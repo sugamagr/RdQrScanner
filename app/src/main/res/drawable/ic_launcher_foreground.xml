@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- Book Base (open book shape) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,30 L54,78 C54,78 38,74 28,74 L28,32 C38,32 54,30 54,30 Z"/>
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,30 L54,78 C54,78 70,74 80,74 L80,32 C70,32 54,30 54,30 Z"/>
+    
+    <!-- Book spine/shadow -->
+    <path
+        android:fillColor="#E67E22"
+        android:pathData="M52,30 L52,78 L56,78 L56,30 Z"/>
+    
+    <!-- QR Code pattern on left page -->
+    <path
+        android:fillColor="#FF9F43"
+        android:pathData="M32,38 L40,38 L40,46 L32,46 Z"/>
+    <path
+        android:fillColor="#FF9F43"
+        android:pathData="M32,50 L36,50 L36,54 L32,54 Z"/>
+    <path
+        android:fillColor="#FF9F43"
+        android:pathData="M38,50 L42,50 L42,54 L38,54 Z"/>
+    <path
+        android:fillColor="#FF9F43"
+        android:pathData="M44,38 L48,38 L48,42 L44,42 Z"/>
+    <path
+        android:fillColor="#FF9F43"
+        android:pathData="M44,46 L48,46 L48,50 L44,50 Z"/>
+    <path
+        android:fillColor="#FF9F43"
+        android:pathData="M32,58 L40,58 L40,66 L32,66 Z"/>
+    <path
+        android:fillColor="#FF9F43"
+        android:pathData="M44,58 L48,58 L48,62 L44,62 Z"/>
+    <path
+        android:fillColor="#FF9F43"
+        android:pathData="M44,66 L48,66 L48,70 L44,70 Z"/>
+    
+    <!-- QR Code pattern on right page -->
+    <path
+        android:fillColor="#FF9F43"
+        android:pathData="M60,38 L68,38 L68,46 L60,46 Z"/>
+    <path
+        android:fillColor="#FF9F43"
+        android:pathData="M72,38 L76,38 L76,42 L72,42 Z"/>
+    <path
+        android:fillColor="#FF9F43"
+        android:pathData="M60,50 L64,50 L64,54 L60,54 Z"/>
+    <path
+        android:fillColor="#FF9F43"
+        android:pathData="M68,50 L76,50 L76,54 L68,54 Z"/>
+    <path
+        android:fillColor="#FF9F43"
+        android:pathData="M60,58 L68,58 L68,66 L60,66 Z"/>
+    <path
+        android:fillColor="#FF9F43"
+        android:pathData="M72,58 L76,58 L76,62 L72,62 Z"/>
+    <path
+        android:fillColor="#FF9F43"
+        android:pathData="M72,66 L76,66 L76,70 L72,70 Z"/>
+    
+    <!-- Small scan line accent -->
+    <path
+        android:fillColor="#FFBE76"
+        android:strokeWidth="1"
+        android:pathData="M30,52 L50,52"/>
+    <path
+        android:fillColor="#FFBE76"
+        android:strokeWidth="1"
+        android:pathData="M58,52 L78,52"/>
+</vector>
