@@ -71,10 +71,6 @@ ehthumbs.db
 
 # External native build folder
 .externalNativeBuild/
-.cxx/
-
-# NDK
-obj/
-
-# Kotlin
+.cxx/# NDK
+obj/# Kotlin
 .kotlin/
