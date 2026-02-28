@@ -71,8 +71,5 @@ interface ScanLotDao {
     @Query("DELETE FROM scan_lots WHERE sessionId = :sessionId")
     suspend fun deleteLotsForSession(sessionId: Long)
     
-    // Check for duplicates across session
-    @Query("SELECT rdNumbers FROM scan_lots WHERE sessionId = :sessionId")
-    suspend fun getAllRdNumbersInSession(sessionId: Long): List<String>
 }
 

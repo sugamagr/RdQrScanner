@@ -101,6 +101,7 @@ import com.google.accompanist.permissions.shouldShowRationale
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.common.InputImage
 import com.qrscanner.app.QRScannerApp
+import com.qrscanner.app.data.RdNumber
 import com.qrscanner.app.data.ScanLot
 import com.qrscanner.app.data.ScanSession
 import com.qrscanner.app.data.isValidRdNumber
@@ -327,11 +328,14 @@ private fun RDCameraScreen(
             currentSession?.let { session ->
                 val lot = ScanLot(
                     sessionId = session.id,
-                    lotNumber = currentLotNumber,
-                    rdNumbers = currentLotNumbers.toList()
+                    lotNumber = currentLotNumber
                 )
-                app.database.scanLotDao().insert(lot)
-                
+                val lotId = app.database.scanLotDao().insert(lot)
+                val rdNumberEntities = currentLotNumbers.reversed().mapIndexed { index, number ->
+                    RdNumber(lotId = lotId, number = number, position = index)
+                }
+                app.database.rdNumberDao().insertAll(rdNumberEntities)
+
                 totalLotsInSession++
                 currentLotNumber++
                 currentLotNumbers.clear()
@@ -370,10 +374,13 @@ private fun RDCameraScreen(
                 currentSession?.let { session ->
                     val lot = ScanLot(
                         sessionId = session.id,
-                        lotNumber = currentLotNumber,
-                        rdNumbers = currentLotNumbers.toList()
+                        lotNumber = currentLotNumber
                     )
-                    app.database.scanLotDao().insert(lot)
+                    val lotId = app.database.scanLotDao().insert(lot)
+                    val rdNumberEntities = currentLotNumbers.reversed().mapIndexed { index, number ->
+                        RdNumber(lotId = lotId, number = number, position = index)
+                    }
+                    app.database.rdNumberDao().insertAll(rdNumberEntities)
                     totalLotsInSession++
                 }
             }

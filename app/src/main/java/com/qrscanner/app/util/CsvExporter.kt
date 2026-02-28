@@ -11,80 +11,82 @@ import java.util.Date
 import java.util.Locale
 
 object CsvExporter {
-    
+
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
-    
+
     fun exportSessionToCsv(
         context: Context,
         lots: List<ScanLot>,
+        rdNumbersPerLot: List<List<String>>,
         sessionDisplayNumber: Int
     ): File? {
         if (lots.isEmpty()) return null
-        
+
         return try {
             val fileName = "RD_Session_${sessionDisplayNumber}_${System.currentTimeMillis()}.csv"
             val downloadsDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
                 ?: context.filesDir
             val file = File(downloadsDir, fileName)
-            
+
             FileWriter(file).use { writer ->
-                // Header
                 writer.append("LOT,RD Numbers,Count,Timestamp\n")
-                
-                // Data rows
-                lots.forEach { lot ->
-                    val rdNumbersStr = lot.rdNumbers.joinToString(", ")
+
+                lots.forEachIndexed { index, lot ->
+                    val numbers = rdNumbersPerLot.getOrElse(index) { emptyList() }
+                    val rdNumbersStr = numbers.joinToString(", ")
                     val timestamp = dateFormat.format(Date(lot.timestamp))
-                    writer.append("${lot.lotNumber},\"$rdNumbersStr\",${lot.rdNumberCount},$timestamp\n")
+                    writer.append("${lot.lotNumber},\"$rdNumbersStr\",${numbers.size},$timestamp\n")
                 }
             }
-            
+
             file
         } catch (e: Exception) {
             e.printStackTrace()
             null
         }
     }
-    
+
     fun exportSessionToTxt(
         context: Context,
         lots: List<ScanLot>,
+        rdNumbersPerLot: List<List<String>>,
         sessionDisplayNumber: Int
     ): File? {
         if (lots.isEmpty()) return null
-        
+
         return try {
             val fileName = "RD_Session_${sessionDisplayNumber}_${System.currentTimeMillis()}.txt"
             val downloadsDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
                 ?: context.filesDir
             val file = File(downloadsDir, fileName)
-            
+
             FileWriter(file).use { writer ->
                 writer.append("RD Book Scanner - Session #$sessionDisplayNumber\n")
-                writer.append("=" .repeat(40) + "\n\n")
-                
-                lots.forEach { lot ->
-                    writer.append("LOT ${lot.lotNumber} (${lot.rdNumberCount} numbers):\n")
-                    writer.append(lot.rdNumbers.joinToString(", "))
+                writer.append("=".repeat(40) + "\n\n")
+
+                lots.forEachIndexed { index, lot ->
+                    val numbers = rdNumbersPerLot.getOrElse(index) { emptyList() }
+                    writer.append("LOT ${lot.lotNumber} (${numbers.size} numbers):\n")
+                    writer.append(numbers.joinToString(", "))
                     writer.append("\n\n")
                 }
-                
-                val totalNumbers = lots.sumOf { it.rdNumberCount }
+
+                val totalNumbers = rdNumbersPerLot.sumOf { it.size }
                 writer.append("-".repeat(40) + "\n")
                 writer.append("Total: ${lots.size} LOTs, $totalNumbers RD Numbers\n")
             }
-            
+
             file
         } catch (e: Exception) {
             e.printStackTrace()
             null
         }
     }
-    
-    fun exportLotToString(lot: ScanLot): String {
-        return lot.rdNumbers.joinToString(", ")
+
+    fun exportLotToString(numbers: List<String>): String {
+        return numbers.joinToString(", ")
     }
-    
+
     fun getShareableUri(context: Context, file: File) = FileProvider.getUriForFile(
         context,
         "${context.packageName}.provider",

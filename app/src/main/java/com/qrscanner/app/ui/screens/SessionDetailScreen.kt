@@ -71,18 +71,17 @@ fun SessionDetailScreen(
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as QRScannerApp
-    
+
     val lots by app.database.scanLotDao().getLotsForSession(sessionId).collectAsState(initial = emptyList())
     var session by remember { mutableStateOf<ScanSession?>(null) }
-    
-    // Load session info
+
     LaunchedEffect(sessionId) {
         session = app.database.scanSessionDao().getSessionById(sessionId)
     }
-    
-    val totalRdNumbers = lots.sumOf { it.rdNumberCount }
+
+    val totalRdNumbers = session?.totalRdNumbers ?: 0
     val displayNumber = session?.displayNumber ?: 0
-    
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -116,7 +115,7 @@ fun SessionDetailScreen(
                         contentDescription = "Back"
                     )
                 }
-                
+
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         text = "Session #$displayNumber",
@@ -130,10 +129,10 @@ fun SessionDetailScreen(
                         color = TextSecondary
                     )
                 }
-                
+
                 Spacer(modifier = Modifier.width(48.dp))
             }
-            
+
             // LOTs List
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -143,7 +142,7 @@ fun SessionDetailScreen(
                 items(lots, key = { it.id }) { lot ->
                     LotCard(lot = lot)
                 }
-                
+
                 item(key = "bottom_spacer") {
                     Spacer(modifier = Modifier.navigationBarsPadding())
                 }
@@ -155,36 +154,40 @@ fun SessionDetailScreen(
 @Composable
 private fun LotCard(lot: ScanLot) {
     val context = LocalContext.current
+    val app = context.applicationContext as QRScannerApp
     var isExpanded by remember { mutableStateOf(false) }
     val timeFormat = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
-    
+
+    // Load RD numbers reactively from the new entity table
+    val rdNumberEntities by app.database.rdNumberDao()
+        .getNumbersForLot(lot.id)
+        .collectAsState(initial = emptyList())
+    val rdNumberStrings = rdNumberEntities.map { it.number }
+    val rdNumberCount = rdNumberStrings.size
+
     fun copyToClipboard() {
         try {
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            // Just the comma-separated list, no extra text
-            val rdNumbersString = lot.rdNumbers.joinToString(", ")
+            val rdNumbersString = rdNumberStrings.joinToString(", ")
             clipboard.setPrimaryClip(ClipData.newPlainText("LOT ${lot.lotNumber}", rdNumbersString))
-            Toast.makeText(context, "Copied ${lot.rdNumberCount} numbers", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Copied $rdNumberCount numbers", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Toast.makeText(context, "Failed to copy", Toast.LENGTH_SHORT).show()
         }
     }
-    
+
     fun shareViaWithImage() {
         try {
-            // Generate image for LOT
             val imageFile = LotImageGenerator.generateLotImage(
                 context,
                 lot.lotNumber,
-                lot.rdNumberCount
+                rdNumberCount
             )
-            
-            // Just the comma-separated list for easy copy on WhatsApp
-            val rdNumbersString = lot.rdNumbers.joinToString(", ")
-            
+
+            val rdNumbersString = rdNumberStrings.joinToString(", ")
+
             if (imageFile != null) {
                 val imageUri = LotImageGenerator.getShareableUri(context, imageFile)
-                
                 val intent = Intent(Intent.ACTION_SEND).apply {
                     type = "image/*"
                     putExtra(Intent.EXTRA_STREAM, imageUri)
@@ -193,7 +196,6 @@ private fun LotCard(lot: ScanLot) {
                 }
                 context.startActivity(Intent.createChooser(intent, "Share LOT"))
             } else {
-                // Fallback to text only
                 val intent = Intent(Intent.ACTION_SEND).apply {
                     type = "text/plain"
                     putExtra(Intent.EXTRA_TEXT, rdNumbersString)
@@ -204,7 +206,7 @@ private fun LotCard(lot: ScanLot) {
             Toast.makeText(context, "Failed to share", Toast.LENGTH_SHORT).show()
         }
     }
-    
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -237,9 +239,9 @@ private fun LotCard(lot: ScanLot) {
                             )
                         )
                     }
-                    
+
                     Spacer(modifier = Modifier.width(12.dp))
-                    
+
                     Column {
                         Text(
                             text = "LOT ${lot.lotNumber}",
@@ -248,13 +250,13 @@ private fun LotCard(lot: ScanLot) {
                             )
                         )
                         Text(
-                            text = "${lot.rdNumberCount} RD Numbers • ${timeFormat.format(Date(lot.timestamp))}",
+                            text = "$rdNumberCount RD Numbers • ${timeFormat.format(Date(lot.timestamp))}",
                             style = MaterialTheme.typography.bodySmall,
                             color = TextSecondary
                         )
                     }
                 }
-                
+
                 Row {
                     IconButton(
                         onClick = { copyToClipboard() },
@@ -267,7 +269,7 @@ private fun LotCard(lot: ScanLot) {
                             modifier = Modifier.size(20.dp)
                         )
                     }
-                    
+
                     IconButton(
                         onClick = { shareViaWithImage() },
                         modifier = Modifier.size(36.dp)
@@ -279,7 +281,7 @@ private fun LotCard(lot: ScanLot) {
                             modifier = Modifier.size(20.dp)
                         )
                     }
-                    
+
                     Icon(
                         imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                         contentDescription = if (isExpanded) "Collapse" else "Expand",
@@ -288,18 +290,17 @@ private fun LotCard(lot: ScanLot) {
                     )
                 }
             }
-            
+
             if (isExpanded) {
                 Spacer(modifier = Modifier.height(12.dp))
-                
-                // RD Numbers list
+
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(Color(0xFFFFF8F0), RoundedCornerShape(12.dp))
                         .padding(12.dp)
                 ) {
-                    lot.rdNumbers.forEachIndexed { index, number ->
+                    rdNumberStrings.forEachIndexed { index, number ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -322,12 +323,11 @@ private fun LotCard(lot: ScanLot) {
                         }
                     }
                 }
-                
+
                 Spacer(modifier = Modifier.height(8.dp))
-                
-                // Comma-separated preview
+
                 Text(
-                    text = "As list: ${lot.getRdNumbersAsString()}",
+                    text = "As list: ${rdNumberStrings.joinToString(", ")}",
                     style = MaterialTheme.typography.bodySmall,
                     color = TextSecondary,
                     maxLines = 2

@@ -20,33 +20,42 @@ A specialized Android application designed for scanning and managing RD (Recurri
 - Group scanned RD numbers into LOTs
 - Multiple LOTs per scanning session
 - Live count display for current LOT and session
+- Confirmation dialog before ending a session (with unsaved data warning)
 - Session history with detailed statistics
+
+### 🔍 Session History
+- Search sessions by session number or RD count
+- Filter chips: All / Today / This Week / This Month
+- Swipe left to delete a session (with confirmation dialog)
+- Long-press to enter multi-select mode; bulk-delete selected sessions
+- Spring-animated selection UI with haptic feedback
 
 ### 📤 Export Options
 - **CSV Export**: Structured data with LOT numbers, RD numbers, counts, and timestamps
 - **TXT Export**: Human-readable format for easy sharing
-- **Copy to Clipboard**: Quick comma-separated list
+- **Copy to Clipboard**: Quick comma-separated list per LOT
 - **Share via Apps**: Direct sharing to WhatsApp, etc. with LOT image attachment
 
 ### 🖨️ QR Code Generator
 - Generate QR codes for multiple RD account numbers
-- A4 PDF output with passport-sized QR codes (9 per page)
+- A4 PDF output with 24 QR codes per page (6 columns × 4 rows)
 - Account number printed below each QR code
 - Open generated PDF directly from app
 
 ### 🎨 Modern UI/UX
-- Light orange theme
-- Smooth spring animations
-- Intuitive navigation
+- Light orange theme with Material 3 components
+- Smooth spring animations throughout
+- Intuitive navigation with Jetpack Compose
 - Bilingual help section (Hindi & English)
 
 ## Tech Stack
 
 - **Language**: Kotlin
-- **UI Framework**: Jetpack Compose
+- **UI Framework**: Jetpack Compose + Material 3
 - **Camera**: CameraX
 - **QR Scanning**: Google ML Kit Barcode Scanning
-- **Database**: Room Persistence Library
+- **QR Generation**: ZXing (for PDF output)
+- **Database**: Room Persistence Library (with versioned migrations)
 - **Architecture**: MVVM with Repository pattern
 - **Async**: Kotlin Coroutines & Flow
 - **PDF Generation**: Android PdfDocument API
@@ -57,7 +66,7 @@ A specialized Android application designed for scanning and managing RD (Recurri
 
 ## Requirements
 
-- Android 7.0 (API level 24) or higher
+- Android 8.0 (API level 26) or higher
 - Camera permission for QR scanning
 - Storage permission for PDF generation
 
@@ -69,7 +78,7 @@ A specialized Android application designed for scanning and managing RD (Recurri
 4. Run on device or emulator
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/rd-qr-scanner.git
+git clone https://github.com/sugamagrawal/rd-qr-scanner.git
 ```
 
 ## Project Structure
@@ -77,10 +86,11 @@ git clone https://github.com/YOUR_USERNAME/rd-qr-scanner.git
 ```
 app/src/main/java/com/qrscanner/app/
 ├── data/                    # Room database entities and DAOs
-│   ├── AppDatabase.kt
-│   ├── ScanSession.kt
-│   ├── ScanSessionDao.kt
-│   └── ScanLot.kt
+│   ├── AppDatabase.kt       # DB setup, version management, migrations
+│   ├── ScanSession.kt       # ScanSession + ScanLot entities
+│   ├── ScanSessionDao.kt    # DAOs for ScanSession and ScanLot
+│   ├── RdNumber.kt          # RdNumber entity (relational, indexed)
+│   └── RdNumberDao.kt       # DAO for RdNumber
 ├── navigation/              # Navigation setup
 │   └── Navigation.kt
 ├── ui/

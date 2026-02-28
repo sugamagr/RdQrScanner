@@ -20,14 +20,16 @@ object PdfGenerator {
     private const val A4_WIDTH = 595 // ~210mm
     private const val A4_HEIGHT = 842 // ~297mm
     
-    // Passport photo size QR code (~40mm = ~113 points)
-    private const val QR_SIZE = 120
-    private const val QR_WITH_TEXT_HEIGHT = 145 // QR + text below
-    
-    // Grid layout: 3 columns
-    private const val COLUMNS = 3
-    private const val MARGIN = 40
-    private const val SPACING_X = 45
+    // QR code size tuned for 6×4 grid on A4
+    private const val QR_SIZE = 80
+    private const val QR_WITH_TEXT_HEIGHT = 97  // QR_SIZE + 17 for text area
+
+    // Grid layout: 6 columns × 4 rows = 24 per page
+    // Width check: 25 + 6×80 + 5×13 + 25 = 595 ✓
+    private const val COLUMNS = 6
+    private const val ROWS = 4
+    private const val MARGIN = 25
+    private const val SPACING_X = 13
     private const val SPACING_Y = 30
     
     fun generatePdf(
@@ -40,17 +42,15 @@ object PdfGenerator {
         val pdfDocument = PdfDocument()
         
         try {
-            // Calculate items per page
-            val usableHeight = A4_HEIGHT - (2 * MARGIN)
-            val rows = (usableHeight + SPACING_Y) / (QR_WITH_TEXT_HEIGHT + SPACING_Y)
-            val itemsPerPage = COLUMNS * rows
+            // Fixed grid: 6 columns × 4 rows = 24 per page
+            val itemsPerPage = COLUMNS * ROWS
             
             // Calculate number of pages
             val totalPages = (rdNumbers.size + itemsPerPage - 1) / itemsPerPage
             
             val textPaint = Paint().apply {
                 color = Color.BLACK
-                textSize = 11f
+                textSize = 7.5f
                 typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
                 textAlign = Paint.Align.CENTER
                 isAntiAlias = true
@@ -83,7 +83,7 @@ object PdfGenerator {
                         canvas.drawBitmap(qrBitmap, x.toFloat(), y.toFloat(), null)
                         
                         // Draw account number CENTERED below QR code
-                        val textY = y + QR_SIZE + 18f
+                        val textY = y + QR_SIZE + 12f
                         val textX = x + QR_SIZE / 2f
                         canvas.drawText(rdNumber, textX, textY, textPaint)
                         
