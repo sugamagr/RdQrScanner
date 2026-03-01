@@ -51,7 +51,7 @@ import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.Undo
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -278,6 +278,18 @@ private fun RDCameraScreen(
         if (lastScanFeedback != null) {
             delay(2000)
             lastScanFeedback = null
+        }
+    }
+
+    // Pause camera analysis whenever any dialog is open; resume when all closed
+    val anyDialogOpen = showEndSessionDialog || showFinishLotDialog
+    LaunchedEffect(anyDialogOpen) {
+        if (anyDialogOpen) {
+            scanningEnabledRef.set(false)
+            isScanningRef.set(false)
+        } else {
+            scanningEnabledRef.set(true)
+            isScanningRef.set(true)
         }
     }
     
@@ -508,7 +520,16 @@ private fun RDCameraScreen(
         
         // Modern scanner overlay
         ScannerOverlay()
-        
+
+        // Dim camera when a dialog is open
+        if (anyDialogOpen) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.55f))
+            )
+        }
+
         // Top gradient
         Box(
             modifier = Modifier
@@ -706,7 +727,7 @@ private fun RDCameraScreen(
                     ),
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Icon(Icons.Default.Undo, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("Undo")
                 }

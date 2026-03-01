@@ -8,7 +8,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateColorAsState
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -77,7 +77,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.mutableStateSetOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -137,7 +136,7 @@ fun SessionHistoryScreen(
 
     // Multi-select
     var isSelectionMode by remember { mutableStateOf(false) }
-    val selectedIds = remember { mutableStateSetOf<Long>() }
+    var selectedIds by remember { mutableStateOf(setOf<Long>()) }
 
     // Date range millis for filter chips
     val (todayStart, weekStart, monthStart) = remember {
@@ -202,7 +201,7 @@ fun SessionHistoryScreen(
                     ) {
                         TextButton(onClick = {
                             isSelectionMode = false
-                            selectedIds.clear()
+                            selectedIds = emptySet()
                         }) {
                             Text("Cancel", color = Color.White, fontWeight = FontWeight.SemiBold)
                         }
@@ -214,10 +213,10 @@ fun SessionHistoryScreen(
                         )
                         TextButton(onClick = {
                             if (selectedIds.size == filteredSessions.size) {
-                                selectedIds.clear()
+                                selectedIds = emptySet()
                                 isSelectionMode = false
                             } else {
-                                selectedIds.addAll(filteredSessions.map { it.id })
+                                selectedIds = selectedIds + filteredSessions.map { it.id }
                             }
                         }) {
                             Text(
@@ -460,8 +459,8 @@ fun SessionHistoryScreen(
                                         isSelected = session.id in selectedIds,
                                         onClick = {
                                             if (isSelectionMode) {
-                                                if (session.id in selectedIds) selectedIds.remove(session.id)
-                                                else selectedIds.add(session.id)
+                                                if (session.id in selectedIds) selectedIds = selectedIds - session.id
+                                                else selectedIds = selectedIds + session.id
                                                 if (selectedIds.isEmpty()) isSelectionMode = false
                                             } else {
                                                 onNavigateToSession(session.id)
@@ -471,7 +470,7 @@ fun SessionHistoryScreen(
                                             if (!isSelectionMode) {
                                                 vibrator?.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
                                                 isSelectionMode = true
-                                                selectedIds.add(session.id)
+                                                selectedIds = selectedIds + session.id
                                             }
                                         },
                                         onExport = { showExportDialog = session },
@@ -539,15 +538,15 @@ fun SessionHistoryScreen(
                                             val rdNumbersPerLot = lots.map { lot ->
                                                 app.database.rdNumberDao().getNumbersForLotSync(lot.id).map { it.number }
                                             }
-                                            val file = CsvExporter.exportSessionToCsv(context, lots, rdNumbersPerLot, session.displayNumber)
+                                            val file = CsvExporter.exportSessionToXlsx(context, lots, rdNumbersPerLot, session.displayNumber)
                                             if (file != null) {
                                                 val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", file)
                                                 val intent = Intent(Intent.ACTION_SEND).apply {
-                                                    type = "text/csv"
+                                                    type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                                                     putExtra(Intent.EXTRA_STREAM, uri)
                                                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                                                 }
-                                                context.startActivity(Intent.createChooser(intent, "Share CSV"))
+                                                context.startActivity(Intent.createChooser(intent, "Share XLSX"))
                                             } else {
                                                 Toast.makeText(context, "Failed to export", Toast.LENGTH_SHORT).show()
                                             }
@@ -563,7 +562,7 @@ fun SessionHistoryScreen(
                             ) {
                                 Icon(Icons.Default.TableChart, null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("CSV")
+                                Text("XLSX")
                             }
 
                             Button(
@@ -651,7 +650,7 @@ fun SessionHistoryScreen(
                 },
                 confirmButton = {
                     TextButton(onClick = {
-                        val toDelete = selectedIds.toSet()
+                        val toDelete = selectedIds
                         scope.launch {
                             try {
                                 toDelete.forEach { id ->
@@ -663,7 +662,7 @@ fun SessionHistoryScreen(
                                 Toast.makeText(context, "Delete failed", Toast.LENGTH_SHORT).show()
                             }
                         }
-                        selectedIds.clear()
+                        selectedIds = emptySet()
                         isSelectionMode = false
                         showDeleteSelectedDialog = false
                     }) {
