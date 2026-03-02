@@ -52,10 +52,14 @@ captures/
 .idea/vcs.xml
 .idea/markdown.xml
 
+# Release build output
+app/release/
+
 # Keystore files - NEVER COMMIT THESE!
 *.jks
 *.keystore
 keystore.properties
+keystore.properties.txt
 signing.properties
 
 # Google Services (if you add Firebase later)

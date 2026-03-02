@@ -65,6 +65,7 @@ abstract class AppDatabase : RoomDatabase() {
                     "rd_scanner_database"
                 )
                 .addMigrations(MIGRATION_1_2)
+                .fallbackToDestructiveMigrationOnDowngrade()
                 .build()
                 INSTANCE = instance
                 instance
