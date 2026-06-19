@@ -267,6 +267,19 @@ private fun RDCameraScreen(
         isHydrated = true
     }
 
+    suspend fun startFreshSession() {
+        val session = ScanSession()
+        val sessionId = app.database.scanSessionDao().insert(session)
+        currentSession = session.copy(id = sessionId)
+        currentSessionId = sessionId
+        currentLotNumber = 1
+        totalLotsInSession = 0
+        currentLotId = null
+        currentLotNumbers.clear()
+        allSessionNumbers.clear()
+        isHydrated = true
+    }
+
     suspend fun rehydrateAfterConfigChange(sessionId: Long) {
         val session = app.database.scanSessionDao().getSessionById(sessionId)
         if (session == null) {
@@ -291,19 +304,6 @@ private fun RDCameraScreen(
         if (pendingLotId != null && (showDefaulterAskDialog || showDefaulterEditDialog)) {
             defaulterRows = app.database.rdNumberDao().getNumbersForLotSync(pendingLotId)
         }
-        isHydrated = true
-    }
-
-    suspend fun startFreshSession() {
-        val session = ScanSession()
-        val sessionId = app.database.scanSessionDao().insert(session)
-        currentSession = session.copy(id = sessionId)
-        currentSessionId = sessionId
-        currentLotNumber = 1
-        totalLotsInSession = 0
-        currentLotId = null
-        currentLotNumbers.clear()
-        allSessionNumbers.clear()
         isHydrated = true
     }
 
