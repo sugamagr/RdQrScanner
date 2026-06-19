@@ -122,6 +122,52 @@ interface ScanSessionDao {
     @Query("UPDATE scan_sessions SET displayNumber = :displayNumber WHERE id = :id")
     suspend fun updateDisplayNumber(id: Long, displayNumber: Int)
 
+    // ── Pull merge helpers (Phase 3 T3.1) ────────────────────────────────
+
+    @Query("SELECT * FROM scan_sessions WHERE cloudId = :cloudId LIMIT 1")
+    suspend fun findByCloudId(cloudId: String): ScanSession?
+
+    /**
+     * Last-writer-wins merge for an inbound pulled row per spec §11.
+     * Overwrites the row IF the incoming `updatedAt` is strictly newer
+     * than the local copy. Idempotent and safe to call concurrently;
+     * the WHERE filter prevents an older payload from clobbering a
+     * locally-edited row that hasn't been pushed yet.
+     */
+    @Query(
+        """
+        UPDATE scan_sessions SET
+            cloudId = :cloudId,
+            deviceCloudId = :deviceCloudId,
+            operatorName = :operatorName,
+            displayNumber = :displayNumber,
+            startTime = :startTime,
+            endTime = :endTime,
+            isActive = 0,
+            totalLots = :totalLots,
+            totalRdNumbers = :totalRdNumbers,
+            syncStatus = 'SYNCED',
+            updatedAt = :updatedAt,
+            syncedAt = :updatedAt,
+            lastSyncError = NULL,
+            deletedAt = :deletedAt
+        WHERE id = :id AND updatedAt <= :updatedAt
+        """
+    )
+    suspend fun mergeFromCloud(
+        id: Long,
+        cloudId: String,
+        deviceCloudId: String,
+        operatorName: String?,
+        displayNumber: Int,
+        startTime: Long,
+        endTime: Long,
+        totalLots: Int,
+        totalRdNumbers: Int,
+        updatedAt: Long,
+        deletedAt: Long?
+    ): Int
+
     /**
      * Finalized sessions still stuck in LOCAL_ONLY. Targets two recovery cases:
      * (a) rotation-during-finalize orphans where scope cancelled between
@@ -247,6 +293,34 @@ interface ScanLotDao {
         """
     )
     suspend fun softDeleteForSession(sessionId: Long, now: Long)
+
+    @Query("SELECT * FROM scan_lots WHERE cloudId = :cloudId LIMIT 1")
+    suspend fun findByCloudId(cloudId: String): ScanLot?
+
+    @Query(
+        """
+        UPDATE scan_lots SET
+            cloudId = :cloudId,
+            sessionId = :sessionId,
+            lotNumber = :lotNumber,
+            timestamp = :timestamp,
+            syncStatus = 'SYNCED',
+            updatedAt = :updatedAt,
+            syncedAt = :updatedAt,
+            lastSyncError = NULL,
+            deletedAt = :deletedAt
+        WHERE id = :id AND updatedAt <= :updatedAt
+        """
+    )
+    suspend fun mergeFromCloud(
+        id: Long,
+        cloudId: String,
+        sessionId: Long,
+        lotNumber: Int,
+        timestamp: Long,
+        updatedAt: Long,
+        deletedAt: Long?
+    ): Int
 
     @Query(
         """

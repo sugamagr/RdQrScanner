@@ -94,6 +94,42 @@ interface RdNumberDao {
     )
     suspend fun softDeleteForSession(sessionId: Long, now: Long)
 
+    // ── Pull merge helpers (Phase 3 T3.1) ────────────────────────────────
+
+    @Query("SELECT * FROM rd_numbers WHERE cloudId = :cloudId LIMIT 1")
+    suspend fun findByCloudId(cloudId: String): RdNumber?
+
+    @Query(
+        """
+        UPDATE rd_numbers SET
+            cloudId = :cloudId,
+            lotId = :lotId,
+            number = :number,
+            position = :position,
+            scannedAt = :scannedAt,
+            monthsPaid = :monthsPaid,
+            monthsList = :monthsList,
+            syncStatus = 'SYNCED',
+            updatedAt = :updatedAt,
+            syncedAt = :updatedAt,
+            lastSyncError = NULL,
+            deletedAt = :deletedAt
+        WHERE id = :id AND updatedAt <= :updatedAt
+        """
+    )
+    suspend fun mergeFromCloud(
+        id: Long,
+        cloudId: String,
+        lotId: Long,
+        number: String,
+        position: Int,
+        scannedAt: Long,
+        monthsPaid: Int,
+        monthsList: String?,
+        updatedAt: Long,
+        deletedAt: Long?
+    ): Int
+
     @Query(
         """
         UPDATE rd_numbers
