@@ -70,4 +70,7 @@
     <string name="banner_title_one">1 recent update</string>
     <string name="banner_title_many">%d recent updates</string>
     <string name="banner_dismiss">Dismiss</string>
+
+    <!-- Generic content descriptions -->
+    <string name="content_desc_back">Back</string>
 </resources>

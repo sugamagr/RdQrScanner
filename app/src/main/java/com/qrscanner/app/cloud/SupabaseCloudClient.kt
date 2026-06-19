@@ -33,6 +33,9 @@ import io.github.jan.supabase.realtime.Realtime
 import io.github.jan.supabase.realtime.channel
 import io.github.jan.supabase.realtime.postgresChangeFlow
 import io.github.jan.supabase.realtime.realtime
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -74,6 +77,15 @@ class SupabaseCloudClient(
             "SUPABASE_URL / SUPABASE_ANON_KEY missing from local.properties — see CLOUD_SYNC_SPEC §20"
         }
     }
+
+    // Dedicated long-lived scope for fire-and-forget cleanup of Realtime
+    // resources. observeRealtimeChanges' awaitClose hook needs to call
+    // suspending unsubscribe() + removeChannel() after the flow's own
+    // ProducerScope has already cancelled, so it can't use that scope —
+    // we'd race the cancellation and leave dangling channels (oracle round 4
+    // WARNING #10). SupervisorJob isolates cleanup failures so one bad
+    // unsubscribe doesn't poison the next.
+    private val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val supabase: SupabaseClient = createSupabaseClient(
         supabaseUrl = supabaseUrl,
@@ -125,10 +137,16 @@ class SupabaseCloudClient(
     }
 
     override suspend fun nextDisplayNumber(ownerId: String): Int = runCloud {
-        supabase.postgrest.rpc(
+        // PostgREST returns the scalar RPC result as the raw JSON body.
+        // A Postgres `int` returns as `42` (no quotes); a `text` returns
+        // as `"42"` (with quotes). Trim quotes + whitespace before
+        // parsing so a future migration that changes the function's
+        // return type doesn't silently break us (oracle round 4 W9).
+        val raw = supabase.postgrest.rpc(
             function = "next_display_number",
             parameters = buildJsonObject { put("p_owner_id", ownerId) }
-        ).data.toIntOrNull() ?: error("next_display_number returned non-int: ${'$'}{this}")
+        ).data.trim().trim('"')
+        raw.toIntOrNull() ?: error("next_display_number returned non-int: '$raw'")
     }
 
     override suspend fun upsertSession(session: ScanSessionDto): ScanSessionDto = runCloud {
@@ -278,7 +296,7 @@ class SupabaseCloudClient(
 
         channel.subscribe()
         awaitClose {
-            launch {
+            cleanupScope.launch {
                 runCatching { channel.unsubscribe() }
                 runCatching { supabase.realtime.removeChannel(channel) }
             }

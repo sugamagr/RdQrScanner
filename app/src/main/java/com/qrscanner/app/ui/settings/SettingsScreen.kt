@@ -74,13 +74,13 @@ fun SettingsScreen(
                 .fillMaxSize()
                 .statusBarsPadding()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .padding(horizontal = 24.dp, vertical = 12.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack) {
                     Icon(
                         Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = null,
+                        contentDescription = stringResource(R.string.content_desc_back),
                         tint = TextPrimary
                     )
                 }
@@ -169,12 +169,12 @@ fun SettingsScreen(
                     onClick = onOpenDiagnostics,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 48.dp),
+                        .heightIn(min = 52.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = PrimaryOrange,
                         contentColor = Color.White
                     ),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(14.dp)
                 ) {
                     Text(
                         text = stringResource(R.string.settings_diagnostics),
@@ -239,7 +239,7 @@ private fun LabeledValue(
         Box(
             modifier = Modifier
                 .size(36.dp)
-                .background(PrimaryOrange.copy(alpha = 0.10f), CircleShape),
+                .background(PrimaryOrange.copy(alpha = 0.12f), CircleShape),
             contentAlignment = Alignment.Center
         ) {
             Icon(

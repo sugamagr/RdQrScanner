@@ -70,4 +70,7 @@
     <string name="banner_title_one">1 नया अपडेट</string>
     <string name="banner_title_many">%d नए अपडेट</string>
     <string name="banner_dismiss">हटाएँ</string>
+
+    <!-- Generic content descriptions -->
+    <string name="content_desc_back">वापस</string>
 </resources>
