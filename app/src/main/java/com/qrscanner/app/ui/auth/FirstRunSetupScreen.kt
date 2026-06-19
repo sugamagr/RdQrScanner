@@ -18,6 +18,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material3.Button
+import com.qrscanner.app.ui.theme.ErrorRed
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -59,6 +60,7 @@ import com.qrscanner.app.ui.theme.TextSecondary
 @Composable
 fun FirstRunSetupScreen(
     isSaving: Boolean,
+    errorMessage: String?,
     defaultDeviceName: String,
     onContinue: (deviceName: String, operatorName: String) -> Unit
 ) {
@@ -140,6 +142,15 @@ fun FirstRunSetupScreen(
                 shape = RoundedCornerShape(12.dp),
                 colors = firstRunFieldColors()
             )
+
+            if (errorMessage != null) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = errorMessage,
+                    style = MaterialTheme.typography.bodySmall.copy(color = ErrorRed),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
 
             Spacer(modifier = Modifier.height(24.dp))
 

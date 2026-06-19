@@ -72,15 +72,25 @@ fun AuthAwareRoot() {
     val app = context.applicationContext as QRScannerApp
     val scope = rememberCoroutineScope()
 
+    if (!app.isCloudConfigured) {
+        NotConfiguredScreen()
+        return
+    }
+
     val sessionStatus by app.cloudClient.sessionStatus.collectAsState(
         initial = CloudSessionStatus.Initializing
     )
     val deviceSettings by app.database.deviceSettingsDao().observe()
         .collectAsState(initial = null)
 
-    var signInLoading by rememberSaveable { mutableStateOf(false) }
+    // Loading flags use plain `remember` (NOT `rememberSaveable`) so a config
+    // change cancels both the coroutine AND its visible spinner. Otherwise the
+    // saveable restores `true`, the coroutine is gone, and the UI hangs forever
+    // on a dead spinner (oracle round 6 BLOCKER #4).
+    var signInLoading by remember { mutableStateOf(false) }
     var signInError by rememberSaveable { mutableStateOf<String?>(null) }
-    var firstRunSaving by rememberSaveable { mutableStateOf(false) }
+    var firstRunSaving by remember { mutableStateOf(false) }
+    var firstRunError by rememberSaveable { mutableStateOf<String?>(null) }
     var notifPromptAnswered by rememberSaveable { mutableStateOf(false) }
     var initializingTimedOut by rememberSaveable { mutableStateOf(false) }
 
@@ -138,15 +148,29 @@ fun AuthAwareRoot() {
             )
             AuthStage.FirstRunSetup -> FirstRunSetupScreen(
                 isSaving = firstRunSaving,
+                errorMessage = firstRunError,
                 defaultDeviceName = Build.MODEL ?: "",
                 onContinue = { deviceName, operatorName ->
                     val ownerId = (sessionStatus as? CloudSessionStatus.Authenticated)
                         ?.session?.ownerId ?: return@FirstRunSetupScreen
+                    firstRunError = null
                     firstRunSaving = true
                     scope.launch {
                         try {
+                            // Local-first write order: persist the cloudId + identity
+                            // BEFORE pushing to cloud. If the cloud push fails the
+                            // user can retry with the same cloudId; if instead we
+                            // pushed first and then crashed, retry would generate a
+                            // NEW UUID and produce an orphan cloud row that nothing
+                            // ever cleans up (oracle round 6 WARNING #8).
                             val cloudId = UUID.randomUUID().toString()
                             val nowIso = IsoTime.fromEpochMillis(System.currentTimeMillis())
+                            app.database.deviceSettingsDao().updateIdentity(
+                                deviceCloudId = cloudId,
+                                deviceName = deviceName,
+                                operatorName = operatorName,
+                                ownerId = ownerId
+                            )
                             app.cloudClient.upsertDevice(
                                 DeviceDto(
                                     id = cloudId,
@@ -160,17 +184,12 @@ fun AuthAwareRoot() {
                                     updatedAt = nowIso
                                 )
                             )
-                            app.database.deviceSettingsDao().updateIdentity(
-                                deviceCloudId = cloudId,
-                                deviceName = deviceName,
-                                operatorName = operatorName,
-                                ownerId = ownerId
-                            )
                         } catch (e: CloudException) {
-                            // Network errors during first-run setup are recoverable —
-                            // we keep the user on this screen so they can retry.
-                            // Future: surface inline. For now log + leave isSaving false.
-                            android.util.Log.w("AuthAwareRoot", "first-run setup failed", e)
+                            firstRunError = e.toUserMessage()
+                            android.util.Log.w("AuthAwareRoot", "first-run cloud push failed", e)
+                        } catch (e: Throwable) {
+                            firstRunError = e.message ?: "Couldn't save device. Try again."
+                            android.util.Log.w("AuthAwareRoot", "first-run unexpected failure", e)
                         } finally {
                             firstRunSaving = false
                         }
@@ -196,6 +215,41 @@ private fun InitializingScreen() {
         contentAlignment = Alignment.Center
     ) {
         CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+    }
+}
+
+/**
+ * Shown when SUPABASE_URL / SUPABASE_ANON_KEY are absent from BuildConfig
+ * (typically a fresh git clone without local.properties). Renders a clear
+ * developer-targeted message instead of crashing on the SDK's bare
+ * malformed-URL exception (oracle round 6 BLOCKER #3).
+ */
+@Composable
+private fun NotConfiguredScreen() {
+    androidx.compose.material3.Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = BackgroundWhite
+    ) {
+        androidx.compose.foundation.layout.Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(28.dp),
+            verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            androidx.compose.material3.Text(
+                text = "Cloud sync not configured",
+                style = MaterialTheme.typography.titleLarge.copy(
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                )
+            )
+            androidx.compose.foundation.layout.Spacer(modifier = Modifier.height(12.dp))
+            androidx.compose.material3.Text(
+                text = "Set SUPABASE_URL and SUPABASE_ANON_KEY in local.properties and rebuild.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = com.qrscanner.app.ui.theme.TextSecondary
+            )
+        }
     }
 }
 
@@ -252,7 +306,9 @@ private fun appVersion(context: android.content.Context): String? = try {
 
 private fun CloudException.toUserMessage(): String = when (this) {
     is CloudException.Network -> "No network — try again when you're online."
-    is CloudException.AuthExpired -> "Email or password incorrect."
+    is CloudException.InvalidCredentials -> "Email or password incorrect."
+    is CloudException.AuthExpired -> "Session expired. Sign in again."
+    is CloudException.NotConfigured -> "Cloud sync not configured."
     is CloudException.Server -> "Server error ($status). Try again in a moment."
     is CloudException.Conflict -> message ?: "Conflict during sign-in."
     is CloudException.Unknown -> message ?: "Unknown error."

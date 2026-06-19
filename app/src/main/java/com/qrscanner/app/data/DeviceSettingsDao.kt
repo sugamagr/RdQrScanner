@@ -60,7 +60,25 @@ interface DeviceSettingsDao {
     @Query("UPDATE device_settings SET operatorName = :operatorName WHERE id = 1")
     suspend fun updateOperatorName(operatorName: String)
 
-    @Query("UPDATE device_settings SET ownerId = NULL WHERE id = 1")
+    /**
+     * Clears the entire device identity block (owner + cloudId + name +
+     * operator). Called by SettingsScreen sign-out. Critical that this
+     * clears all four fields, not just ownerId — otherwise the next
+     * sign-in on a DIFFERENT owner account would inherit the previous
+     * owner's deviceCloudId and skip first-run setup, breaking RLS
+     * assumptions and producing cross-account device row pollution
+     * (oracle round 6 BLOCKER #10).
+     */
+    @Query(
+        """
+        UPDATE device_settings
+        SET ownerId = NULL,
+            deviceCloudId = NULL,
+            deviceName = NULL,
+            operatorName = NULL
+        WHERE id = 1
+        """
+    )
     suspend fun clearOwner()
 
     @Query(

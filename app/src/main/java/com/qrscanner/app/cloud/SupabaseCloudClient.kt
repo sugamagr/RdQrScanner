@@ -41,6 +41,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.io.IOException
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Production [CloudClient] implementation backed by supabase-kt 3.1.4.
@@ -63,6 +64,17 @@ class SupabaseCloudClient(
     private val supabaseAnonKey: String = BuildConfig.SUPABASE_ANON_KEY
 ) : CloudClient {
 
+    init {
+        // Fail fast with a structured exception so QRScannerApp can render
+        // a 'Cloud sync not configured' screen instead of crashing on the
+        // SDK's malformed-URL error (oracle round 6 BLOCKER #3). Without
+        // this guard a missing local.properties produces a stack trace on
+        // first composition with no actionable feedback.
+        require(supabaseUrl.isNotBlank() && supabaseAnonKey.isNotBlank()) {
+            "SUPABASE_URL / SUPABASE_ANON_KEY missing from local.properties — see CLOUD_SYNC_SPEC §20"
+        }
+    }
+
     private val supabase: SupabaseClient = createSupabaseClient(
         supabaseUrl = supabaseUrl,
         supabaseKey = supabaseAnonKey
@@ -75,7 +87,7 @@ class SupabaseCloudClient(
         }
         install(Postgrest)
         install(Realtime) {
-            reconnectDelay = REALTIME_RECONNECT_DELAY_MS
+            reconnectDelay = REALTIME_RECONNECT_DELAY
         }
     }
 
@@ -277,8 +289,16 @@ class SupabaseCloudClient(
         try {
             return block()
         } catch (e: RestException) {
+            // Supabase Auth returns 400 + body containing "invalid_grant" /
+            // "Invalid login credentials" for wrong email or password. Map
+            // both the 400 case and the 401/403 case to InvalidCredentials
+            // so the UI shows "Email or password incorrect" instead of a
+            // generic "server error" (oracle round 6 BLOCKER #2).
             throw when (e.statusCode) {
-                401, 403 -> CloudException.AuthExpired(e)
+                400 -> if (looksLikeBadAuth(e)) CloudException.InvalidCredentials(e)
+                       else CloudException.Server(e.statusCode, e.error)
+                401, 403 -> if (looksLikeBadAuth(e)) CloudException.InvalidCredentials(e)
+                            else CloudException.AuthExpired(e)
                 409 -> CloudException.Conflict(e.message ?: "conflict")
                 in 500..599 -> CloudException.Server(e.statusCode, e.error)
                 else -> CloudException.Server(e.statusCode, e.error)
@@ -290,6 +310,13 @@ class SupabaseCloudClient(
         } catch (e: Throwable) {
             throw CloudException.Unknown(e)
         }
+    }
+
+    private fun looksLikeBadAuth(e: RestException): Boolean {
+        val body = (e.error.orEmpty() + " " + (e.message.orEmpty())).lowercase()
+        return "invalid_grant" in body ||
+            "invalid login credentials" in body ||
+            "invalid credentials" in body
     }
 
     private fun UserSession.toCloud(): CloudSession {
@@ -331,7 +358,7 @@ class SupabaseCloudClient(
         private const val TABLE_SCAN_LOTS = "scan_lots"
         private const val TABLE_RD_NUMBERS = "rd_numbers"
         private const val PULL_PAGE_SIZE = 500
-        private const val REALTIME_RECONNECT_DELAY_MS = 5_000L
+        private val REALTIME_RECONNECT_DELAY = 5.seconds
     }
 }
 

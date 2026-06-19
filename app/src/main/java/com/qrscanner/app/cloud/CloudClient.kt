@@ -120,6 +120,8 @@ enum class CloudRealtimeEvent { INSERT, UPDATE, DELETE }
 /** All cloud errors funnel through this. The repository decides retry semantics. */
 sealed class CloudException(message: String, cause: Throwable? = null) : RuntimeException(message, cause) {
     class AuthExpired(cause: Throwable? = null) : CloudException("auth expired", cause)
+    class InvalidCredentials(cause: Throwable? = null) : CloudException("invalid credentials", cause)
+    class NotConfigured : CloudException("cloud not configured")
     class Network(cause: Throwable) : CloudException("network error: ${cause.message}", cause)
     class Server(val status: Int, body: String?) : CloudException("server $status: $body")
     class Conflict(message: String) : CloudException(message)

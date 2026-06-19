@@ -42,6 +42,15 @@ class QRScannerApp : Application(), Configuration.Provider {
         AppDatabase.getDatabase(this)
     }
 
+    /**
+     * True when SUPABASE_URL + SUPABASE_ANON_KEY are present in BuildConfig.
+     * AuthAwareRoot reads this to render a 'Cloud sync not configured' screen
+     * instead of accessing [cloudClient] and crashing on the SDK's bare
+     * malformed-URL error path (oracle round 6 BLOCKER #3).
+     */
+    val isCloudConfigured: Boolean
+        get() = BuildConfig.SUPABASE_URL.isNotBlank() && BuildConfig.SUPABASE_ANON_KEY.isNotBlank()
+
     val cloudClient: CloudClient by lazy {
         SupabaseCloudClient(this)
     }
