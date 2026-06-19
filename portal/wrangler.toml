@@ -1,0 +1,12 @@
+# Cloudflare Pages deploy config for the RD Scanner Portal.
+#
+# Deploy: `npm run deploy` (auths via CLOUDFLARE_API_TOKEN env var)
+# or `wrangler pages deploy dist --project-name=rd-scanner-portal`.
+#
+# The Pages project itself is created on first deploy; subsequent
+# deploys reuse it. Environment variables (VITE_SUPABASE_URL,
+# VITE_SUPABASE_ANON_KEY) live in the Pages dashboard, NOT this file.
+
+name = "rd-scanner-portal"
+pages_build_output_dir = "./dist"
+compatibility_date = "2025-06-20"
