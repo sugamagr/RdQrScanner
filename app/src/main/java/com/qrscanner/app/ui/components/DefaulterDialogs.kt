@@ -79,8 +79,12 @@ fun DefaulterAskDialog(
     onYes: () -> Unit
 ) {
     Dialog(
-        onDismissRequest = onNo,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        onDismissRequest = { /* require explicit choice */ },
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnBackPress = false,
+            dismissOnClickOutside = false
+        )
     ) {
         Surface(
             modifier = Modifier
@@ -150,8 +154,12 @@ fun DefaulterEditDialog(
     val defaulterCount = numbers.count { (draft[it.id] ?: it.monthsPaid) > 1 }
 
     Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        onDismissRequest = { /* prevent accidental loss of in-progress edits */ },
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            dismissOnBackPress = false,
+            dismissOnClickOutside = false
+        )
     ) {
         Surface(
             modifier = Modifier
