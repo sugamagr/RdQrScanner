@@ -240,27 +240,29 @@ private fun RDCameraScreen(
     suspend fun adoptSession(session: ScanSession) {
         val lots = app.database.scanLotDao().getLotsForSessionSync(session.id)
         val allRows = lots.flatMap { app.database.rdNumberDao().getNumbersForLotSync(it.id) }
-        val lastLot = lots.maxByOrNull { it.lotNumber }
-        val lastLotRows = lastLot?.let { app.database.rdNumberDao().getNumbersForLotSync(it.id) } ?: emptyList()
+        val pinnedLotId = session.activeLotId
+        val pinnedLot = pinnedLotId?.let { id -> lots.firstOrNull { it.id == id } }
+        val pinnedRows = pinnedLot?.let { app.database.rdNumberDao().getNumbersForLotSync(it.id) } ?: emptyList()
 
         currentSession = session
         currentSessionId = session.id
         allSessionNumbers.clear()
         allSessionNumbers.addAll(allRows.map { it.number })
         currentLotNumbers.clear()
-        currentLotNumbers.addAll(lastLotRows.sortedByDescending { it.position }.map { it.number })
+        currentLotNumbers.addAll(pinnedRows.sortedByDescending { it.position }.map { it.number })
 
-        if (lastLot != null && lastLotRows.isNotEmpty()) {
-            currentLotId = lastLot.id
-            currentLotNumber = lastLot.lotNumber
-            totalLotsInSession = lots.size - 1
+        if (pinnedLot != null) {
+            currentLotId = pinnedLot.id
+            currentLotNumber = pinnedLot.lotNumber
+            totalLotsInSession = lots.count { it.id != pinnedLot.id }
         } else {
-            if (lastLot != null) app.database.scanLotDao().deleteIfEmpty(lastLot.id)
+            if (pinnedLotId != null) {
+                app.database.scanSessionDao().setActiveLotId(session.id, null)
+            }
             currentLotId = null
-            val remainingLots = if (lastLot != null) lots.filter { it.id != lastLot.id } else lots
-            val highest = remainingLots.maxOfOrNull { it.lotNumber } ?: 0
+            val highest = lots.maxOfOrNull { it.lotNumber } ?: 0
             currentLotNumber = highest + 1
-            totalLotsInSession = remainingLots.size
+            totalLotsInSession = lots.size
         }
         isHydrated = true
     }
@@ -375,9 +377,14 @@ private fun RDCameraScreen(
                             isScanningRef.set(true)
                             return@LaunchedEffect
                         }
-                        val lotId = currentLotId ?: app.database.scanLotDao().insert(
-                            ScanLot(sessionId = session.id, lotNumber = currentLotNumber)
-                        ).also { currentLotId = it }
+                        val lotId = currentLotId ?: run {
+                            val newId = app.database.scanLotDao().insert(
+                                ScanLot(sessionId = session.id, lotNumber = currentLotNumber)
+                            )
+                            currentLotId = newId
+                            app.database.scanSessionDao().setActiveLotId(session.id, newId)
+                            newId
+                        }
                         val position = app.database.rdNumberDao().getNextPosition(lotId)
                         app.database.rdNumberDao().insert(
                             RdNumber(lotId = lotId, number = cleanValue, position = position)
@@ -430,6 +437,7 @@ private fun RDCameraScreen(
     fun undoLastScan() {
         if (currentLotNumbers.isEmpty()) return
         val lotId = currentLotId ?: return
+        val sessionId = currentSession?.id ?: return
         scope.launch {
             val lastRow = app.database.rdNumberDao().getMostRecentForLot(lotId)
             if (lastRow != null) {
@@ -439,6 +447,7 @@ private fun RDCameraScreen(
                 Toast.makeText(context, "Removed: ${lastRow.number}", Toast.LENGTH_SHORT).show()
                 if (currentLotNumbers.isEmpty()) {
                     app.database.scanLotDao().deleteIfEmpty(lotId)
+                    app.database.scanSessionDao().setActiveLotId(sessionId, null)
                     currentLotId = null
                 }
             }
@@ -501,9 +510,11 @@ private fun RDCameraScreen(
         isScanningRef.set(false)
 
         scope.launch {
+            val session = currentSession ?: return@launch
             val savedLotNumber = currentLotNumber
             val savedRows = app.database.rdNumberDao().getNumbersForLotSync(lotId)
 
+            app.database.scanSessionDao().setActiveLotId(session.id, null)
             totalLotsInSession++
             currentLotNumber++
             currentLotId = null
@@ -524,6 +535,7 @@ private fun RDCameraScreen(
             if (lotId != null && currentLotNumbers.isNotEmpty()) {
                 val savedLotNumber = currentLotNumber
                 val savedRows = app.database.rdNumberDao().getNumbersForLotSync(lotId)
+                app.database.scanSessionDao().setActiveLotId(session.id, null)
                 totalLotsInSession++
                 currentLotNumber++
                 currentLotId = null
@@ -537,6 +549,7 @@ private fun RDCameraScreen(
             } else {
                 if (lotId != null) {
                     app.database.scanLotDao().deleteIfEmpty(lotId)
+                    app.database.scanSessionDao().setActiveLotId(session.id, null)
                     currentLotId = null
                 }
                 finalizeSession(session)
@@ -547,6 +560,8 @@ private fun RDCameraScreen(
     fun discardSession() {
         scope.launch {
             currentSession?.let { session ->
+                // FK cascade (v4) handles scan_lots → rd_numbers, but we delete
+                // explicitly first for fail-safety against partial cascade.
                 app.database.rdNumberDao().deleteForSession(session.id)
                 app.database.scanLotDao().deleteLotsForSession(session.id)
                 app.database.scanSessionDao().deleteById(session.id)

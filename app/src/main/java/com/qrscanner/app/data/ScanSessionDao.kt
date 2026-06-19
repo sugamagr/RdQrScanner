@@ -43,8 +43,11 @@ interface ScanSessionDao {
     suspend fun deleteById(id: Long)
     
     // End session with display number
-    @Query("UPDATE scan_sessions SET isActive = 0, endTime = :endTime, totalLots = :totalLots, totalRdNumbers = :totalRdNumbers, displayNumber = :displayNumber WHERE id = :id")
+    @Query("UPDATE scan_sessions SET isActive = 0, endTime = :endTime, totalLots = :totalLots, totalRdNumbers = :totalRdNumbers, displayNumber = :displayNumber, activeLotId = NULL WHERE id = :id")
     suspend fun endSession(id: Long, endTime: Long, totalLots: Int, totalRdNumbers: Int, displayNumber: Int)
+
+    @Query("UPDATE scan_sessions SET activeLotId = :lotId WHERE id = :sessionId")
+    suspend fun setActiveLotId(sessionId: Long, lotId: Long?)
 
     @Query("""
         SELECT sl.sessionId AS sessionId, COUNT(rn.id) AS count

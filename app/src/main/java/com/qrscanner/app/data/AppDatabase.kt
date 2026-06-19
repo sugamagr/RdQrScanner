@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [ScanSession::class, ScanLot::class, RdNumber::class],
-    version = 3,
+    version = 4,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -32,6 +32,44 @@ abstract class AppDatabase : RoomDatabase() {
                 database.execSQL(
                     "ALTER TABLE `rd_numbers` ADD COLUMN `monthsPaid` INTEGER NOT NULL DEFAULT 1"
                 )
+            }
+        }
+
+        /**
+         * v3 → v4: Two related changes that close two long-standing risks:
+         *
+         * 1. Adds [ScanSession.activeLotId] (nullable) — persisted source of
+         *    truth for "which LOT is in progress", so resume after process
+         *    death never misidentifies a just-finished LOT as in-progress.
+         *
+         * 2. Recreates scan_lots with a FK on sessionId → scan_sessions.id
+         *    (ON DELETE CASCADE). Pre-v4 the column had no referential
+         *    integrity; deleting a session could orphan its LOTs and rows.
+         *    Uses the standard SQLite rename-create-copy-drop pattern.
+         *    rd_numbers is unaffected — its FK on lotId already cascades.
+         */
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    "ALTER TABLE `scan_sessions` ADD COLUMN `activeLotId` INTEGER DEFAULT NULL"
+                )
+
+                database.execSQL("ALTER TABLE `scan_lots` RENAME TO `scan_lots_old`")
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `scan_lots` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `sessionId` INTEGER NOT NULL,
+                        `lotNumber` INTEGER NOT NULL,
+                        `timestamp` INTEGER NOT NULL,
+                        FOREIGN KEY(`sessionId`) REFERENCES `scan_sessions`(`id`) ON DELETE CASCADE
+                    )
+                """)
+                database.execSQL("""
+                    INSERT INTO `scan_lots` (`id`, `sessionId`, `lotNumber`, `timestamp`)
+                    SELECT `id`, `sessionId`, `lotNumber`, `timestamp` FROM `scan_lots_old`
+                """)
+                database.execSQL("DROP TABLE `scan_lots_old`")
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_scan_lots_sessionId` ON `scan_lots` (`sessionId`)")
             }
         }
 
@@ -77,7 +115,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "rd_scanner_database"
                 )
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .fallbackToDestructiveMigrationOnDowngrade()
                 .build()
                 INSTANCE = instance
