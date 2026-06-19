@@ -4,12 +4,19 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 val keystorePropertiesFile = rootProject.file("app/keystore.properties")
 val keystoreProperties = Properties()
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(keystorePropertiesFile.inputStream())
+}
+
+val localPropertiesFile = rootProject.file("local.properties")
+val localProperties = Properties()
+if (localPropertiesFile.exists()) {
+    localProperties.load(localPropertiesFile.inputStream())
 }
 
 android {
@@ -24,6 +31,17 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField(
+            "String",
+            "SUPABASE_URL",
+            "\"${localProperties.getProperty("SUPABASE_URL", "")}\""
+        )
+        buildConfigField(
+            "String",
+            "SUPABASE_ANON_KEY",
+            "\"${localProperties.getProperty("SUPABASE_ANON_KEY", "")}\""
+        )
     }
 
     signingConfigs {
@@ -54,6 +72,7 @@ android {
     // jvmTarget defaults to compileOptions.targetCompatibility (17)
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -96,6 +115,19 @@ dependencies {
 
     // Accompanist Permissions
     implementation(libs.accompanist.permissions)
+
+    // Supabase + Ktor for cloud sync (Phase 1 T1.14, spec §15)
+    implementation(platform(libs.supabase.bom))
+    implementation(libs.supabase.postgrest)
+    implementation(libs.supabase.auth)
+    implementation(libs.supabase.realtime)
+    implementation(libs.ktor.client.okhttp)
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.kotlinx.datetime)
+    implementation(libs.multiplatform.settings)
+    implementation(libs.multiplatform.settings.no.arg)
+    implementation(libs.androidx.security.crypto)
+    implementation(libs.androidx.work.runtime.ktx)
 
     debugImplementation(libs.androidx.ui.tooling)
 }
