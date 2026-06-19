@@ -16,6 +16,7 @@ const config: Config = {
         accent: {
           coral: '#FF6B6B',
           mint: '#4ECDC4',
+          'mint-ink': '#0E8278',
         },
         warn: '#F59E0B',
         danger: '#EF4444',

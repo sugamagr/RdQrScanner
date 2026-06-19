@@ -1,8 +1,12 @@
-// Byte-for-byte port of app/src/main/java/com/qrscanner/app/util/XlsxExporter.kt.
+// Structural port of app/src/main/java/com/qrscanner/app/util/XlsxExporter.kt.
 // Hand-rolls OOXML inside a ZIP so portal-exported XLSX files have the
 // same column order, header bolding, and cell formatting as the phone's
-// export. Verified against the Kotlin source so an owner comparing two
-// files side-by-side sees identical structure.
+// export. The OOXML payload matches the Kotlin source character-for-
+// character; the surrounding ZIP container metadata (timestamps, CRC,
+// compression method) differs between fflate and Kotlin's
+// ZipOutputStream, so files aren't byte-identical — but every reader
+// (Excel, Numbers, LibreOffice, Sheets) renders them as the same
+// workbook.
 
 import { zipSync, strToU8 } from 'fflate';
 import type { RdNumberRow, ScanLotRow } from '../types/db';

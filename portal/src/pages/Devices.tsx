@@ -124,7 +124,7 @@ function StatusBadge({ status }: { status: 'active' | 'idle' | 'dormant' }) {
   const config = {
     active: {
       label: 'Active',
-      classes: 'bg-accent-mint/15 text-[#0E8278] ring-1 ring-accent-mint/30',
+      classes: 'bg-accent-mint/15 text-accent-mint-ink ring-1 ring-accent-mint/30',
     },
     idle: {
       label: 'Idle',

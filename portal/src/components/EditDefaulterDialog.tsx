@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   autoWindow,
@@ -74,6 +74,30 @@ export function EditDefaulterDialog({ rd, lotTimestamp, onClose }: Props) {
 
   const candidateMonths = useMemo(() => buildCandidateGrid(anchor), [anchor]);
 
+  // Focus management + ESC handling per WAI-ARIA modal pattern. Remembers
+  // the element that opened the dialog so focus returns there on close
+  // (Wave 2 oracle finding bg_53bf3b2b W1).
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeBtnRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    closeBtnRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      opener?.focus();
+    };
+  }, [onClose]);
+
+  const remainingPicks = monthsPaid > 1 ? monthsPaid - selected.length : 0;
+  const saveDisabled = mutation.isPending || (monthsPaid > 1 && selected.length !== monthsPaid);
+
   return (
     <div
       role="dialog"
@@ -83,6 +107,7 @@ export function EditDefaulterDialog({ rd, lotTimestamp, onClose }: Props) {
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
         className="w-full max-w-lg overflow-hidden rounded-t-2xl bg-surface shadow-elevated sm:rounded-2xl"
         onClick={(e) => e.stopPropagation()}
       >
@@ -169,23 +194,36 @@ export function EditDefaulterDialog({ rd, lotTimestamp, onClose }: Props) {
           )}
         </div>
 
-        <footer className="flex items-center justify-end gap-2 border-t border-surface-border bg-surface-alt px-5 py-3">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={mutation.isPending}
-            className="rounded-pill px-3.5 py-1.5 text-xs font-medium text-ink-secondary hover:text-ink-primary"
+        <footer className="flex items-center justify-between gap-2 border-t border-surface-border bg-surface-alt px-5 py-3">
+          <span
+            className="text-[11px] text-ink-muted"
+            aria-live="polite"
           >
-            Cancel
-          </button>
-          <button
-            type="button"
-            disabled={mutation.isPending || (monthsPaid > 1 && selected.length !== monthsPaid)}
-            onClick={() => mutation.mutate()}
-            className="rounded-pill bg-primary px-4 py-1.5 text-xs font-semibold text-white shadow-card transition-colors hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {mutation.isPending ? 'Saving…' : 'Save'}
-          </button>
+            {monthsPaid > 1 && remainingPicks > 0
+              ? `Pick ${remainingPicks} more month${remainingPicks === 1 ? '' : 's'} to save.`
+              : monthsPaid > 1 && selected.length > monthsPaid
+                ? `Remove ${selected.length - monthsPaid} to save.`
+                : ''}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              ref={closeBtnRef}
+              type="button"
+              onClick={onClose}
+              disabled={mutation.isPending}
+              className="rounded-pill px-3.5 py-1.5 text-xs font-medium text-ink-secondary hover:text-ink-primary"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={saveDisabled}
+              onClick={() => mutation.mutate()}
+              className="rounded-pill bg-primary px-4 py-1.5 text-xs font-semibold text-white shadow-card transition-colors hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {mutation.isPending ? 'Saving…' : 'Save'}
+            </button>
+          </div>
         </footer>
       </div>
     </div>
