@@ -73,6 +73,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -107,6 +108,7 @@ import com.qrscanner.app.data.ScanSession
 import com.qrscanner.app.data.isValidRdNumber
 import com.qrscanner.app.ui.components.DefaulterAskDialog
 import com.qrscanner.app.ui.components.DefaulterEditDialog
+import com.qrscanner.app.ui.components.ResumeSessionDialog
 import com.qrscanner.app.ui.theme.AccentCoral
 import com.qrscanner.app.ui.theme.AccentMint
 import com.qrscanner.app.ui.theme.ErrorRed
@@ -171,26 +173,34 @@ private fun RDCameraScreen(
     val scope = rememberCoroutineScope()
     val app = context.applicationContext as QRScannerApp
     
-    // Session state
+    // Session state — hydrated from DB in the init effect below. currentLotId
+    // tracks the in-progress LOT row (created on first scan, cleared on finish).
     var currentSession by remember { mutableStateOf<ScanSession?>(null) }
     var currentLotNumber by remember { mutableIntStateOf(1) }
     var totalLotsInSession by remember { mutableIntStateOf(0) }
+    var currentLotId by remember { mutableStateOf<Long?>(null) }
     val currentLotNumbers = remember { mutableStateListOf<String>() }
     val allSessionNumbers = remember { mutableStateListOf<String>() }
-    
-    // Camera state
-    var isFlashOn by remember { mutableStateOf(false) }
+    var isHydrated by remember { mutableStateOf(false) }
+
+    // Camera state — flash survives config change so users don't have to retoggle.
+    var isFlashOn by rememberSaveable { mutableStateOf(false) }
     var camera by remember { mutableStateOf<androidx.camera.core.Camera?>(null) }
-    
+
     // Thread-safe scanning flags using atomic references
     val scanningEnabledRef = remember { AtomicBoolean(true) }
     val isScanningRef = remember { AtomicBoolean(true) }
     val pendingValueRef = remember { AtomicReference<String?>(null) }
-    
-    // UI state
-    var showEndSessionDialog by remember { mutableStateOf(false) }
-    var showFinishLotDialog by remember { mutableStateOf(false) }
+
+    // UI state — dialog visibility persists across config change.
+    var showEndSessionDialog by rememberSaveable { mutableStateOf(false) }
+    var showFinishLotDialog by rememberSaveable { mutableStateOf(false) }
     var lastScanFeedback by remember { mutableStateOf<ScanFeedback?>(null) }
+
+    // Resume flow — surfaced when an active session from a prior launch is found.
+    var showResumeDialog by remember { mutableStateOf(false) }
+    var resumeSummary by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    var sessionPendingResume by remember { mutableStateOf<ScanSession?>(null) }
 
     // Defaulter flow state — set after a successful LOT save, drives the
     // ask -> (optional edit) -> post-save sequence.
@@ -217,11 +227,72 @@ private fun RDCameraScreen(
         } 
     }
     
-    // Initialize session
-    LaunchedEffect(Unit) {
+    suspend fun adoptSession(session: ScanSession) {
+        val lots = app.database.scanLotDao().getLotsForSessionSync(session.id)
+        val allRows = lots.flatMap { app.database.rdNumberDao().getNumbersForLotSync(it.id) }
+        val lastLot = lots.maxByOrNull { it.lotNumber }
+        val lastLotRows = lastLot?.let { app.database.rdNumberDao().getNumbersForLotSync(it.id) } ?: emptyList()
+
+        currentSession = session
+        allSessionNumbers.clear()
+        allSessionNumbers.addAll(allRows.map { it.number })
+        currentLotNumbers.clear()
+        currentLotNumbers.addAll(lastLotRows.sortedByDescending { it.position }.map { it.number })
+
+        if (lastLot != null && lastLotRows.isNotEmpty()) {
+            currentLotId = lastLot.id
+            currentLotNumber = lastLot.lotNumber
+            totalLotsInSession = lots.size - 1
+        } else {
+            if (lastLot != null) app.database.scanLotDao().deleteIfEmpty(lastLot.id)
+            currentLotId = null
+            currentLotNumber = (lots.size + 1).coerceAtLeast(1)
+            totalLotsInSession = lots.count { it.id != lastLot?.id || lastLotRows.isNotEmpty() }
+        }
+        isHydrated = true
+    }
+
+    suspend fun startFreshSession() {
         val session = ScanSession()
         val sessionId = app.database.scanSessionDao().insert(session)
         currentSession = session.copy(id = sessionId)
+        currentLotNumber = 1
+        totalLotsInSession = 0
+        currentLotId = null
+        currentLotNumbers.clear()
+        allSessionNumbers.clear()
+        isHydrated = true
+    }
+
+    // Detect resumable session on first composition; otherwise start fresh.
+    LaunchedEffect(Unit) {
+        if (isHydrated) return@LaunchedEffect
+        val activeIds = app.database.scanSessionDao().getAllActiveSessionIds()
+        if (activeIds.size > 1) {
+            // GC duplicates — keep only the most recent (first in DESC order).
+            activeIds.drop(1).forEach { stale ->
+                app.database.rdNumberDao().deleteForSession(stale)
+                app.database.scanLotDao().deleteLotsForSession(stale)
+                app.database.scanSessionDao().deleteById(stale)
+            }
+        }
+        val active = app.database.scanSessionDao().getActiveSession()
+        if (active == null) {
+            startFreshSession()
+            return@LaunchedEffect
+        }
+        val lotCount = app.database.scanSessionDao().getSessionById(active.id)?.let {
+            app.database.scanLotDao().getLotsForSessionSync(it.id).size
+        } ?: 0
+        val scanCount = app.database.rdNumberDao().getAllNumbersInSession(active.id).size
+        if (lotCount == 0 && scanCount == 0) {
+            // Empty active session — silently adopt without prompting.
+            adoptSession(active)
+        } else {
+            sessionPendingResume = active
+            resumeSummary = lotCount to scanCount
+            showResumeDialog = true
+        }
     }
     
     // Process scanned values on main thread when triggered
@@ -257,6 +328,19 @@ private fun RDCameraScreen(
                         } catch (e: Exception) { /* ignore */ }
                     }
                     else -> {
+                        val session = currentSession
+                        if (session == null) {
+                            pendingValueRef.set(null)
+                            isScanningRef.set(true)
+                            return@LaunchedEffect
+                        }
+                        val lotId = currentLotId ?: app.database.scanLotDao().insert(
+                            ScanLot(sessionId = session.id, lotNumber = currentLotNumber)
+                        ).also { currentLotId = it }
+                        val position = app.database.rdNumberDao().getNextPosition(lotId)
+                        app.database.rdNumberDao().insert(
+                            RdNumber(lotId = lotId, number = cleanValue, position = position)
+                        )
                         currentLotNumbers.add(0, cleanValue)
                         allSessionNumbers.add(cleanValue)
                         lastScanFeedback = ScanFeedback.Success(cleanValue)
@@ -265,11 +349,8 @@ private fun RDCameraScreen(
                         } catch (e: Exception) { /* ignore */ }
                     }
                 }
-                
-                // Clear pending value
+
                 pendingValueRef.set(null)
-                
-                // Resume scanning after short delay
                 delay(700)
                 isScanningRef.set(true)
             }
@@ -291,9 +372,10 @@ private fun RDCameraScreen(
         }
     }
 
-    // Pause camera analysis whenever any dialog is open; resume when all closed
-    val anyDialogOpen = showEndSessionDialog || showFinishLotDialog ||
-            showDefaulterAskDialog || showDefaulterEditDialog
+    // Pause camera analysis whenever any dialog is open; resume when all closed.
+    // Also pause while the session is still hydrating from DB.
+    val anyDialogOpen = !isHydrated || showResumeDialog || showEndSessionDialog ||
+            showFinishLotDialog || showDefaulterAskDialog || showDefaulterEditDialog
     LaunchedEffect(anyDialogOpen) {
         if (anyDialogOpen) {
             scanningEnabledRef.set(false)
@@ -305,10 +387,20 @@ private fun RDCameraScreen(
     }
     
     fun undoLastScan() {
-        if (currentLotNumbers.isNotEmpty()) {
-            val removed = currentLotNumbers.removeAt(0)
-            allSessionNumbers.remove(removed)
-            Toast.makeText(context, "Removed: $removed", Toast.LENGTH_SHORT).show()
+        if (currentLotNumbers.isEmpty()) return
+        val lotId = currentLotId ?: return
+        scope.launch {
+            val lastRow = app.database.rdNumberDao().getMostRecentForLot(lotId)
+            if (lastRow != null) {
+                app.database.rdNumberDao().deleteById(lastRow.id)
+                currentLotNumbers.remove(lastRow.number)
+                allSessionNumbers.remove(lastRow.number)
+                Toast.makeText(context, "Removed: ${lastRow.number}", Toast.LENGTH_SHORT).show()
+                if (currentLotNumbers.isEmpty()) {
+                    app.database.scanLotDao().deleteIfEmpty(lotId)
+                    currentLotId = null
+                }
+            }
         }
     }
 
@@ -352,7 +444,8 @@ private fun RDCameraScreen(
     }
 
     fun finishCurrentLot(alsoEndSession: Boolean = false) {
-        if (currentLotNumbers.isEmpty()) {
+        val lotId = currentLotId
+        if (lotId == null || currentLotNumbers.isEmpty()) {
             if (alsoEndSession) {
                 scope.launch { currentSession?.let { finalizeSession(it) } }
             } else {
@@ -365,19 +458,12 @@ private fun RDCameraScreen(
         isScanningRef.set(false)
 
         scope.launch {
-            val session = currentSession ?: return@launch
             val savedLotNumber = currentLotNumber
-            val lotId = app.database.scanLotDao().insert(
-                ScanLot(sessionId = session.id, lotNumber = savedLotNumber)
-            )
-            val rdNumberEntities = currentLotNumbers.reversed().mapIndexed { index, number ->
-                RdNumber(lotId = lotId, number = number, position = index)
-            }
-            app.database.rdNumberDao().insertAll(rdNumberEntities)
             val savedRows = app.database.rdNumberDao().getNumbersForLotSync(lotId)
 
             totalLotsInSession++
             currentLotNumber++
+            currentLotId = null
             currentLotNumbers.clear()
 
             defaulterLotNumber = savedLotNumber
@@ -390,32 +476,33 @@ private fun RDCameraScreen(
     fun endSession() {
         scope.launch {
             val session = currentSession ?: return@launch
-            if (currentLotNumbers.isNotEmpty()) {
+            val lotId = currentLotId
+            if (lotId != null && currentLotNumbers.isNotEmpty()) {
                 val savedLotNumber = currentLotNumber
-                val lotId = app.database.scanLotDao().insert(
-                    ScanLot(sessionId = session.id, lotNumber = savedLotNumber)
-                )
-                val rdNumberEntities = currentLotNumbers.reversed().mapIndexed { index, number ->
-                    RdNumber(lotId = lotId, number = number, position = index)
-                }
-                app.database.rdNumberDao().insertAll(rdNumberEntities)
+                val savedRows = app.database.rdNumberDao().getNumbersForLotSync(lotId)
                 totalLotsInSession++
                 currentLotNumber++
+                currentLotId = null
                 currentLotNumbers.clear()
 
                 defaulterLotNumber = savedLotNumber
-                defaulterRows = app.database.rdNumberDao().getNumbersForLotSync(lotId)
+                defaulterRows = savedRows
                 pendingPostSave = PostSave.EndSession
                 showDefaulterAskDialog = true
             } else {
+                if (lotId != null) {
+                    app.database.scanLotDao().deleteIfEmpty(lotId)
+                    currentLotId = null
+                }
                 finalizeSession(session)
             }
         }
     }
-    
+
     fun discardSession() {
         scope.launch {
             currentSession?.let { session ->
+                app.database.rdNumberDao().deleteForSession(session.id)
                 app.database.scanLotDao().deleteLotsForSession(session.id)
                 app.database.scanSessionDao().deleteById(session.id)
                 Toast.makeText(context, "Session discarded", Toast.LENGTH_SHORT).show()
@@ -1004,6 +1091,39 @@ private fun RDCameraScreen(
                         }
                         pendingPostSave?.let { executePostSave(it) }
                         pendingPostSave = null
+                    }
+                }
+            )
+        }
+
+        if (showResumeDialog) {
+            val (lotCount, scanCount) = resumeSummary ?: (0 to 0)
+            ResumeSessionDialog(
+                lotCount = lotCount,
+                scanCount = scanCount,
+                onResume = {
+                    val pending = sessionPendingResume
+                    showResumeDialog = false
+                    sessionPendingResume = null
+                    resumeSummary = null
+                    if (pending != null) {
+                        scope.launch { adoptSession(pending) }
+                    } else {
+                        scope.launch { startFreshSession() }
+                    }
+                },
+                onDiscard = {
+                    val pending = sessionPendingResume
+                    showResumeDialog = false
+                    sessionPendingResume = null
+                    resumeSummary = null
+                    scope.launch {
+                        if (pending != null) {
+                            app.database.rdNumberDao().deleteForSession(pending.id)
+                            app.database.scanLotDao().deleteLotsForSession(pending.id)
+                            app.database.scanSessionDao().deleteById(pending.id)
+                        }
+                        startFreshSession()
                     }
                 }
             )
