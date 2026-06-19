@@ -54,6 +54,26 @@ abstract class AppDatabase : RoomDatabase() {
                     "ALTER TABLE `scan_sessions` ADD COLUMN `activeLotId` INTEGER DEFAULT NULL"
                 )
 
+                // Best-effort backfill: any session that was mid-scan at upgrade
+                // time gets its highest-numbered LOT pinned as activeLotId, so
+                // resume continues into the same LOT instead of starting a new
+                // one. Without this, the v3 in-progress LOT becomes a phantom
+                // 'completed' LOT in the user's count.
+                database.execSQL("""
+                    UPDATE `scan_sessions`
+                    SET `activeLotId` = (
+                        SELECT `id` FROM `scan_lots`
+                        WHERE `scan_lots`.`sessionId` = `scan_sessions`.`id`
+                        ORDER BY `lotNumber` DESC LIMIT 1
+                    )
+                    WHERE `isActive` = 1
+                """)
+
+                // SQLite 3.26+ auto-updates child FK references during RENAME
+                // (the rd_numbers.lotId FK would silently re-target scan_lots_old
+                // and become dangling after DROP). legacy_alter_table=ON opts
+                // out of that behaviour for the duration of the rebuild.
+                database.execSQL("PRAGMA legacy_alter_table = ON")
                 database.execSQL("ALTER TABLE `scan_lots` RENAME TO `scan_lots_old`")
                 database.execSQL("""
                     CREATE TABLE IF NOT EXISTS `scan_lots` (
@@ -69,6 +89,8 @@ abstract class AppDatabase : RoomDatabase() {
                     SELECT `id`, `sessionId`, `lotNumber`, `timestamp` FROM `scan_lots_old`
                 """)
                 database.execSQL("DROP TABLE `scan_lots_old`")
+                database.execSQL("PRAGMA legacy_alter_table = OFF")
+
                 database.execSQL("CREATE INDEX IF NOT EXISTS `index_scan_lots_sessionId` ON `scan_lots` (`sessionId`)")
             }
         }
@@ -90,7 +112,10 @@ abstract class AppDatabase : RoomDatabase() {
                 database.execSQL("CREATE INDEX IF NOT EXISTS `index_rd_numbers_lotId_number` ON `rd_numbers` (`lotId`, `number`)")
                 database.execSQL("CREATE INDEX IF NOT EXISTS `index_rd_numbers_number` ON `rd_numbers` (`number`)")
 
-                // Recreate scan_lots without the rdNumbers column (SQLite rename-create-copy-drop)
+                // Recreate scan_lots without the rdNumbers column (SQLite rename-create-copy-drop).
+                // legacy_alter_table=ON keeps the freshly-created rd_numbers.lotId FK pointed at
+                // 'scan_lots' instead of being auto-rewritten to 'scan_lots_old' by SQLite 3.26+.
+                database.execSQL("PRAGMA legacy_alter_table = ON")
                 database.execSQL("ALTER TABLE `scan_lots` RENAME TO `scan_lots_old`")
                 database.execSQL("""
                     CREATE TABLE IF NOT EXISTS `scan_lots` (
@@ -105,6 +130,7 @@ abstract class AppDatabase : RoomDatabase() {
                     SELECT `id`, `sessionId`, `lotNumber`, `timestamp` FROM `scan_lots_old`
                 """)
                 database.execSQL("DROP TABLE `scan_lots_old`")
+                database.execSQL("PRAGMA legacy_alter_table = OFF")
             }
         }
 

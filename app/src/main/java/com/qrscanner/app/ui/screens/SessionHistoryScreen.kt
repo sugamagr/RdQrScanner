@@ -625,6 +625,7 @@ fun SessionHistoryScreen(
                     TextButton(onClick = {
                         scope.launch {
                             try {
+                                app.database.rdNumberDao().deleteForSession(session.id)
                                 app.database.scanLotDao().deleteLotsForSession(session.id)
                                 app.database.scanSessionDao().delete(session)
                                 Toast.makeText(context, "Session deleted", Toast.LENGTH_SHORT).show()
@@ -660,6 +661,7 @@ fun SessionHistoryScreen(
                         scope.launch {
                             try {
                                 toDelete.forEach { id ->
+                                    app.database.rdNumberDao().deleteForSession(id)
                                     app.database.scanLotDao().deleteLotsForSession(id)
                                     app.database.scanSessionDao().deleteById(id)
                                 }
@@ -696,6 +698,7 @@ fun SessionHistoryScreen(
                         scope.launch {
                             try {
                                 completedSessions.forEach { session ->
+                                    app.database.rdNumberDao().deleteForSession(session.id)
                                     app.database.scanLotDao().deleteLotsForSession(session.id)
                                     app.database.scanSessionDao().delete(session)
                                 }
