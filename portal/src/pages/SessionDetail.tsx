@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { PageHeader } from '../components/PageHeader';
@@ -9,6 +9,7 @@ import {
 } from '../lib/queries';
 import { formatDateTime, formatNumber, formatRelativeTime } from '../lib/format';
 import type { RdNumberRow, ScanLotRow, ScanSessionRow } from '../types/db';
+import { buildSessionXlsx, triggerDownload } from '../lib/xlsx';
 
 export function SessionDetailPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -44,6 +45,26 @@ export function SessionDetailPage() {
 
   const session = sessionQuery.data;
   const isLoading = sessionQuery.isLoading || lotsQuery.isLoading;
+  const [exportError, setExportError] = useState<string | null>(null);
+  const canExport =
+    !!session && (lotsQuery.data?.length ?? 0) > 0 && !rdQuery.isLoading;
+
+  const handleExport = () => {
+    if (!session || !lotsQuery.data) return;
+    setExportError(null);
+    try {
+      const bytes = buildSessionXlsx({
+        sessionDisplayNumber: session.display_number,
+        lots: lotsQuery.data,
+        rdNumbersByLotId: rdByLot,
+      });
+      const filename = `RD_Session_${session.display_number}_${Date.now()}.xlsx`;
+      triggerDownload(bytes, filename);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Export failed.';
+      setExportError(msg);
+    }
+  };
 
   if (!sessionId) {
     return <NotFound />;
@@ -68,16 +89,34 @@ export function SessionDetailPage() {
               ? 'Loading…'
               : 'Session not found.'
         }
+        action={
+          session && (
+            <button
+              type="button"
+              onClick={handleExport}
+              disabled={!canExport}
+              className="rounded-pill bg-primary px-3.5 py-1.5 text-xs font-semibold text-white shadow-card transition-colors hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {rdQuery.isLoading ? 'Preparing…' : 'Export XLSX'}
+            </button>
+          )
+        }
       />
 
       {sessionQuery.isError && (
-        <Error
+        <ErrorBox
           message={
             sessionQuery.error instanceof Error
               ? sessionQuery.error.message
               : 'Failed to load session.'
           }
         />
+      )}
+
+      {exportError && (
+        <div className="mt-4 rounded-2xl border border-danger/20 bg-danger/5 p-3 text-xs text-danger">
+          Export failed: {exportError}
+        </div>
       )}
 
       {!isLoading && !session && !sessionQuery.isError && <NotFound />}
@@ -239,7 +278,7 @@ function NotFound() {
   );
 }
 
-function Error({ message }: { message: string }) {
+function ErrorBox({ message }: { message: string }) {
   return (
     <div className="mt-6 rounded-2xl border border-danger/20 bg-danger/5 p-6 text-center">
       <p className="text-sm font-medium text-danger">{message}</p>
