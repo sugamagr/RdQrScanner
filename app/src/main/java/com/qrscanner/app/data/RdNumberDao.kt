@@ -60,4 +60,11 @@ interface RdNumberDao {
         WHERE sl.sessionId = :sessionId AND rn.monthsPaid > 1
     """)
     fun observeDefaultCountForSession(sessionId: Long): Flow<Int>
+
+    @Query("""
+        SELECT COALESCE(SUM(rn.monthsPaid), 0) FROM rd_numbers rn
+        INNER JOIN scan_lots sl ON rn.lotId = sl.id
+        WHERE sl.sessionId = :sessionId AND rn.monthsPaid > 1
+    """)
+    fun observeTotalDefaulterMonthsForSession(sessionId: Long): Flow<Int>
 }

@@ -347,7 +347,7 @@ private fun HindiContent() {
             FeatureItem(
                 icon = Icons.Default.EditCalendar,
                 title = "डिफॉल्टर मार्क करें",
-                description = "एक LOT स्कैन करने के बाद, उन खातों को मार्क करें जिनके लिए एक से अधिक महीने का भुगतान हुआ है। डिफॉल्टर की संख्या LOT कार्ड और सभी एक्सपोर्ट में दिखेगी।"
+                description = "एक LOT स्कैन करने के बाद, उन खातों को मार्क करें जिनके लिए एक से अधिक महीने का भुगतान हुआ है। हर डिफॉल्टर के लिए कौन से महीने (जैसे जून, जुलाई 2024) हैं, यह भी चुनें — पोर्टल से मिलान करने में आसानी होगी। महीने LOT कार्ड और सभी एक्सपोर्ट में दिखेंगे।"
             )
         }
 
@@ -521,7 +521,7 @@ private fun EnglishContent() {
             FeatureItem(
                 icon = Icons.Default.EditCalendar,
                 title = "Mark Defaulters",
-                description = "After scanning a LOT, mark any account that paid for more than one month. The default count appears on the LOT card and in all exports."
+                description = "After scanning a LOT, mark any account that paid for more than one month — and pick which months (e.g. Jun, Jul 2024) so you can reconcile against the postal portal. Months show up on the LOT card and in every export."
             )
         }
 

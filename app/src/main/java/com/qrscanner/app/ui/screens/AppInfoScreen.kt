@@ -179,7 +179,7 @@ fun AppInfoScreen(
                             "Export sessions as XLSX or TXT",
                             "Generate QR code PDFs for RD numbers",
                             "Duplicate detection within session",
-                            "Track defaulter accounts — mark RD numbers paid for multiple months",
+                            "Track defaulter accounts — pick the exact months paid (e.g. Jun, Jul, Aug 2024) for portal reconciliation",
                             "Modern light orange theme"
                         )
                     )

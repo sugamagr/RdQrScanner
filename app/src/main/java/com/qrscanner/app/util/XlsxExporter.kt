@@ -111,6 +111,12 @@ object XlsxExporter {
         val sb = StringBuilder()
         sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>")
         sb.append("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">")
+        sb.append("<cols>")
+        sb.append("<col min=\"2\" max=\"2\" width=\"40\" customWidth=\"1\"/>")
+        sb.append("<col min=\"5\" max=\"5\" width=\"30\" customWidth=\"1\"/>")
+        sb.append("<col min=\"6\" max=\"6\" width=\"50\" customWidth=\"1\"/>")
+        sb.append("<col min=\"7\" max=\"7\" width=\"22\" customWidth=\"1\"/>")
+        sb.append("</cols>")
         sb.append("<sheetData>")
 
         sb.append("<row r=\"1\">")
@@ -119,12 +125,14 @@ object XlsxExporter {
         sb.append(strCell("C1", "Count", bold = true))
         sb.append(strCell("D1", "Default Count", bold = true))
         sb.append(strCell("E1", "Defaulters", bold = true))
-        sb.append(strCell("F1", "Timestamp", bold = true))
+        sb.append(strCell("F1", "Default Months", bold = true))
+        sb.append(strCell("G1", "Timestamp", bold = true))
         sb.append("</row>")
 
         lots.forEachIndexed { index, lot ->
             val rows = rdNumbersPerLot.getOrElse(index) { emptyList() }
             val defaulters = rows.filter { it.monthsPaid > 1 }
+            val anchor = MonthYear.fromEpochMillis(lot.timestamp)
             val rowNum = index + 2
             sb.append("<row r=\"$rowNum\">")
             sb.append(numCell("A$rowNum", lot.lotNumber))
@@ -132,7 +140,11 @@ object XlsxExporter {
             sb.append(numCell("C$rowNum", rows.size))
             sb.append(numCell("D$rowNum", defaulters.size))
             sb.append(strCell("E$rowNum", defaulters.joinToString("; ") { "${it.number}: ${it.monthsPaid}m" }))
-            sb.append(strCell("F$rowNum", dateFormat.format(Date(lot.timestamp))))
+            sb.append(strCell("F$rowNum", defaulters.joinToString("; ") { rd ->
+                val months = MonthYear.resolveOrAuto(rd.monthsList, rd.monthsPaid, anchor)
+                "${rd.number}: " + months.joinToString(", ") { it.formatExport() }
+            }))
+            sb.append(strCell("G$rowNum", dateFormat.format(Date(lot.timestamp))))
             sb.append("</row>")
         }
 
@@ -178,10 +190,13 @@ object XlsxExporter {
                 writer.append("=".repeat(40) + "\n\n")
 
                 var totalDefaulters = 0
+                var totalMonths = 0
                 lots.forEachIndexed { index, lot ->
                     val rows = rdNumbersPerLot.getOrElse(index) { emptyList() }
                     val defaulters = rows.filter { it.monthsPaid > 1 }
+                    val anchor = MonthYear.fromEpochMillis(lot.timestamp)
                     totalDefaulters += defaulters.size
+                    totalMonths += defaulters.sumOf { it.monthsPaid }
 
                     val header = if (defaulters.isEmpty()) {
                         "LOT ${lot.lotNumber} (${rows.size} numbers):"
@@ -193,7 +208,10 @@ object XlsxExporter {
                     writer.append("\n")
                     if (defaulters.isNotEmpty()) {
                         writer.append("Defaulters: ")
-                        writer.append(defaulters.joinToString(", ") { "${it.number} (${it.monthsPaid}m)" })
+                        writer.append(defaulters.joinToString(", ") { rd ->
+                            val months = MonthYear.resolveOrAuto(rd.monthsList, rd.monthsPaid, anchor)
+                            "${rd.number} (" + months.joinToString(", ") { it.formatExport() } + ")"
+                        })
                         writer.append("\n")
                     }
                     writer.append("\n")
@@ -202,7 +220,7 @@ object XlsxExporter {
                 val totalNumbers = rdNumbersPerLot.sumOf { it.size }
                 writer.append("-".repeat(40) + "\n")
                 writer.append("Total: ${lots.size} LOTs, $totalNumbers RD Numbers")
-                if (totalDefaulters > 0) writer.append(", $totalDefaulters defaulters")
+                if (totalDefaulters > 0) writer.append(", $totalDefaulters defaulters ($totalMonths months)")
                 writer.append("\n")
             }
 

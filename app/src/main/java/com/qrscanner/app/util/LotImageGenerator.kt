@@ -12,28 +12,40 @@ import java.io.File
 import java.io.FileOutputStream
 
 object LotImageGenerator {
-    
+
+    private const val BANNER_WIDTH = 400
+    private const val BANNER_HEIGHT_PLAIN = 200
+    private const val BANNER_HEIGHT_DEFAULTERS = 240
+    private const val EDGE_INSET = 16f
+
     /**
      * Generates a share-banner image for a single LOT.
      *
-     * Renders LOT number, scanned count, and (when present) the defaulter
-     * count on an orange band. Designed for the WhatsApp share intent so
-     * recipients see the LOT identity at a glance before the number list.
+     * Renders LOT number, scanned count, and (when present) a defaulter
+     * summary that includes both the defaulter count and the total months
+     * those defaulters represent ('2 defaulters · 6 months'). Designed for
+     * the WhatsApp share intent so recipients see the LOT identity and
+     * defaulter scale at a glance before reading the text body.
+     *
+     * Text size on the defaulter line auto-shrinks if the rendered string
+     * would overflow the banner width, so high-count LOTs stay legible.
      */
     fun generateLotImage(
         context: Context,
         lotNumber: Int,
         rdNumberCount: Int,
-        defaultCount: Int = 0
+        defaultCount: Int = 0,
+        totalMonths: Int = 0
     ): File? {
         return try {
-            val width = 400
-            val height = if (defaultCount > 0) 240 else 200
+            val hasDefaulters = defaultCount > 0
+            val height = if (hasDefaulters) BANNER_HEIGHT_DEFAULTERS else BANNER_HEIGHT_PLAIN
+            val width = BANNER_WIDTH
 
             val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bitmap)
 
-            val baseColor = if (defaultCount > 0) "#F39C12" else "#FF9F43"
+            val baseColor = if (hasDefaulters) "#F39C12" else "#FF9F43"
             val bgPaint = Paint().apply {
                 color = Color.parseColor(baseColor)
                 style = Paint.Style.FILL
@@ -54,7 +66,7 @@ object LotImageGenerator {
                 textAlign = Paint.Align.CENTER
                 isAntiAlias = true
             }
-            val lotY = if (defaultCount > 0) height / 2f - 8f else height / 2f + 10f
+            val lotY = if (hasDefaulters) height / 2f - 8f else height / 2f + 10f
             canvas.drawText("LOT $lotNumber", width / 2f, lotY, lotTextPaint)
 
             val countPaint = Paint().apply {
@@ -67,17 +79,21 @@ object LotImageGenerator {
             }
             canvas.drawText("$rdNumberCount RD Numbers", width / 2f, lotY + 42f, countPaint)
 
-            if (defaultCount > 0) {
+            if (hasDefaulters) {
                 val defaulterPaint = Paint().apply {
                     color = Color.WHITE
                     alpha = 235
-                    textSize = 24f
                     typeface = Typeface.DEFAULT_BOLD
                     textAlign = Paint.Align.CENTER
                     isAntiAlias = true
                 }
                 val plural = if (defaultCount == 1) "defaulter" else "defaulters"
-                canvas.drawText("$defaultCount $plural", width / 2f, lotY + 78f, defaulterPaint)
+                val monthsPart = if (totalMonths > 0) {
+                    " · $totalMonths month${if (totalMonths == 1) "" else "s"}"
+                } else ""
+                val line = "$defaultCount $plural$monthsPart"
+                defaulterPaint.textSize = fitToWidth(line, width - 2 * EDGE_INSET, defaulterPaint, max = 24f, min = 14f)
+                canvas.drawText(line, width / 2f, lotY + 78f, defaulterPaint)
             }
 
             val fileName = "LOT_${lotNumber}_${System.currentTimeMillis()}.png"
@@ -96,13 +112,32 @@ object LotImageGenerator {
             null
         }
     }
-    
+
+    /**
+     * Walks text size down from [max] toward [min] until the rendered width
+     * fits inside [maxWidth]. Keeps the banner readable on high-count LOTs
+     * without ever clipping or wrapping.
+     */
+    private fun fitToWidth(
+        text: String,
+        maxWidth: Float,
+        paint: Paint,
+        max: Float,
+        min: Float
+    ): Float {
+        var size = max
+        while (size > min) {
+            paint.textSize = size
+            if (paint.measureText(text) <= maxWidth) return size
+            size -= 1f
+        }
+        paint.textSize = min
+        return min
+    }
+
     fun getShareableUri(context: Context, file: File) = FileProvider.getUriForFile(
         context,
         "${context.packageName}.provider",
         file
     )
 }
-
-
-

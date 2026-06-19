@@ -67,6 +67,7 @@ import com.qrscanner.app.ui.theme.PrimaryOrange
 import com.qrscanner.app.ui.theme.TextSecondary
 import com.qrscanner.app.ui.theme.WarningAmber
 import com.qrscanner.app.util.LotImageGenerator
+import com.qrscanner.app.util.MonthYear
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -95,6 +96,13 @@ fun SessionDetailScreen(
 
     val totalRdNumbers = session?.totalRdNumbers ?: 0
     val displayNumber = session?.displayNumber ?: 0
+    val sessionAnchor = remember(session?.endTime, session?.startTime) {
+        val anchorEpoch = session?.endTime ?: session?.startTime ?: System.currentTimeMillis()
+        MonthYear.fromEpochMillis(anchorEpoch)
+    }
+    val totalDefaulterMonths by app.database.rdNumberDao()
+        .observeTotalDefaulterMonthsForSession(sessionId)
+        .collectAsState(initial = 0)
 
     Box(
         modifier = Modifier
@@ -140,7 +148,12 @@ fun SessionDetailScreen(
                     Text(
                         text = buildString {
                             append("${lots.size} LOTs • $totalRdNumbers RD Numbers")
-                            if (totalDefaults > 0) append(" • $totalDefaults default${if (totalDefaults == 1) "" else "s"}")
+                            if (totalDefaults > 0) {
+                                append(" • $totalDefaults default${if (totalDefaults == 1) "" else "s"}")
+                                if (totalDefaulterMonths > 0) {
+                                    append(", $totalDefaulterMonths month${if (totalDefaulterMonths == 1) "" else "s"}")
+                                }
+                            }
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = TextSecondary
@@ -159,6 +172,7 @@ fun SessionDetailScreen(
                 items(lots, key = { it.id }) { lot ->
                     LotCard(
                         lot = lot,
+                        sessionAnchor = sessionAnchor,
                         isExpanded = lot.id in expandedLotIds,
                         onToggleExpanded = {
                             expandedLotIds = if (lot.id in expandedLotIds) {
@@ -186,6 +200,7 @@ private val LongSetSaver: Saver<Set<Long>, List<Long>> = Saver(
 @Composable
 private fun LotCard(
     lot: ScanLot,
+    sessionAnchor: MonthYear,
     isExpanded: Boolean,
     onToggleExpanded: () -> Unit
 ) {
@@ -202,6 +217,10 @@ private fun LotCard(
     val rdNumberCount = rdNumberStrings.size
     val defaulters = rdNumberEntities.filter { it.monthsPaid > 1 }
     val defaultCount = defaulters.size
+    val resolvedMonths = remember(defaulters, sessionAnchor) {
+        defaulters.associate { it.id to MonthYear.resolveOrAuto(it.monthsList, it.monthsPaid, sessionAnchor) }
+    }
+    val totalMonthsInLot = resolvedMonths.values.sumOf { it.size }
 
     fun copyToClipboard() {
         try {
@@ -217,7 +236,11 @@ private fun LotCard(
     fun buildShareText(): String {
         val numbers = rdNumberStrings.joinToString(", ")
         if (defaulters.isEmpty()) return numbers
-        val defaulterLine = defaulters.joinToString(", ") { "${it.number} (${it.monthsPaid}m)" }
+        val defaulterLine = defaulters.joinToString(", ") { rd ->
+            val months = resolvedMonths[rd.id].orEmpty()
+            val formatted = months.joinToString(", ") { it.formatExport() }
+            "${rd.number} ($formatted)"
+        }
         return "$numbers\n\nDefaulters: $defaulterLine"
     }
 
@@ -227,7 +250,8 @@ private fun LotCard(
                 context,
                 lot.lotNumber,
                 rdNumberCount,
-                defaultCount
+                defaultCount,
+                totalMonthsInLot
             )
             val shareText = buildShareText()
 
@@ -384,6 +408,7 @@ private fun LotCard(
                                 modifier = Modifier.weight(1f)
                             )
                             if (rd.monthsPaid > 1) {
+                                val months = resolvedMonths[rd.id].orEmpty()
                                 Box(
                                     modifier = Modifier
                                         .background(
@@ -393,9 +418,10 @@ private fun LotCard(
                                         .padding(horizontal = 8.dp, vertical = 3.dp)
                                 ) {
                                     Text(
-                                        text = "${rd.monthsPaid} mo",
+                                        text = months.joinToString(", ") {
+                                            it.formatShort().substringBefore(' ')
+                                        },
                                         style = MaterialTheme.typography.labelSmall.copy(
-                                            fontFamily = FontFamily.Monospace,
                                             fontWeight = FontWeight.Bold,
                                             color = WarningAmber
                                         )
