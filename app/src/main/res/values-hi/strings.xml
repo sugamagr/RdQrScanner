@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">RD बुक स्कैनर</string>
+
+    <!-- Notification channels -->
+    <string name="channel_sync_success">सिंक पुष्टि</string>
+    <string name="channel_sync_success_desc">जब आपकी स्कैन की हुई सेशन क्लाउड पर अपलोड हो जाती है।</string>
+    <string name="channel_sync_error">सिंक समस्याएँ</string>
+    <string name="channel_sync_error_desc">जब सिंक बार-बार फेल हो रहा हो तो रिट्राई के लिए।</string>
+    <string name="channel_remote_edit">मालिक के अपडेट</string>
+    <string name="channel_remote_edit_desc">जब मालिक वेब पोर्टल से कोई बदलाव करता है।</string>
+
+    <!-- Notification bodies -->
+    <string name="notif_sync_success_title">सेशन #%1$d सिंक हो गया</string>
+    <string name="notif_sync_success_body">%1$d LOTs, %2$d RD नंबर अपलोड हुए · %3$s</string>
+    <string name="notif_sync_error_title">सिंक रुका है</string>
+    <plurals name="notif_sync_error_body">
+        <item quantity="one">%d सेशन अटका है · रिट्राई के लिए टैप करें</item>
+        <item quantity="other">%d सेशन अटके हैं · रिट्राई के लिए टैप करें</item>
+    </plurals>
+    <string name="notif_remote_edit_title">मालिक ने सेशन एडिट किया</string>
+    <string name="notif_remote_edit_body">सेशन #%1$d · %2$d डिफ़ॉल्टर महीने अपडेट हुए</string>
+
+    <!-- Sign-in -->
+    <string name="signin_title">साइन इन करें</string>
+    <string name="signin_subtitle">अपने दुकान के मालिक खाते से साइन इन करें।</string>
+    <string name="signin_email_label">ईमेल</string>
+    <string name="signin_password_label">पासवर्ड</string>
+    <string name="signin_button">साइन इन</string>
+    <string name="signin_loading">साइन इन हो रहा है…</string>
+    <string name="signin_error_generic">साइन इन नहीं हो पाया। ईमेल और पासवर्ड चेक करें।</string>
+    <string name="signin_error_no_network">नेटवर्क नहीं है। ऑनलाइन होने पर फिर से कोशिश करें।</string>
+
+    <!-- First-run setup -->
+    <string name="firstrun_title">फ़ोन का नाम रखें</string>
+    <string name="firstrun_subtitle">पोर्टल पर फ़ोन पहचानने में आसानी होगी।</string>
+    <string name="firstrun_device_label">फ़ोन का नाम</string>
+    <string name="firstrun_device_hint">जैसे काउंटर फ़ोन</string>
+    <string name="firstrun_operator_label">आपका नाम</string>
+    <string name="firstrun_operator_hint">जैसे रवि</string>
+    <string name="firstrun_continue">आगे बढ़ें</string>
+
+    <!-- Notification permission -->
+    <string name="notifperm_title">सिंक में बने रहें</string>
+    <string name="notifperm_subtitle">हम आपको बताएँगे जब दूसरे फ़ोन नए सेशन अपलोड करें या मालिक वेब से कुछ एडिट करे।</string>
+    <string name="notifperm_enable">नोटिफिकेशन चालू करें</string>
+    <string name="notifperm_skip">अभी नहीं</string>
+
+    <!-- Settings -->
+    <string name="settings_title">सेटिंग्स</string>
+    <string name="settings_signed_in_as">%1$s से साइन इन है</string>
+    <string name="settings_device_name">फ़ोन का नाम</string>
+    <string name="settings_operator_name">ऑपरेटर</string>
+    <string name="settings_switch_operator">ऑपरेटर बदलें</string>
+    <string name="settings_sign_out">साइन आउट</string>
+    <string name="settings_sync_status">सिंक स्थिति</string>
+    <string name="settings_force_push">अभी पुश करें</string>
+    <string name="settings_force_pull">अभी पुल करें</string>
+    <string name="settings_diagnostics">सिंक डायग्नोस्टिक्स</string>
+
+    <!-- Pill states -->
+    <string name="pill_not_signed_in">साइन इन के लिए टैप करें</string>
+    <string name="pill_initializing">कनेक्ट हो रहा है…</string>
+    <string name="pill_synced">सब सिंक है</string>
+    <string name="pill_pending">%d बाकी</string>
+    <string name="pill_syncing">सिंक हो रहा है…</string>
+    <string name="pill_error">सिंक एरर · टैप करें</string>
+
+    <!-- Banner -->
+    <string name="banner_title_one">1 नया अपडेट</string>
+    <string name="banner_title_many">%d नए अपडेट</string>
+    <string name="banner_dismiss">हटाएँ</string>
+</resources>
