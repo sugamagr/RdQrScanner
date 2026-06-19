@@ -67,4 +67,30 @@ interface RdNumberDao {
         WHERE sl.sessionId = :sessionId AND rn.monthsPaid > 1
     """)
     fun observeTotalDefaulterMonthsForSession(sessionId: Long): Flow<Int>
+
+    // ── Sync push helpers (Phase 2 T2.1a) ────────────────────────────────
+
+    @Query("SELECT * FROM rd_numbers WHERE syncStatus IN ('DIRTY','SYNC_ERROR') AND lotId = :lotId ORDER BY position ASC")
+    suspend fun getDirtyForLot(lotId: Long): List<RdNumber>
+
+    @Query("UPDATE rd_numbers SET syncStatus = 'SYNCING' WHERE id = :id AND syncStatus IN ('DIRTY','SYNC_ERROR')")
+    suspend fun markSyncing(id: Long)
+
+    @Query("UPDATE rd_numbers SET syncStatus = 'SYNCED', syncedAt = :syncedAt, cloudId = COALESCE(cloudId, :cloudId), lastSyncError = NULL WHERE id = :id")
+    suspend fun markSynced(id: Long, syncedAt: Long, cloudId: String)
+
+    @Query("UPDATE rd_numbers SET syncStatus = 'SYNC_ERROR', lastSyncError = :error WHERE id = :id")
+    suspend fun markSyncError(id: Long, error: String)
+
+    @Query(
+        """
+        UPDATE rd_numbers
+        SET syncStatus = 'DIRTY', updatedAt = :updatedAt
+        WHERE lotId IN (SELECT id FROM scan_lots WHERE sessionId = :sessionId) AND syncStatus = 'LOCAL_ONLY'
+        """
+    )
+    suspend fun markRdNumbersDirtyForSession(sessionId: Long, updatedAt: Long)
+
+    @Query("UPDATE rd_numbers SET syncStatus = 'DIRTY', updatedAt = :updatedAt WHERE id = :id")
+    suspend fun markDirty(id: Long, updatedAt: Long)
 }

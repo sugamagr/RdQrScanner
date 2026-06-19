@@ -57,6 +57,58 @@ interface ScanSessionDao {
         GROUP BY sl.sessionId
     """)
     fun getDefaultCountsBySession(): Flow<List<SessionDefaultCount>>
+
+    // ── Sync push helpers (Phase 2 T2.1a) ────────────────────────────────
+
+    @Query("SELECT * FROM scan_sessions WHERE syncStatus IN ('DIRTY','SYNC_ERROR') AND isActive = 0 ORDER BY updatedAt ASC LIMIT :limit")
+    suspend fun getDirtyForPush(limit: Int = 500): List<ScanSession>
+
+    @Query("UPDATE scan_sessions SET syncStatus = 'SYNCING' WHERE id = :id AND syncStatus IN ('DIRTY','SYNC_ERROR')")
+    suspend fun markSyncing(id: Long)
+
+    @Query("UPDATE scan_sessions SET syncStatus = 'SYNCED', syncedAt = :syncedAt, cloudId = COALESCE(cloudId, :cloudId), lastSyncError = NULL WHERE id = :id")
+    suspend fun markSynced(id: Long, syncedAt: Long, cloudId: String)
+
+    @Query("UPDATE scan_sessions SET syncStatus = 'SYNC_ERROR', lastSyncError = :error WHERE id = :id")
+    suspend fun markSyncError(id: Long, error: String)
+
+    @Query("SELECT COUNT(*) FROM scan_sessions WHERE syncStatus IN ('DIRTY','SYNC_ERROR') AND isActive = 0")
+    fun observePendingCount(): Flow<Int>
+
+    /**
+     * Flips the entire session subtree (session + its lots + its rd_numbers)
+     * from LOCAL_ONLY to DIRTY in one atomic UPDATE pass. Called at finalize
+     * time once the cloud identity (cloudId, deviceCloudId, operatorName) is
+     * stamped on the session row by [stampFinalizeMetadata]. Wrapped in
+     * @Transaction at the SyncRepository level so a process kill between
+     * the three writes can't half-promote a session.
+     */
+    @Query(
+        """
+        UPDATE scan_sessions
+        SET syncStatus = 'DIRTY', updatedAt = :updatedAt
+        WHERE id = :sessionId AND syncStatus = 'LOCAL_ONLY'
+        """
+    )
+    suspend fun markSessionDirty(sessionId: Long, updatedAt: Long)
+
+    @Query(
+        """
+        UPDATE scan_sessions
+        SET cloudId = COALESCE(cloudId, :cloudId),
+            deviceCloudId = :deviceCloudId,
+            operatorName = :operatorName,
+            updatedAt = :updatedAt
+        WHERE id = :sessionId
+        """
+    )
+    suspend fun stampFinalizeMetadata(
+        sessionId: Long,
+        cloudId: String,
+        deviceCloudId: String,
+        operatorName: String?,
+        updatedAt: Long
+    )
 }
 
 data class SessionDefaultCount(
@@ -91,6 +143,29 @@ interface ScanLotDao {
           AND NOT EXISTS (SELECT 1 FROM rd_numbers WHERE lotId = :lotId)
     """)
     suspend fun deleteIfEmpty(lotId: Long)
+
+    // ── Sync push helpers (Phase 2 T2.1a) ────────────────────────────────
+
+    @Query("SELECT * FROM scan_lots WHERE syncStatus IN ('DIRTY','SYNC_ERROR') AND sessionId = :sessionId ORDER BY lotNumber ASC")
+    suspend fun getDirtyForSession(sessionId: Long): List<ScanLot>
+
+    @Query("UPDATE scan_lots SET syncStatus = 'SYNCING' WHERE id = :id AND syncStatus IN ('DIRTY','SYNC_ERROR')")
+    suspend fun markSyncing(id: Long)
+
+    @Query("UPDATE scan_lots SET syncStatus = 'SYNCED', syncedAt = :syncedAt, cloudId = COALESCE(cloudId, :cloudId), lastSyncError = NULL WHERE id = :id")
+    suspend fun markSynced(id: Long, syncedAt: Long, cloudId: String)
+
+    @Query("UPDATE scan_lots SET syncStatus = 'SYNC_ERROR', lastSyncError = :error WHERE id = :id")
+    suspend fun markSyncError(id: Long, error: String)
+
+    @Query(
+        """
+        UPDATE scan_lots
+        SET syncStatus = 'DIRTY', updatedAt = :updatedAt
+        WHERE sessionId = :sessionId AND syncStatus = 'LOCAL_ONLY'
+        """
+    )
+    suspend fun markLotsDirtyForSession(sessionId: Long, updatedAt: Long)
 
 }
 
