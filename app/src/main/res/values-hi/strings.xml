@@ -26,6 +26,12 @@
     </plurals>
     <string name="notif_remote_edit_title">मालिक ने सेशन एडिट किया</string>
     <string name="notif_remote_edit_body">सेशन #%1$d · %2$d डिफ़ॉल्टर महीने अपडेट हुए</string>
+    <string name="notif_remote_session_finalized_title">सेशन #%1$d सिंक हुआ</string>
+    <string name="notif_remote_session_finalized_body">%1$s ने दूसरे फ़ोन पर सेशन पूरा किया।</string>
+    <string name="notif_remote_defaulter_edit_title">सेशन #%1$d अपडेट हुआ</string>
+    <string name="notif_remote_defaulter_edit_body">%1$s ने डिफ़ॉल्टर महीने बदले।</string>
+    <string name="notif_remote_session_deleted_title">सेशन #%1$d हटाया गया</string>
+    <string name="notif_remote_session_deleted_body">%1$s ने हटाया।</string>
 
     <!-- Sign-in -->
     <string name="signin_title">साइन इन करें</string>

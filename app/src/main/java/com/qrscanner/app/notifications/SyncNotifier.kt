@@ -12,6 +12,7 @@ import androidx.core.content.ContextCompat
 import com.qrscanner.app.MainActivity
 import com.qrscanner.app.QRScannerApp
 import com.qrscanner.app.R
+import com.qrscanner.app.data.SyncEventType
 
 /**
  * Owns the two sync system-tray notification channels for Phase 2 per
@@ -113,6 +114,42 @@ class SyncNotifier(private val context: Context) {
     }
 
     /**
+     * Spec §15.5.2 Channel C — fires when a pull merges a change that
+     * originated elsewhere (another phone or the portal). The id is
+     * deterministic from (type, displayNumber) so successive edits to
+     * the same session collapse into one tray slot.
+     */
+    fun notifyRemoteEdit(type: SyncEventType, displayNumber: Int, originLabel: String) {
+        if (!canPostNotifications()) return
+        val (title, body) = when (type) {
+            SyncEventType.REMOTE_SESSION_FINALIZED -> Pair(
+                context.getString(R.string.notif_remote_session_finalized_title, displayNumber),
+                context.getString(R.string.notif_remote_session_finalized_body, originLabel)
+            )
+            SyncEventType.REMOTE_DEFAULTER_EDIT,
+            SyncEventType.PORTAL_DEFAULTER_EDIT -> Pair(
+                context.getString(R.string.notif_remote_defaulter_edit_title, displayNumber),
+                context.getString(R.string.notif_remote_defaulter_edit_body, originLabel)
+            )
+            SyncEventType.REMOTE_SESSION_DELETED -> Pair(
+                context.getString(R.string.notif_remote_session_deleted_title, displayNumber),
+                context.getString(R.string.notif_remote_session_deleted_body, originLabel)
+            )
+        }
+        val notificationId = NOTIF_ID_REMOTE_EDIT_BASE +
+            (type.ordinal * 100_000) + (displayNumber % 100_000)
+        val notification = NotificationCompat.Builder(context, QRScannerApp.CHANNEL_REMOTE_EDIT)
+            .setSmallIcon(android.R.drawable.stat_notify_sync)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setAutoCancel(true)
+            .setContentIntent(buildOpenAppIntent(requestCode = notificationId))
+            .build()
+        runCatching { manager.notify(notificationId, notification) }
+    }
+
+    /**
      * Fires (or refreshes) the sync-error notification. Called by
      * SyncRepository when the failure streak reaches the configured
      * threshold. Re-firing with the same id [NOTIF_ID_ERROR] replaces
@@ -174,5 +211,6 @@ class SyncNotifier(private val context: Context) {
         private const val NOTIF_ID_ERROR = 9001
         private const val NOTIF_ID_BULK_SUCCESS = 9002
         private const val NOTIF_ID_SUCCESS_BASE = 10_000
+        private const val NOTIF_ID_REMOTE_EDIT_BASE = 20_000
     }
 }

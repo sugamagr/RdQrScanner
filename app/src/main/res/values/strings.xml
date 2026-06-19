@@ -26,6 +26,12 @@
     </plurals>
     <string name="notif_remote_edit_title">Owner edited a session</string>
     <string name="notif_remote_edit_body">Session #%1$d · %2$d defaulter months updated</string>
+    <string name="notif_remote_session_finalized_title">Session #%1$d synced</string>
+    <string name="notif_remote_session_finalized_body">%1$s finished a session on another phone.</string>
+    <string name="notif_remote_defaulter_edit_title">Session #%1$d updated</string>
+    <string name="notif_remote_defaulter_edit_body">%1$s edited defaulter months.</string>
+    <string name="notif_remote_session_deleted_title">Session #%1$d deleted</string>
+    <string name="notif_remote_session_deleted_body">Removed by %1$s.</string>
 
     <!-- Sign-in screen -->
     <string name="signin_title">Sign in</string>

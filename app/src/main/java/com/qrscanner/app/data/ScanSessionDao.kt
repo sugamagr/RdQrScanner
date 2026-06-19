@@ -127,6 +127,9 @@ interface ScanSessionDao {
     @Query("SELECT * FROM scan_sessions WHERE cloudId = :cloudId LIMIT 1")
     suspend fun findByCloudId(cloudId: String): ScanSession?
 
+    @Query("SELECT cloudId FROM scan_sessions WHERE id = :localId LIMIT 1")
+    suspend fun findCloudIdByLocalId(localId: Long): String?
+
     /**
      * Last-writer-wins merge for an inbound pulled row per spec §11.
      * Overwrites the row IF the incoming `updatedAt` is strictly newer

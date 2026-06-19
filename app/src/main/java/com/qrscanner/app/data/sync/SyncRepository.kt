@@ -12,6 +12,8 @@ import com.qrscanner.app.data.AppDatabase
 import com.qrscanner.app.data.RdNumber
 import com.qrscanner.app.data.ScanLot
 import com.qrscanner.app.data.ScanSession
+import com.qrscanner.app.data.SyncEvent
+import com.qrscanner.app.data.SyncEventType
 import com.qrscanner.app.notifications.SyncNotifier
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,6 +36,7 @@ class SyncRepository(
     private val lotDao = database.scanLotDao()
     private val rdNumberDao = database.rdNumberDao()
     private val deviceSettingsDao = database.deviceSettingsDao()
+    private val syncEventDao = database.syncEventDao()
 
     // Track consecutive runPush failure cycles. Spec §15.5.2 fires the
     // sync_error notification on the 3rd consecutive failure and re-fires
@@ -517,28 +520,114 @@ class SyncRepository(
             return Result.failure(e)
         }
 
-        database.withTransaction {
-            mergeSessions(delta.sessions)
+        // Own-device cloudId — banner events originating from this phone are
+        // suppressed so the user doesn't see "Counter Phone synced Session #47"
+        // about themselves (spec §15.5.3). May be null on the rare first-pull
+        // after sign-in before first-run setup; null comparisons against
+        // null always fail the equality, so no spurious suppression.
+        val ownDeviceCloudId = settings.deviceCloudId
+
+        val notices = database.withTransaction {
+            val emitted = mutableListOf<RemoteEditNotice>()
+            emitted += mergeSessions(delta.sessions, ownDeviceCloudId)
             mergeLots(delta.lots)
-            mergeRdNumbers(delta.rdNumbers)
+            emitted += mergeRdNumbers(delta.rdNumbers, delta.sessions, ownDeviceCloudId)
             if (delta.highWaterMark > since) {
                 deviceSettingsDao.updateLastPulledAt(delta.highWaterMark)
             }
+            for (notice in emitted) {
+                syncEventDao.insert(notice.toEvent())
+            }
+            emitted.toList()
         }
 
         val now = System.currentTimeMillis()
         updateSummary { it.copy(lastSuccessfulPullAt = now, lastErrorMessage = null) }
+        notifyRemoteEdits(notices)
         return Result.success(Unit)
     }
 
-    private suspend fun mergeSessions(dtos: List<com.qrscanner.app.cloud.dto.ScanSessionDto>) {
+    /**
+     * Fires Channel C "owner edited / other phone synced" tray
+     * notifications (spec §15.5.2). Per-event individually to keep
+     * tap-routing simple; the in-app banner UI dedupes further.
+     */
+    private fun notifyRemoteEdits(notices: List<RemoteEditNotice>) {
+        if (notices.isEmpty()) return
+        for (notice in notices) {
+            runCatching {
+                notifier.notifyRemoteEdit(
+                    type = notice.type,
+                    displayNumber = notice.displayNumber,
+                    originLabel = notice.originLabel
+                )
+            }
+        }
+    }
+
+    /**
+     * Single carrier for "remote change worth telling the user about"
+     * produced by the merge functions and consumed by both the
+     * SyncEvent log writer (in-app banner) and the SyncNotifier (tray).
+     * Keeping the two consumers off the same DTO avoids them drifting.
+     */
+    private data class RemoteEditNotice(
+        val type: SyncEventType,
+        val displayNumber: Int,
+        val sessionCloudId: String,
+        val rdNumberCloudId: String? = null,
+        val originDeviceCloudId: String?,
+        val originDeviceName: String?,
+        val originOperatorName: String?,
+        val occurredAt: Long,
+        val summary: String
+    ) {
+        val originLabel: String
+            get() = when {
+                originDeviceCloudId == null -> "Portal"
+                !originOperatorName.isNullOrBlank() -> originOperatorName
+                !originDeviceName.isNullOrBlank() -> originDeviceName
+                else -> "another phone"
+            }
+
+        fun toEvent(): SyncEvent = SyncEvent(
+            occurredAt = occurredAt,
+            type = type,
+            sessionCloudId = sessionCloudId,
+            rdNumberCloudId = rdNumberCloudId,
+            originDeviceCloudId = originDeviceCloudId,
+            originDeviceName = originDeviceName,
+            originOperatorName = originOperatorName,
+            payloadSummary = summary
+        )
+    }
+
+    private suspend fun mergeSessions(
+        dtos: List<com.qrscanner.app.cloud.dto.ScanSessionDto>,
+        ownDeviceCloudId: String?
+    ): List<RemoteEditNotice> {
+        val notices = mutableListOf<RemoteEditNotice>()
         for (dto in dtos) {
             val existing = sessionDao.findByCloudId(dto.id)
             val updatedAt = IsoTime.toEpochMillis(dto.updatedAt)
             val deletedAt = IsoTime.toEpochMillisOrNull(dto.deletedAt)
+            val isOwn = dto.deviceId == ownDeviceCloudId
             if (existing == null) {
                 sessionDao.insert(SessionMapper.toEntity(dto))
+                if (!isOwn && deletedAt == null) {
+                    notices += RemoteEditNotice(
+                        type = SyncEventType.REMOTE_SESSION_FINALIZED,
+                        displayNumber = dto.displayNumber,
+                        sessionCloudId = dto.id,
+                        originDeviceCloudId = dto.deviceId,
+                        originDeviceName = null,
+                        originOperatorName = dto.operatorName,
+                        occurredAt = updatedAt,
+                        summary = "finalized Session #${dto.displayNumber} (${dto.totalLots} LOTs)"
+                    )
+                }
             } else {
+                val wasAlive = existing.deletedAt == null
                 sessionDao.mergeFromCloud(
                     id = existing.id,
                     cloudId = dto.id,
@@ -552,8 +641,21 @@ class SyncRepository(
                     updatedAt = updatedAt,
                     deletedAt = deletedAt
                 )
+                if (!isOwn && wasAlive && deletedAt != null) {
+                    notices += RemoteEditNotice(
+                        type = SyncEventType.REMOTE_SESSION_DELETED,
+                        displayNumber = dto.displayNumber,
+                        sessionCloudId = dto.id,
+                        originDeviceCloudId = dto.deviceId,
+                        originDeviceName = null,
+                        originOperatorName = dto.operatorName,
+                        occurredAt = updatedAt,
+                        summary = "deleted Session #${dto.displayNumber}"
+                    )
+                }
             }
         }
+        return notices
     }
 
     private suspend fun mergeLots(dtos: List<com.qrscanner.app.cloud.dto.ScanLotDto>) {
@@ -582,7 +684,26 @@ class SyncRepository(
         }
     }
 
-    private suspend fun mergeRdNumbers(dtos: List<com.qrscanner.app.cloud.dto.RdNumberDto>) {
+    private suspend fun mergeRdNumbers(
+        dtos: List<com.qrscanner.app.cloud.dto.RdNumberDto>,
+        sessionDtos: List<com.qrscanner.app.cloud.dto.ScanSessionDto>,
+        ownDeviceCloudId: String?
+    ): List<RemoteEditNotice> {
+        val notices = mutableListOf<RemoteEditNotice>()
+        // Build lot.cloudId -> (session.cloudId, displayNumber, deviceId, operator)
+        // index so per-rd_number defaulter edits can attribute the change
+        // to the originating session without an extra DAO query inside the
+        // hot pull loop. We derive the lot -> session linkage from the DTOs
+        // currently being merged when possible; otherwise fall back to Room.
+        val lotToSession = mutableMapOf<String, com.qrscanner.app.cloud.dto.ScanSessionDto>()
+        if (dtos.isNotEmpty() && sessionDtos.isNotEmpty()) {
+            val sessionByCloudId = sessionDtos.associateBy { it.id }
+            for (dto in dtos) {
+                val lot = lotDao.findByCloudId(dto.lotId) ?: continue
+                val sessionCloudId = sessionDao.findCloudIdByLocalId(lot.sessionId) ?: continue
+                sessionByCloudId[sessionCloudId]?.let { lotToSession[dto.lotId] = it }
+            }
+        }
         for (dto in dtos) {
             val parent = lotDao.findByCloudId(dto.lotId)
             if (parent == null) {
@@ -592,9 +713,17 @@ class SyncRepository(
             val existing = rdNumberDao.findByCloudId(dto.id)
             val updatedAt = IsoTime.toEpochMillis(dto.updatedAt)
             val deletedAt = IsoTime.toEpochMillisOrNull(dto.deletedAt)
+            val parentSessionDto = lotToSession[dto.lotId]
+            // Use the SESSION's deviceId for own-device suppression — the
+            // rd_number row itself doesn't carry the origin device, only
+            // the parent session does.
+            val isOwn = parentSessionDto?.deviceId == ownDeviceCloudId &&
+                ownDeviceCloudId != null
             if (existing == null) {
                 rdNumberDao.insert(RdNumberMapper.toEntity(dto).copy(lotId = parent.id))
             } else {
+                val priorMonthsPaid = existing.monthsPaid
+                val priorMonthsList = existing.monthsList
                 rdNumberDao.mergeFromCloud(
                     id = existing.id,
                     cloudId = dto.id,
@@ -607,8 +736,32 @@ class SyncRepository(
                     updatedAt = updatedAt,
                     deletedAt = deletedAt
                 )
+                // Banner-worthy only when defaulter data actually changed
+                // AND the merge actually applied (LWW gate at mergeFromCloud
+                // ensures we only emit when remote.updatedAt > local). Mid-
+                // edit pull races where local already had the values are
+                // silently no-op.
+                val changed = priorMonthsPaid != dto.monthsPaid ||
+                    priorMonthsList != dto.monthsList
+                if (!isOwn && changed && deletedAt == null && parentSessionDto != null) {
+                    notices += RemoteEditNotice(
+                        type = if (parentSessionDto.deviceId.isBlank())
+                            SyncEventType.PORTAL_DEFAULTER_EDIT
+                        else
+                            SyncEventType.REMOTE_DEFAULTER_EDIT,
+                        displayNumber = parentSessionDto.displayNumber,
+                        sessionCloudId = parentSessionDto.id,
+                        rdNumberCloudId = dto.id,
+                        originDeviceCloudId = parentSessionDto.deviceId.ifBlank { null },
+                        originDeviceName = null,
+                        originOperatorName = parentSessionDto.operatorName,
+                        occurredAt = updatedAt,
+                        summary = "edited defaulter on RD #${dto.number}"
+                    )
+                }
             }
         }
+        return notices
     }
 
     /**
