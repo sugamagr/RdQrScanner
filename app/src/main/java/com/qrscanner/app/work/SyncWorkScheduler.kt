@@ -35,9 +35,27 @@ class SyncWorkScheduler(context: Context) {
         )
     }
 
-    /** Cancel any pending push. Called on sign-out by [SettingsScreen]. */
+    /**
+     * Enqueue a pull with KEEP semantics: if a pull is already in flight,
+     * don't displace it. Pulls are idempotent — replaying the same delta
+     * is a no-op via mergeFromCloud's updated_at filter — so we prefer
+     * letting the running one finish over churning the queue.
+     *
+     * Called from MainActivity on app launch / SessionHistory open / the
+     * lifecycle-scoped 5-min foreground poll (Phase 3 T3.4).
+     */
+    fun enqueuePull() {
+        workManager.enqueueUniqueWork(
+            SyncPullWorker.UNIQUE_WORK_NAME,
+            ExistingWorkPolicy.KEEP,
+            SyncPullWorker.buildRequest()
+        )
+    }
+
+    /** Cancel both pending workers. Called on sign-out by [SettingsScreen]. */
     fun cancelAll() {
         workManager.cancelUniqueWork(SyncPushWorker.UNIQUE_WORK_NAME)
+        workManager.cancelUniqueWork(SyncPullWorker.UNIQUE_WORK_NAME)
     }
 
     /**
