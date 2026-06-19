@@ -1029,7 +1029,9 @@ enum class SyncEventType {
 }
 ```
 
-Populated by `SyncRepository.handleRemoteChange()` after a pull/realtime payload is merged. Bounded to the last 100 rows (older rows pruned in a periodic worker). The banner reads:
+Populated by `SyncRepository.handleRemoteChange()` after a pull/realtime payload is merged. Bounded by two independent rules applied as an `OR` in the prune query: **keep at most the 100 most-recent rows** AND **drop anything older than 7 days regardless of count**. Whichever rule cuts more aggressively wins on any given prune pass. The periodic worker that runs the prune lands in Phase 5; until then `sync_events` is append-only.
+
+The banner reads:
 
 ```kotlin
 @Query("SELECT * FROM sync_events WHERE occurredAt > :since ORDER BY occurredAt DESC LIMIT 20")

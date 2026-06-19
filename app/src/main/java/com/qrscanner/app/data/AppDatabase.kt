@@ -58,6 +58,10 @@ abstract class AppDatabase : RoomDatabase() {
          *
          * Two new tables for the sync engine itself:
          *   - device_settings: single-row key/value with CHECK(id = 1).
+         *     NB: the CHECK constraint exists on upgraded DBs but NOT on
+         *     fresh installs (Room's entity-generated CREATE TABLE doesn't
+         *     emit CHECK). The DAO surface enforces id = 1 in every query,
+         *     so the divergence is invisible at runtime.
          *   - sync_events: bounded log feeding the in-app banner (§15.5.5).
          *
          * Backfill rules (see spec §17):
@@ -67,8 +71,16 @@ abstract class AppDatabase : RoomDatabase() {
          *     until the user finalizes them).
          *   - updatedAt seeded from the row's natural timestamp (startTime /
          *     timestamp / scannedAt) so conflict resolution has a defensible
-         *     starting value.
+         *     starting value. COALESCE falls back to current epoch ms in the
+         *     impossible-but-defensive case where the natural timestamp is
+         *     NULL.
          *   - device_settings seeded with id = 1, all nullable columns null.
+         *
+         * Idempotency: ADD COLUMN itself is NOT idempotent (replaying throws
+         * "duplicate column"), but Room never replays a completed migration
+         * because the schema_version pragma bumps atomically at the end of
+         * the transaction. So in practice this migration runs at most once
+         * per device per upgrade.
          */
         private val MIGRATION_5_6 = object : Migration(5, 6) {
             override fun migrate(database: SupportSQLiteDatabase) {
@@ -103,12 +115,12 @@ abstract class AppDatabase : RoomDatabase() {
                 database.execSQL("""
                     UPDATE `scan_lots`
                     SET `syncStatus` = 'DIRTY',
-                        `updatedAt` = `timestamp`
+                        `updatedAt` = COALESCE(`timestamp`, strftime('%s','now') * 1000)
                     WHERE `sessionId` IN (SELECT `id` FROM `scan_sessions` WHERE `isActive` = 0)
                 """)
                 database.execSQL("""
                     UPDATE `scan_lots`
-                    SET `updatedAt` = `timestamp`
+                    SET `updatedAt` = COALESCE(`timestamp`, strftime('%s','now') * 1000)
                     WHERE `sessionId` IN (SELECT `id` FROM `scan_sessions` WHERE `isActive` = 1)
                 """)
 
@@ -122,7 +134,7 @@ abstract class AppDatabase : RoomDatabase() {
                 database.execSQL("""
                     UPDATE `rd_numbers`
                     SET `syncStatus` = 'DIRTY',
-                        `updatedAt` = `scannedAt`
+                        `updatedAt` = COALESCE(`scannedAt`, strftime('%s','now') * 1000)
                     WHERE `lotId` IN (
                         SELECT `id` FROM `scan_lots` WHERE `sessionId` IN (
                             SELECT `id` FROM `scan_sessions` WHERE `isActive` = 0
@@ -131,7 +143,7 @@ abstract class AppDatabase : RoomDatabase() {
                 """)
                 database.execSQL("""
                     UPDATE `rd_numbers`
-                    SET `updatedAt` = `scannedAt`
+                    SET `updatedAt` = COALESCE(`scannedAt`, strftime('%s','now') * 1000)
                     WHERE `lotId` IN (
                         SELECT `id` FROM `scan_lots` WHERE `sessionId` IN (
                             SELECT `id` FROM `scan_sessions` WHERE `isActive` = 1
