@@ -105,6 +105,8 @@ import com.qrscanner.app.data.RdNumber
 import com.qrscanner.app.data.ScanLot
 import com.qrscanner.app.data.ScanSession
 import com.qrscanner.app.data.isValidRdNumber
+import com.qrscanner.app.ui.components.DefaulterAskDialog
+import com.qrscanner.app.ui.components.DefaulterEditDialog
 import com.qrscanner.app.ui.theme.AccentCoral
 import com.qrscanner.app.ui.theme.AccentMint
 import com.qrscanner.app.ui.theme.ErrorRed
@@ -189,6 +191,15 @@ private fun RDCameraScreen(
     var showEndSessionDialog by remember { mutableStateOf(false) }
     var showFinishLotDialog by remember { mutableStateOf(false) }
     var lastScanFeedback by remember { mutableStateOf<ScanFeedback?>(null) }
+
+    // Defaulter flow state — set after a successful LOT save, drives the
+    // ask -> (optional edit) -> post-save sequence.
+    var showDefaulterAskDialog by remember { mutableStateOf(false) }
+    var showDefaulterEditDialog by remember { mutableStateOf(false) }
+    var defaulterLotId by remember { mutableStateOf<Long?>(null) }
+    var defaulterLotNumber by remember { mutableIntStateOf(0) }
+    var defaulterRows by remember { mutableStateOf<List<RdNumber>>(emptyList()) }
+    var pendingPostSave by remember { mutableStateOf<PostSave?>(null) }
     
     // Trigger for processing scanned value on main thread
     var scanTrigger by remember { mutableStateOf(0) }
@@ -282,7 +293,8 @@ private fun RDCameraScreen(
     }
 
     // Pause camera analysis whenever any dialog is open; resume when all closed
-    val anyDialogOpen = showEndSessionDialog || showFinishLotDialog
+    val anyDialogOpen = showEndSessionDialog || showFinishLotDialog ||
+            showDefaulterAskDialog || showDefaulterEditDialog
     LaunchedEffect(anyDialogOpen) {
         if (anyDialogOpen) {
             scanningEnabledRef.set(false)
@@ -300,126 +312,106 @@ private fun RDCameraScreen(
             Toast.makeText(context, "Removed: $removed", Toast.LENGTH_SHORT).show()
         }
     }
-    
+
+    suspend fun finalizeSession(session: ScanSession) {
+        if (totalLotsInSession > 0) {
+            val displayNumber = app.database.scanSessionDao().getNextDisplayNumber()
+            app.database.scanSessionDao().endSession(
+                id = session.id,
+                endTime = System.currentTimeMillis(),
+                totalLots = totalLotsInSession,
+                totalRdNumbers = allSessionNumbers.size,
+                displayNumber = displayNumber
+            )
+            Toast.makeText(
+                context,
+                "Session #$displayNumber saved! $totalLotsInSession LOTs, ${allSessionNumbers.size} RD numbers",
+                Toast.LENGTH_LONG
+            ).show()
+            onNavigateToSession(session.id)
+        } else {
+            app.database.scanSessionDao().deleteById(session.id)
+            Toast.makeText(context, "Empty session discarded", Toast.LENGTH_SHORT).show()
+            onNavigateBack()
+        }
+    }
+
+    fun executePostSave(action: PostSave) {
+        scope.launch {
+            when (action) {
+                PostSave.Continue -> {
+                    Toast.makeText(context, "LOT ${currentLotNumber - 1} saved! Ready for next LOT.", Toast.LENGTH_SHORT).show()
+                    delay(300)
+                    scanningEnabledRef.set(true)
+                    isScanningRef.set(true)
+                }
+                PostSave.EndSession -> {
+                    currentSession?.let { finalizeSession(it) }
+                }
+            }
+        }
+    }
+
     fun finishCurrentLot(alsoEndSession: Boolean = false) {
         if (currentLotNumbers.isEmpty()) {
             if (alsoEndSession) {
-                // End session even with empty current lot
-                scope.launch {
-                    currentSession?.let { session ->
-                        if (totalLotsInSession > 0) {
-                            val displayNumber = app.database.scanSessionDao().getNextDisplayNumber()
-                            app.database.scanSessionDao().endSession(
-                                id = session.id,
-                                endTime = System.currentTimeMillis(),
-                                totalLots = totalLotsInSession,
-                                totalRdNumbers = allSessionNumbers.size,
-                                displayNumber = displayNumber
-                            )
-                            Toast.makeText(context, "Session #$displayNumber saved!", Toast.LENGTH_LONG).show()
-                            onNavigateToSession(session.id)
-                        } else {
-                            // Delete empty session
-                            app.database.scanSessionDao().deleteById(session.id)
-                            Toast.makeText(context, "Session discarded (no data)", Toast.LENGTH_SHORT).show()
-                            onNavigateBack()
-                        }
-                    }
-                }
+                scope.launch { currentSession?.let { finalizeSession(it) } }
             } else {
                 Toast.makeText(context, "No RD numbers in current LOT", Toast.LENGTH_SHORT).show()
             }
             return
         }
-        
-        // Pause scanning while saving
+
         scanningEnabledRef.set(false)
         isScanningRef.set(false)
-        
+
         scope.launch {
-            currentSession?.let { session ->
-                val lot = ScanLot(
-                    sessionId = session.id,
-                    lotNumber = currentLotNumber
+            val session = currentSession ?: return@launch
+            val savedLotNumber = currentLotNumber
+            val lotId = app.database.scanLotDao().insert(
+                ScanLot(sessionId = session.id, lotNumber = savedLotNumber)
+            )
+            val rdNumberEntities = currentLotNumbers.reversed().mapIndexed { index, number ->
+                RdNumber(lotId = lotId, number = number, position = index)
+            }
+            app.database.rdNumberDao().insertAll(rdNumberEntities)
+            val savedRows = app.database.rdNumberDao().getNumbersForLotSync(lotId)
+
+            totalLotsInSession++
+            currentLotNumber++
+            currentLotNumbers.clear()
+
+            defaulterLotId = lotId
+            defaulterLotNumber = savedLotNumber
+            defaulterRows = savedRows
+            pendingPostSave = if (alsoEndSession) PostSave.EndSession else PostSave.Continue
+            showDefaulterAskDialog = true
+        }
+    }
+
+    fun endSession() {
+        scope.launch {
+            val session = currentSession ?: return@launch
+            if (currentLotNumbers.isNotEmpty()) {
+                val savedLotNumber = currentLotNumber
+                val lotId = app.database.scanLotDao().insert(
+                    ScanLot(sessionId = session.id, lotNumber = savedLotNumber)
                 )
-                val lotId = app.database.scanLotDao().insert(lot)
                 val rdNumberEntities = currentLotNumbers.reversed().mapIndexed { index, number ->
                     RdNumber(lotId = lotId, number = number, position = index)
                 }
                 app.database.rdNumberDao().insertAll(rdNumberEntities)
-
                 totalLotsInSession++
                 currentLotNumber++
                 currentLotNumbers.clear()
-                
-                if (alsoEndSession) {
-                    // End the session with display number
-                    val displayNumber = app.database.scanSessionDao().getNextDisplayNumber()
-                    app.database.scanSessionDao().endSession(
-                        id = session.id,
-                        endTime = System.currentTimeMillis(),
-                        totalLots = totalLotsInSession,
-                        totalRdNumbers = allSessionNumbers.size,
-                        displayNumber = displayNumber
-                    )
-                    Toast.makeText(
-                        context,
-                        "Session #$displayNumber saved! $totalLotsInSession LOTs, ${allSessionNumbers.size} RD numbers",
-                        Toast.LENGTH_LONG
-                    ).show()
-                    onNavigateToSession(session.id)
-                } else {
-                    Toast.makeText(context, "LOT ${currentLotNumber - 1} saved! Ready for next LOT.", Toast.LENGTH_SHORT).show()
-                    // Re-enable scanning for next lot
-                    delay(300)
-                    scanningEnabledRef.set(true)
-                    isScanningRef.set(true)
-                }
-            }
-        }
-    }
-    
-    fun endSession() {
-        scope.launch {
-            // Save current lot if not empty
-            if (currentLotNumbers.isNotEmpty()) {
-                currentSession?.let { session ->
-                    val lot = ScanLot(
-                        sessionId = session.id,
-                        lotNumber = currentLotNumber
-                    )
-                    val lotId = app.database.scanLotDao().insert(lot)
-                    val rdNumberEntities = currentLotNumbers.reversed().mapIndexed { index, number ->
-                        RdNumber(lotId = lotId, number = number, position = index)
-                    }
-                    app.database.rdNumberDao().insertAll(rdNumberEntities)
-                    totalLotsInSession++
-                }
-            }
-            
-            // End or delete session based on whether it has data
-            currentSession?.let { session ->
-                if (totalLotsInSession > 0) {
-                    val displayNumber = app.database.scanSessionDao().getNextDisplayNumber()
-                    app.database.scanSessionDao().endSession(
-                        id = session.id,
-                        endTime = System.currentTimeMillis(),
-                        totalLots = totalLotsInSession,
-                        totalRdNumbers = allSessionNumbers.size,
-                        displayNumber = displayNumber
-                    )
-                    Toast.makeText(
-                        context,
-                        "Session #$displayNumber saved! $totalLotsInSession LOTs, ${allSessionNumbers.size} RD numbers",
-                        Toast.LENGTH_LONG
-                    ).show()
-                    onNavigateToSession(session.id)
-                } else {
-                    // Delete empty session
-                    app.database.scanSessionDao().deleteById(session.id)
-                    Toast.makeText(context, "Empty session discarded", Toast.LENGTH_SHORT).show()
-                    onNavigateBack()
-                }
+
+                defaulterLotId = lotId
+                defaulterLotNumber = savedLotNumber
+                defaulterRows = app.database.rdNumberDao().getNumbersForLotSync(lotId)
+                pendingPostSave = PostSave.EndSession
+                showDefaulterAskDialog = true
+            } else {
+                finalizeSession(session)
             }
         }
     }
@@ -975,7 +967,56 @@ private fun RDCameraScreen(
                 }
             }
         }
+
+        if (showDefaulterAskDialog) {
+            DefaulterAskDialog(
+                lotNumber = defaulterLotNumber,
+                onNo = {
+                    showDefaulterAskDialog = false
+                    pendingPostSave?.let { executePostSave(it) }
+                    pendingPostSave = null
+                },
+                onYes = {
+                    showDefaulterAskDialog = false
+                    showDefaulterEditDialog = true
+                }
+            )
+        }
+
+        if (showDefaulterEditDialog) {
+            DefaulterEditDialog(
+                lotNumber = defaulterLotNumber,
+                numbers = defaulterRows,
+                onDismiss = {
+                    showDefaulterEditDialog = false
+                    pendingPostSave?.let { executePostSave(it) }
+                    pendingPostSave = null
+                },
+                onSave = { changes ->
+                    showDefaulterEditDialog = false
+                    scope.launch {
+                        changes.forEach { (id, months) ->
+                            app.database.rdNumberDao().updateMonths(id, months)
+                        }
+                        if (changes.isNotEmpty()) {
+                            Toast.makeText(
+                                context,
+                                "Marked ${changes.size} defaulter${if (changes.size == 1) "" else "s"}",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                        pendingPostSave?.let { executePostSave(it) }
+                        pendingPostSave = null
+                    }
+                }
+            )
+        }
     }
+}
+
+private sealed class PostSave {
+    data object Continue : PostSave()
+    data object EndSession : PostSave()
 }
 
 @Composable
