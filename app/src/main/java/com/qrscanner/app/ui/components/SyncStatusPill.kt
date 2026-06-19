@@ -16,6 +16,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -30,6 +31,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.qrscanner.app.data.sync.SyncPillState
@@ -77,19 +82,26 @@ fun SyncStatusPill(
 
     val label = labelFor(summary)
 
+    val a11yDescription = "Sync status: $label"
+
     Box(
         modifier = modifier
             .scale(pressScale)
+            .defaultMinSize(minHeight = 44.dp)
             .background(
                 color = Color.White.copy(alpha = 0.92f),
-                shape = RoundedCornerShape(20.dp)
+                shape = RoundedCornerShape(24.dp)
             )
             .clickable(
                 interactionSource = interaction,
                 indication = null,
                 onClick = onTap
             )
-            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .padding(horizontal = 14.dp, vertical = 10.dp)
+            .semantics {
+                role = Role.Button
+                contentDescription = a11yDescription
+            }
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
