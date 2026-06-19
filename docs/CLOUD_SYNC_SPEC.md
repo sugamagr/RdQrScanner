@@ -784,17 +784,55 @@ com.qrscanner.app
 
 ### Dependencies to add
 
+Versions verified against supabase-kt 3.1.4 (Kotlin 2.2.x compatible). The
+`gotrue-kt` module was renamed to `auth-kt` in 3.0.0; using the old name will
+fail to resolve. Ktor engine is **okhttp** (not android) because we need
+WebSocket support for Realtime.
+
 ```kotlin
 // in app/build.gradle.kts
-implementation("io.github.jan-tennert.supabase:postgrest-kt:<latest>")
-implementation("io.github.jan-tennert.supabase:gotrue-kt:<latest>")
-implementation("io.github.jan-tennert.supabase:realtime-kt:<latest>")
-implementation("io.ktor:ktor-client-android:<latest>")
-implementation("androidx.work:work-runtime-ktx:<latest>")
-implementation("androidx.security:security-crypto-ktx:<latest>")
+
+plugins {
+    kotlin("plugin.serialization") version "2.2.10"
+}
+
+dependencies {
+    // Supabase BOM aligns all -kt module versions
+    implementation(platform("io.github.jan-tennert.supabase:bom:3.1.4"))
+    implementation("io.github.jan-tennert.supabase:postgrest-kt")
+    implementation("io.github.jan-tennert.supabase:auth-kt")        // renamed from gotrue-kt
+    implementation("io.github.jan-tennert.supabase:realtime-kt")
+
+    // Ktor okhttp engine (WebSocket-capable, required for Realtime)
+    implementation("io.ktor:ktor-client-okhttp:3.2.0")
+
+    // Serialization
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.6.1")
+
+    // Encrypted session storage for the Supabase JWT
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
+    // Settings backing for the encrypted SessionManager
+    implementation("com.russhwolf:multiplatform-settings:1.2.0")
+    implementation("com.russhwolf:multiplatform-settings-no-arg:1.2.0")
+
+    // Sync workers
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
+
+    // Lifecycle-aware Flow collection in Compose
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
+}
 ```
 
 Plus the existing Room + Compose stack stays unchanged.
+
+**EncryptedSharedPreferences fallback note:** Some API 26–28 devices ship with
+broken Keystore implementations that throw at `MasterKey.Builder.build()`. The
+`SecureSessionStorage` wrapper catches the exception and falls back to plain
+`SharedPreferences` with a WARN log entry. Acceptable degradation: on those
+devices the session token is unencrypted but otherwise identical. Documented
+because the silent fallback is not obvious.
 
 ### Manifest changes
 
