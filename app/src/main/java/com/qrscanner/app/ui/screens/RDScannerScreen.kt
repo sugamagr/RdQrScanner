@@ -73,6 +73,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -175,10 +176,13 @@ private fun RDCameraScreen(
     
     // Session state — hydrated from DB in the init effect below. currentLotId
     // tracks the in-progress LOT row (created on first scan, cleared on finish).
+    // Saveable so config change preserves in-flight bookkeeping; otherwise the
+    // hydration effect would treat a just-finished LOT as in-progress.
+    var currentSessionId by rememberSaveable { mutableStateOf<Long?>(null) }
     var currentSession by remember { mutableStateOf<ScanSession?>(null) }
-    var currentLotNumber by remember { mutableIntStateOf(1) }
-    var totalLotsInSession by remember { mutableIntStateOf(0) }
-    var currentLotId by remember { mutableStateOf<Long?>(null) }
+    var currentLotNumber by rememberSaveable { mutableIntStateOf(1) }
+    var totalLotsInSession by rememberSaveable { mutableIntStateOf(0) }
+    var currentLotId by rememberSaveable { mutableStateOf<Long?>(null) }
     val currentLotNumbers = remember { mutableStateListOf<String>() }
     val allSessionNumbers = remember { mutableStateListOf<String>() }
     var isHydrated by remember { mutableStateOf(false) }
@@ -203,12 +207,17 @@ private fun RDCameraScreen(
     var sessionPendingResume by remember { mutableStateOf<ScanSession?>(null) }
 
     // Defaulter flow state — set after a successful LOT save, drives the
-    // ask -> (optional edit) -> post-save sequence.
-    var showDefaulterAskDialog by remember { mutableStateOf(false) }
-    var showDefaulterEditDialog by remember { mutableStateOf(false) }
-    var defaulterLotNumber by remember { mutableIntStateOf(0) }
+    // ask -> (optional edit) -> post-save sequence. Saveable booleans so a
+    // config change mid-flow keeps the dialog up; the row list is re-hydrated
+    // from DB on recompose via the lot number it points at.
+    var showDefaulterAskDialog by rememberSaveable { mutableStateOf(false) }
+    var showDefaulterEditDialog by rememberSaveable { mutableStateOf(false) }
+    var defaulterLotNumber by rememberSaveable { mutableIntStateOf(0) }
+    var defaulterLotId by rememberSaveable { mutableStateOf<Long?>(null) }
     var defaulterRows by remember { mutableStateOf<List<RdNumber>>(emptyList()) }
-    var pendingPostSave by remember { mutableStateOf<PostSave?>(null) }
+    var pendingPostSave by rememberSaveable(stateSaver = PostSaveSaver) {
+        mutableStateOf<PostSave?>(null)
+    }
     
     // Trigger for processing scanned value on main thread
     var scanTrigger by remember { mutableStateOf(0) }
@@ -234,6 +243,7 @@ private fun RDCameraScreen(
         val lastLotRows = lastLot?.let { app.database.rdNumberDao().getNumbersForLotSync(it.id) } ?: emptyList()
 
         currentSession = session
+        currentSessionId = session.id
         allSessionNumbers.clear()
         allSessionNumbers.addAll(allRows.map { it.number })
         currentLotNumbers.clear()
@@ -246,8 +256,37 @@ private fun RDCameraScreen(
         } else {
             if (lastLot != null) app.database.scanLotDao().deleteIfEmpty(lastLot.id)
             currentLotId = null
-            currentLotNumber = (lots.size + 1).coerceAtLeast(1)
-            totalLotsInSession = lots.count { it.id != lastLot?.id || lastLotRows.isNotEmpty() }
+            val remainingLots = if (lastLot != null) lots.filter { it.id != lastLot.id } else lots
+            val highest = remainingLots.maxOfOrNull { it.lotNumber } ?: 0
+            currentLotNumber = highest + 1
+            totalLotsInSession = remainingLots.size
+        }
+        isHydrated = true
+    }
+
+    suspend fun rehydrateAfterConfigChange(sessionId: Long) {
+        val session = app.database.scanSessionDao().getSessionById(sessionId)
+        if (session == null) {
+            currentSessionId = null
+            currentLotId = null
+            currentLotNumber = 1
+            totalLotsInSession = 0
+            startFreshSession()
+            return
+        }
+        currentSession = session
+        val allRows = app.database.rdNumberDao().getAllNumbersInSession(sessionId)
+        allSessionNumbers.clear()
+        allSessionNumbers.addAll(allRows)
+        val lotId = currentLotId
+        if (lotId != null) {
+            val rows = app.database.rdNumberDao().getNumbersForLotSync(lotId)
+            currentLotNumbers.clear()
+            currentLotNumbers.addAll(rows.sortedByDescending { it.position }.map { it.number })
+        }
+        val pendingLotId = defaulterLotId
+        if (pendingLotId != null && (showDefaulterAskDialog || showDefaulterEditDialog)) {
+            defaulterRows = app.database.rdNumberDao().getNumbersForLotSync(pendingLotId)
         }
         isHydrated = true
     }
@@ -256,6 +295,7 @@ private fun RDCameraScreen(
         val session = ScanSession()
         val sessionId = app.database.scanSessionDao().insert(session)
         currentSession = session.copy(id = sessionId)
+        currentSessionId = sessionId
         currentLotNumber = 1
         totalLotsInSession = 0
         currentLotId = null
@@ -264,12 +304,15 @@ private fun RDCameraScreen(
         isHydrated = true
     }
 
-    // Detect resumable session on first composition; otherwise start fresh.
     LaunchedEffect(Unit) {
         if (isHydrated) return@LaunchedEffect
+        val savedSessionId = currentSessionId
+        if (savedSessionId != null) {
+            rehydrateAfterConfigChange(savedSessionId)
+            return@LaunchedEffect
+        }
         val activeIds = app.database.scanSessionDao().getAllActiveSessionIds()
         if (activeIds.size > 1) {
-            // GC duplicates — keep only the most recent (first in DESC order).
             activeIds.drop(1).forEach { stale ->
                 app.database.rdNumberDao().deleteForSession(stale)
                 app.database.scanLotDao().deleteLotsForSession(stale)
@@ -281,12 +324,9 @@ private fun RDCameraScreen(
             startFreshSession()
             return@LaunchedEffect
         }
-        val lotCount = app.database.scanSessionDao().getSessionById(active.id)?.let {
-            app.database.scanLotDao().getLotsForSessionSync(it.id).size
-        } ?: 0
+        val lotCount = app.database.scanLotDao().getLotsForSessionSync(active.id).size
         val scanCount = app.database.rdNumberDao().getAllNumbersInSession(active.id).size
         if (lotCount == 0 && scanCount == 0) {
-            // Empty active session — silently adopt without prompting.
             adoptSession(active)
         } else {
             sessionPendingResume = active
@@ -405,6 +445,8 @@ private fun RDCameraScreen(
     }
 
     suspend fun finalizeSession(session: ScanSession) {
+        currentSessionId = null
+        currentLotId = null
         if (totalLotsInSession > 0) {
             val displayNumber = app.database.scanSessionDao().getNextDisplayNumber()
             app.database.scanSessionDao().endSession(
@@ -466,6 +508,7 @@ private fun RDCameraScreen(
             currentLotId = null
             currentLotNumbers.clear()
 
+            defaulterLotId = lotId
             defaulterLotNumber = savedLotNumber
             defaulterRows = savedRows
             pendingPostSave = if (alsoEndSession) PostSave.EndSession else PostSave.Continue
@@ -485,6 +528,7 @@ private fun RDCameraScreen(
                 currentLotId = null
                 currentLotNumbers.clear()
 
+                defaulterLotId = lotId
                 defaulterLotNumber = savedLotNumber
                 defaulterRows = savedRows
                 pendingPostSave = PostSave.EndSession
@@ -507,6 +551,8 @@ private fun RDCameraScreen(
                 app.database.scanSessionDao().deleteById(session.id)
                 Toast.makeText(context, "Session discarded", Toast.LENGTH_SHORT).show()
             }
+            currentSessionId = null
+            currentLotId = null
             onNavigateBack()
         }
     }
@@ -1057,6 +1103,7 @@ private fun RDCameraScreen(
                 lotNumber = defaulterLotNumber,
                 onNo = {
                     showDefaulterAskDialog = false
+                    defaulterLotId = null
                     pendingPostSave?.let { executePostSave(it) }
                     pendingPostSave = null
                 },
@@ -1073,11 +1120,13 @@ private fun RDCameraScreen(
                 numbers = defaulterRows,
                 onDismiss = {
                     showDefaulterEditDialog = false
+                    defaulterLotId = null
                     pendingPostSave?.let { executePostSave(it) }
                     pendingPostSave = null
                 },
                 onSave = { changes ->
                     showDefaulterEditDialog = false
+                    defaulterLotId = null
                     scope.launch {
                         changes.forEach { (id, months) ->
                             app.database.rdNumberDao().updateMonths(id, months)
@@ -1123,6 +1172,8 @@ private fun RDCameraScreen(
                             app.database.scanLotDao().deleteLotsForSession(pending.id)
                             app.database.scanSessionDao().deleteById(pending.id)
                         }
+                        currentSessionId = null
+                        currentLotId = null
                         startFreshSession()
                     }
                 }
@@ -1135,6 +1186,23 @@ private sealed class PostSave {
     data object Continue : PostSave()
     data object EndSession : PostSave()
 }
+
+private val PostSaveSaver: Saver<PostSave?, String> = Saver(
+    save = { value ->
+        when (value) {
+            PostSave.Continue -> "C"
+            PostSave.EndSession -> "E"
+            null -> ""
+        }
+    },
+    restore = { token ->
+        when (token) {
+            "C" -> PostSave.Continue
+            "E" -> PostSave.EndSession
+            else -> null
+        }
+    }
+)
 
 @Composable
 private fun ScannerOverlay() {

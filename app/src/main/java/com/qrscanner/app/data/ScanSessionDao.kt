@@ -88,9 +88,6 @@ interface ScanLotDao {
     @Query("DELETE FROM scan_lots WHERE sessionId = :sessionId")
     suspend fun deleteLotsForSession(sessionId: Long)
 
-    @Query("SELECT COUNT(*) FROM scan_lots WHERE sessionId = :sessionId")
-    suspend fun countLotsForSession(sessionId: Long): Int
-
     @Query("""
         DELETE FROM scan_lots
         WHERE id = :lotId
