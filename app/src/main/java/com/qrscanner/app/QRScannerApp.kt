@@ -10,6 +10,7 @@ import com.qrscanner.app.cloud.CloudClient
 import com.qrscanner.app.cloud.SupabaseCloudClient
 import com.qrscanner.app.data.AppDatabase
 import com.qrscanner.app.data.sync.SyncRepository
+import com.qrscanner.app.work.SyncWorkScheduler
 
 /**
  * Application root. Owns the singletons every other layer reaches for
@@ -57,6 +58,10 @@ class QRScannerApp : Application(), Configuration.Provider {
 
     val syncRepository: SyncRepository by lazy {
         SyncRepository(database, cloudClient)
+    }
+
+    val syncScheduler: SyncWorkScheduler by lazy {
+        SyncWorkScheduler(this)
     }
 
     override val workManagerConfiguration: Configuration
