@@ -1,6 +1,5 @@
 package com.qrscanner.app.data
 
-import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -21,7 +20,6 @@ import androidx.room.PrimaryKey
 @Entity(tableName = "device_settings")
 data class DeviceSettings(
     @PrimaryKey
-    @ColumnInfo(name = "id")
     val id: Int = SINGLETON_ID,
 
     /**

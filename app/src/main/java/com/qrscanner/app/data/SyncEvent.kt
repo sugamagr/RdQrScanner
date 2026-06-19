@@ -1,6 +1,5 @@
 package com.qrscanner.app.data
 
-import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -34,7 +33,6 @@ data class SyncEvent(
      */
     val occurredAt: Long,
 
-    @ColumnInfo(name = "type")
     val type: SyncEventType,
 
     /** Cloud UUID of the affected session, when applicable. */
