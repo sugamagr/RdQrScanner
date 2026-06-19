@@ -10,6 +10,7 @@ import {
 import { formatDateTime, formatNumber, formatRelativeTime } from '../lib/format';
 import type { RdNumberRow, ScanLotRow, ScanSessionRow } from '../types/db';
 import { buildSessionXlsx, triggerDownload } from '../lib/xlsx';
+import { EditDefaulterDialog } from '../components/EditDefaulterDialog';
 
 export function SessionDetailPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -46,6 +47,7 @@ export function SessionDetailPage() {
   const session = sessionQuery.data;
   const isLoading = sessionQuery.isLoading || lotsQuery.isLoading;
   const [exportError, setExportError] = useState<string | null>(null);
+  const [editing, setEditing] = useState<{ rd: RdNumberRow; lotTimestamp: string } | null>(null);
   const canExport =
     !!session && (lotsQuery.data?.length ?? 0) > 0 && !rdQuery.isLoading;
 
@@ -132,6 +134,7 @@ export function SessionDetailPage() {
                 lot={lot}
                 rdNumbers={rdByLot.get(lot.id) ?? []}
                 rdLoading={rdQuery.isLoading && lotIds.length > 0}
+                onEditRd={(rd) => setEditing({ rd, lotTimestamp: lot.timestamp })}
               />
             ))}
             {lotsQuery.data && lotsQuery.data.length === 0 && (
@@ -143,6 +146,14 @@ export function SessionDetailPage() {
             )}
           </div>
         </>
+      )}
+
+      {editing && (
+        <EditDefaulterDialog
+          rd={editing.rd}
+          lotTimestamp={editing.lotTimestamp}
+          onClose={() => setEditing(null)}
+        />
       )}
     </div>
   );
@@ -191,14 +202,16 @@ function LotCard({
   lot,
   rdNumbers,
   rdLoading,
+  onEditRd,
 }: {
   lot: ScanLotRow;
   rdNumbers: RdNumberRow[];
   rdLoading: boolean;
+  onEditRd: (rd: RdNumberRow) => void;
 }) {
   const defaulters = rdNumbers.filter((rd) => rd.months_paid > 1);
   return (
-    <div className="rounded-2xl border border-surface-border bg-surface shadow-card">
+    <div className="rounded-2xl border border-surface-border bg-surface shadow-card transition-colors duration-150 hover:border-surface-border/80">
       <div className="flex items-center justify-between border-b border-surface-border px-4 py-3">
         <div>
           <p className="text-sm font-semibold text-ink-primary">
@@ -223,26 +236,36 @@ function LotCard({
 
       <div className="p-4">
         {rdLoading && rdNumbers.length === 0 && (
-          <div className="h-6 animate-pulse rounded bg-surface-alt" />
+          <div className="space-y-1.5">
+            <div className="h-6 animate-pulse rounded bg-surface-alt" />
+            <div className="h-6 w-3/4 animate-pulse rounded bg-surface-alt" />
+          </div>
         )}
         {rdNumbers.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {rdNumbers.map((rd) => {
               const isDefaulter = rd.months_paid > 1;
               return (
-                <span
+                <button
                   key={rd.id}
+                  type="button"
+                  onClick={() => onEditRd(rd)}
                   title={
                     isDefaulter
                       ? `Defaulter · ${rd.months_paid} months${
                           rd.months_list ? ` (${rd.months_list})` : ''
-                        }`
-                      : undefined
+                        } · Tap to edit`
+                      : 'Tap to mark as defaulter'
                   }
-                  className={`inline-flex items-center rounded-pill px-2.5 py-0.5 font-mono text-xs ${
+                  aria-label={
                     isDefaulter
-                      ? 'bg-warn/10 text-warn'
-                      : 'bg-surface-alt text-ink-primary'
+                      ? `Edit defaulter ${rd.number}, ${rd.months_paid} months`
+                      : `Mark ${rd.number} as defaulter`
+                  }
+                  className={`inline-flex items-center rounded-pill px-2.5 py-0.5 font-mono text-xs transition-all hover:scale-[1.03] hover:shadow-card active:scale-[0.98] ${
+                    isDefaulter
+                      ? 'bg-warn/15 text-warn ring-1 ring-warn/20'
+                      : 'bg-surface-alt text-ink-primary hover:bg-primary/10 hover:text-primary-dark'
                   }`}
                 >
                   {rd.number}
@@ -251,7 +274,7 @@ function LotCard({
                       ×{rd.months_paid}
                     </span>
                   )}
-                </span>
+                </button>
               );
             })}
           </div>

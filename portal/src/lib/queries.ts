@@ -92,6 +92,22 @@ export async function fetchDevices(): Promise<DeviceRow[]> {
   return (data ?? []) as DeviceRow[];
 }
 
+export async function updateRdNumberMonths(params: {
+  id: string;
+  monthsPaid: number;
+  monthsList: string | null;
+}): Promise<void> {
+  const { id, monthsPaid, monthsList } = params;
+  const { error } = await supabase
+    .from('rd_numbers')
+    .update({
+      months_paid: monthsPaid,
+      months_list: monthsList,
+    })
+    .eq('id', id);
+  if (error) throw error;
+}
+
 export interface RdSearchHit {
   rd: RdNumberRow;
   lot: Pick<ScanLotRow, 'id' | 'lot_number' | 'session_id'>;
