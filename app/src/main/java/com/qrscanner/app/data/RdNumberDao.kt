@@ -33,6 +33,15 @@ interface RdNumberDao {
     @Query("DELETE FROM rd_numbers WHERE lotId = :lotId")
     suspend fun deleteForLot(lotId: Long)
 
+    @Query("DELETE FROM rd_numbers WHERE id = :id")
+    suspend fun deleteById(id: Long)
+
+    @Query("SELECT * FROM rd_numbers WHERE lotId = :lotId ORDER BY position DESC LIMIT 1")
+    suspend fun getMostRecentForLot(lotId: Long): RdNumber?
+
+    @Query("SELECT COALESCE(MAX(position), -1) + 1 FROM rd_numbers WHERE lotId = :lotId")
+    suspend fun getNextPosition(lotId: Long): Int
+
     @Query("""
         DELETE FROM rd_numbers WHERE lotId IN
         (SELECT id FROM scan_lots WHERE sessionId = :sessionId)

@@ -17,8 +17,11 @@ interface ScanSessionDao {
     @Query("SELECT * FROM scan_sessions WHERE isActive = 0 AND totalLots > 0 ORDER BY displayNumber DESC")
     fun getCompletedSessions(): Flow<List<ScanSession>>
     
-    @Query("SELECT * FROM scan_sessions WHERE isActive = 1 LIMIT 1")
+    @Query("SELECT * FROM scan_sessions WHERE isActive = 1 ORDER BY startTime DESC LIMIT 1")
     suspend fun getActiveSession(): ScanSession?
+
+    @Query("SELECT id FROM scan_sessions WHERE isActive = 1 ORDER BY startTime DESC")
+    suspend fun getAllActiveSessionIds(): List<Long>
     
     @Query("SELECT * FROM scan_sessions WHERE id = :id")
     suspend fun getSessionById(id: Long): ScanSession?
@@ -84,6 +87,16 @@ interface ScanLotDao {
     
     @Query("DELETE FROM scan_lots WHERE sessionId = :sessionId")
     suspend fun deleteLotsForSession(sessionId: Long)
-    
+
+    @Query("SELECT COUNT(*) FROM scan_lots WHERE sessionId = :sessionId")
+    suspend fun countLotsForSession(sessionId: Long): Int
+
+    @Query("""
+        DELETE FROM scan_lots
+        WHERE id = :lotId
+          AND NOT EXISTS (SELECT 1 FROM rd_numbers WHERE lotId = :lotId)
+    """)
+    suspend fun deleteIfEmpty(lotId: Long)
+
 }
 
