@@ -74,6 +74,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -127,6 +128,13 @@ fun SessionHistoryScreen(
     val defaultCountsList by app.database.scanSessionDao().getDefaultCountsBySession().collectAsState(initial = emptyList())
     val defaultCountMap = remember(defaultCountsList) {
         defaultCountsList.associate { it.sessionId to it.count }
+    }
+
+    // Phase 3 T3.4: opportunistic pull-on-open. Fresh data the moment the
+    // user lands here. KEEP semantics in the scheduler means we don't
+    // displace an in-flight pull from the MainActivity 5-min poll.
+    LaunchedEffect(Unit) {
+        runCatching { app.syncScheduler.enqueuePull() }
     }
 
     // Dialogs

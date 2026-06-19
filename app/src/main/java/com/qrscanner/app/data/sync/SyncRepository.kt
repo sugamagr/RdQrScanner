@@ -556,9 +556,22 @@ class SyncRepository(
         }
     }
 
-    /** Realtime targeted pull. Filled in by Phase 3 T3.4. */
+    /**
+     * Called by the realtime channel handler on every postgresChange
+     * payload. The payload identifies which row changed; we treat it as
+     * a 'go look' trigger and run [runPull] which fetches the delta
+     * since `lastPulledAt`. Targeted single-row fetch would be more
+     * bandwidth-efficient but reusing the delta path keeps the cursor
+     * state machine consistent and avoids a second cloud round-trip.
+     *
+     * Phase 3 T3.4. Spec §14.
+     */
     suspend fun handleRealtimeChange(payload: com.qrscanner.app.cloud.CloudRealtimePayload) {
-        throw NotImplementedError("handleRealtimeChange() is Phase 3 T3.4")
+        android.util.Log.d(
+            "SyncRepository",
+            "realtime ${payload.event} on ${payload.table} cloudId=${payload.cloudId}"
+        )
+        runPull()
     }
 
     private fun updateSummary(transform: (SyncSummary) -> SyncSummary) {
