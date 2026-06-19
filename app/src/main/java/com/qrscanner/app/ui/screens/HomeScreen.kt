@@ -55,7 +55,10 @@ import com.qrscanner.app.QRScannerApp
 import com.qrscanner.app.cloud.CloudSessionStatus
 import com.qrscanner.app.data.sync.SyncPillState
 import com.qrscanner.app.data.sync.SyncSummary
+import com.qrscanner.app.ui.components.RecentChangesBanner
 import com.qrscanner.app.ui.components.SyncStatusPill
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import com.qrscanner.app.ui.theme.AccentCoral
 import com.qrscanner.app.ui.theme.AccentMint
 import com.qrscanner.app.ui.theme.PrimaryOrange
@@ -152,6 +155,40 @@ fun HomeScreen(
                 modifier = Modifier
                     .align(Alignment.End)
             )
+
+            // Recent-changes banner (spec §15.5.1, F1c). Reads sync_events
+            // since the last-seen watermark; on dismiss/open it bumps the
+            // watermark so the banner doesn't re-show the same set after
+            // a config change. Suppressed entirely while not signed in.
+            val scope = rememberCoroutineScope()
+            val deviceSettings by app.database.deviceSettingsDao().observe()
+                .collectAsState(initial = null)
+            val bannerSeenAt = deviceSettings?.lastBannerSeenAt ?: 0L
+            val recentEvents by app.database.syncEventDao()
+                .observeEventsSince(since = bannerSeenAt, limit = 20)
+                .collectAsState(initial = emptyList())
+            val showBanner = displayedSummary.state != SyncPillState.NOT_SIGNED_IN &&
+                recentEvents.isNotEmpty()
+            if (showBanner) {
+                Spacer(modifier = Modifier.height(10.dp))
+                RecentChangesBanner(
+                    events = recentEvents,
+                    onDismiss = {
+                        scope.launch {
+                            app.database.deviceSettingsDao()
+                                .updateLastBannerSeenAt(System.currentTimeMillis())
+                        }
+                    },
+                    onOpenHistory = {
+                        scope.launch {
+                            app.database.deviceSettingsDao()
+                                .updateLastBannerSeenAt(System.currentTimeMillis())
+                        }
+                        onNavigateToHistory()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
 
             Spacer(modifier = Modifier.height(8.dp))
             

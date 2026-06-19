@@ -1,0 +1,194 @@
+package com.qrscanner.app.ui.components
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import com.qrscanner.app.data.SyncEvent
+import com.qrscanner.app.data.SyncEventType
+import com.qrscanner.app.ui.theme.AccentMint
+import com.qrscanner.app.ui.theme.PrimaryOrange
+import com.qrscanner.app.ui.theme.TextSecondary
+
+/**
+ * Compact "what changed while you were away" banner anchored under the
+ * sync pill on Home. Renders the recent SyncEvent log per spec §15.5.1:
+ * minimal, dismissible, aggregates same-origin same-type events within
+ * a 60-second window into a single line.
+ *
+ * Hides itself entirely when the event list is empty so it never
+ * occupies layout space on the no-changes path. AnimatedVisibility
+ * gives the appear/dismiss a soft expand/collapse so it doesn't
+ * surprise the user mid-scroll.
+ */
+@Composable
+fun RecentChangesBanner(
+    events: List<SyncEvent>,
+    onDismiss: () -> Unit,
+    onOpenHistory: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val lines = remember(events) { aggregate(events) }
+    AnimatedVisibility(
+        visible = lines.isNotEmpty(),
+        enter = fadeIn() + expandVertically(),
+        exit = fadeOut() + shrinkVertically(),
+        modifier = modifier
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    brush = Brush.linearGradient(
+                        colors = listOf(
+                            PrimaryOrange.copy(alpha = 0.10f),
+                            AccentMint.copy(alpha = 0.10f)
+                        )
+                    ),
+                    shape = RoundedCornerShape(18.dp)
+                )
+                .clickable(onClick = onOpenHistory)
+                .padding(horizontal = 14.dp, vertical = 12.dp)
+                .semantics { contentDescription = "Recent changes: ${lines.joinToString("; ")}" }
+        ) {
+            Row(verticalAlignment = Alignment.Top) {
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .background(PrimaryOrange.copy(alpha = 0.18f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.NotificationsActive,
+                        contentDescription = null,
+                        tint = PrimaryOrange,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = headerFor(lines.size),
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextSecondary
+                        )
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    for ((index, line) in lines.withIndex()) {
+                        if (index > 0) Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = line,
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFF1F2937)
+                            )
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clickable(onClick = onDismiss)
+                        .semantics { contentDescription = "Dismiss" },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = null,
+                        tint = TextSecondary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun headerFor(lineCount: Int): String = when (lineCount) {
+    1 -> "1 recent update"
+    else -> "$lineCount recent updates"
+}
+
+/**
+ * Spec §15.5.1 aggregation: same (type, origin) within 60s collapse
+ * into one line. Caps output at 3 lines so the banner stays small even
+ * after a long catch-up pull.
+ */
+private fun aggregate(events: List<SyncEvent>): List<String> {
+    if (events.isEmpty()) return emptyList()
+    val ordered = events.sortedByDescending { it.occurredAt }
+    val groups = mutableListOf<MutableList<SyncEvent>>()
+    for (event in ordered) {
+        val tail = groups.lastOrNull()
+        val sameBucket = tail != null &&
+            tail.first().type == event.type &&
+            tail.first().originDeviceCloudId == event.originDeviceCloudId &&
+            (tail.first().occurredAt - event.occurredAt) <= AGGREGATION_WINDOW_MS
+        if (sameBucket) {
+            tail!!.add(event)
+        } else {
+            groups += mutableListOf(event)
+        }
+    }
+    return groups.take(MAX_LINES).map { describe(it) }
+}
+
+private fun describe(group: List<SyncEvent>): String {
+    val first = group.first()
+    val origin = first.originLabel()
+    val n = group.size
+    return when (first.type) {
+        SyncEventType.REMOTE_SESSION_FINALIZED ->
+            if (n == 1) "$origin synced ${first.payloadSummary}"
+            else "$origin synced $n sessions"
+        SyncEventType.REMOTE_DEFAULTER_EDIT,
+        SyncEventType.PORTAL_DEFAULTER_EDIT ->
+            if (n == 1) "$origin ${first.payloadSummary}"
+            else "$origin updated $n defaulters"
+        SyncEventType.REMOTE_SESSION_DELETED ->
+            if (n == 1) "$origin ${first.payloadSummary}"
+            else "$origin deleted $n sessions"
+    }
+}
+
+private fun SyncEvent.originLabel(): String = when {
+    originDeviceCloudId == null -> "Portal"
+    !originOperatorName.isNullOrBlank() -> originOperatorName
+    !originDeviceName.isNullOrBlank() -> originDeviceName
+    else -> "Another phone"
+}
+
+private const val AGGREGATION_WINDOW_MS: Long = 60_000L
+private const val MAX_LINES: Int = 3
