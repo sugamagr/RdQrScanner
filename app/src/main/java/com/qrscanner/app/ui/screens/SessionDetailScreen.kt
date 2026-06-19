@@ -46,6 +46,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -83,6 +85,9 @@ fun SessionDetailScreen(
         .observeDefaultCountForSession(sessionId)
         .collectAsState(initial = 0)
     var session by remember { mutableStateOf<ScanSession?>(null) }
+    var expandedLotIds by rememberSaveable(stateSaver = LongSetSaver) {
+        mutableStateOf(emptySet<Long>())
+    }
 
     LaunchedEffect(sessionId) {
         session = app.database.scanSessionDao().getSessionById(sessionId)
@@ -152,7 +157,17 @@ fun SessionDetailScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 items(lots, key = { it.id }) { lot ->
-                    LotCard(lot = lot)
+                    LotCard(
+                        lot = lot,
+                        isExpanded = lot.id in expandedLotIds,
+                        onToggleExpanded = {
+                            expandedLotIds = if (lot.id in expandedLotIds) {
+                                expandedLotIds - lot.id
+                            } else {
+                                expandedLotIds + lot.id
+                            }
+                        }
+                    )
                 }
 
                 item(key = "bottom_spacer") {
@@ -163,12 +178,20 @@ fun SessionDetailScreen(
     }
 }
 
+private val LongSetSaver: Saver<Set<Long>, List<Long>> = Saver(
+    save = { it.toList() },
+    restore = { it.toSet() }
+)
+
 @Composable
-private fun LotCard(lot: ScanLot) {
+private fun LotCard(
+    lot: ScanLot,
+    isExpanded: Boolean,
+    onToggleExpanded: () -> Unit
+) {
     val context = LocalContext.current
     val app = context.applicationContext as QRScannerApp
     val scope = rememberCoroutineScope()
-    var isExpanded by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
     val timeFormat = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
 
@@ -233,7 +256,7 @@ private fun LotCard(lot: ScanLot) {
         modifier = Modifier
             .fillMaxWidth()
             .animateContentSize()
-            .clickable { isExpanded = !isExpanded },
+            .clickable { onToggleExpanded() },
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
