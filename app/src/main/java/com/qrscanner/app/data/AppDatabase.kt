@@ -8,8 +8,14 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [ScanSession::class, ScanLot::class, RdNumber::class],
-    version = 5,
+    entities = [
+        ScanSession::class,
+        ScanLot::class,
+        RdNumber::class,
+        DeviceSettings::class,
+        SyncEvent::class
+    ],
+    version = 6,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -17,6 +23,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun scanSessionDao(): ScanSessionDao
     abstract fun scanLotDao(): ScanLotDao
     abstract fun rdNumberDao(): RdNumberDao
+    abstract fun deviceSettingsDao(): DeviceSettingsDao
+    abstract fun syncEventDao(): SyncEventDao
 
     companion object {
         @Volatile
@@ -38,6 +46,130 @@ abstract class AppDatabase : RoomDatabase() {
                 database.execSQL(
                     "ALTER TABLE `rd_numbers` ADD COLUMN `monthsList` TEXT DEFAULT NULL"
                 )
+            }
+        }
+
+        /**
+         * v5 → v6: Cloud sync schema bump.
+         *
+         * Adds the per-row sync metadata block (cloudId, syncStatus, updatedAt,
+         * syncedAt, lastSyncError, deletedAt) to scan_sessions, scan_lots, and
+         * rd_numbers. ScanSession also gains deviceCloudId + operatorName.
+         *
+         * Two new tables for the sync engine itself:
+         *   - device_settings: single-row key/value with CHECK(id = 1).
+         *   - sync_events: bounded log feeding the in-app banner (§15.5.5).
+         *
+         * Backfill rules (see spec §17):
+         *   - existing finalized rows (isActive = 0) flip to syncStatus = DIRTY
+         *     so they push on first sign-in.
+         *   - existing active rows stay LOCAL_ONLY (they're device-private
+         *     until the user finalizes them).
+         *   - updatedAt seeded from the row's natural timestamp (startTime /
+         *     timestamp / scannedAt) so conflict resolution has a defensible
+         *     starting value.
+         *   - device_settings seeded with id = 1, all nullable columns null.
+         */
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                // scan_sessions: 8 new columns (6 sync + 2 session-specific).
+                database.execSQL("ALTER TABLE `scan_sessions` ADD COLUMN `deviceCloudId` TEXT DEFAULT NULL")
+                database.execSQL("ALTER TABLE `scan_sessions` ADD COLUMN `operatorName` TEXT DEFAULT NULL")
+                database.execSQL("ALTER TABLE `scan_sessions` ADD COLUMN `cloudId` TEXT DEFAULT NULL")
+                database.execSQL("ALTER TABLE `scan_sessions` ADD COLUMN `syncStatus` TEXT NOT NULL DEFAULT 'LOCAL_ONLY'")
+                database.execSQL("ALTER TABLE `scan_sessions` ADD COLUMN `updatedAt` INTEGER NOT NULL DEFAULT 0")
+                database.execSQL("ALTER TABLE `scan_sessions` ADD COLUMN `syncedAt` INTEGER DEFAULT NULL")
+                database.execSQL("ALTER TABLE `scan_sessions` ADD COLUMN `lastSyncError` TEXT DEFAULT NULL")
+                database.execSQL("ALTER TABLE `scan_sessions` ADD COLUMN `deletedAt` INTEGER DEFAULT NULL")
+                database.execSQL("""
+                    UPDATE `scan_sessions`
+                    SET `syncStatus` = 'DIRTY',
+                        `updatedAt` = COALESCE(`endTime`, `startTime`, strftime('%s','now') * 1000)
+                    WHERE `isActive` = 0
+                """)
+                database.execSQL("""
+                    UPDATE `scan_sessions`
+                    SET `updatedAt` = `startTime`
+                    WHERE `isActive` = 1
+                """)
+
+                // scan_lots: 6 new columns.
+                database.execSQL("ALTER TABLE `scan_lots` ADD COLUMN `cloudId` TEXT DEFAULT NULL")
+                database.execSQL("ALTER TABLE `scan_lots` ADD COLUMN `syncStatus` TEXT NOT NULL DEFAULT 'LOCAL_ONLY'")
+                database.execSQL("ALTER TABLE `scan_lots` ADD COLUMN `updatedAt` INTEGER NOT NULL DEFAULT 0")
+                database.execSQL("ALTER TABLE `scan_lots` ADD COLUMN `syncedAt` INTEGER DEFAULT NULL")
+                database.execSQL("ALTER TABLE `scan_lots` ADD COLUMN `lastSyncError` TEXT DEFAULT NULL")
+                database.execSQL("ALTER TABLE `scan_lots` ADD COLUMN `deletedAt` INTEGER DEFAULT NULL")
+                database.execSQL("""
+                    UPDATE `scan_lots`
+                    SET `syncStatus` = 'DIRTY',
+                        `updatedAt` = `timestamp`
+                    WHERE `sessionId` IN (SELECT `id` FROM `scan_sessions` WHERE `isActive` = 0)
+                """)
+                database.execSQL("""
+                    UPDATE `scan_lots`
+                    SET `updatedAt` = `timestamp`
+                    WHERE `sessionId` IN (SELECT `id` FROM `scan_sessions` WHERE `isActive` = 1)
+                """)
+
+                // rd_numbers: 6 new columns.
+                database.execSQL("ALTER TABLE `rd_numbers` ADD COLUMN `cloudId` TEXT DEFAULT NULL")
+                database.execSQL("ALTER TABLE `rd_numbers` ADD COLUMN `syncStatus` TEXT NOT NULL DEFAULT 'LOCAL_ONLY'")
+                database.execSQL("ALTER TABLE `rd_numbers` ADD COLUMN `updatedAt` INTEGER NOT NULL DEFAULT 0")
+                database.execSQL("ALTER TABLE `rd_numbers` ADD COLUMN `syncedAt` INTEGER DEFAULT NULL")
+                database.execSQL("ALTER TABLE `rd_numbers` ADD COLUMN `lastSyncError` TEXT DEFAULT NULL")
+                database.execSQL("ALTER TABLE `rd_numbers` ADD COLUMN `deletedAt` INTEGER DEFAULT NULL")
+                database.execSQL("""
+                    UPDATE `rd_numbers`
+                    SET `syncStatus` = 'DIRTY',
+                        `updatedAt` = `scannedAt`
+                    WHERE `lotId` IN (
+                        SELECT `id` FROM `scan_lots` WHERE `sessionId` IN (
+                            SELECT `id` FROM `scan_sessions` WHERE `isActive` = 0
+                        )
+                    )
+                """)
+                database.execSQL("""
+                    UPDATE `rd_numbers`
+                    SET `updatedAt` = `scannedAt`
+                    WHERE `lotId` IN (
+                        SELECT `id` FROM `scan_lots` WHERE `sessionId` IN (
+                            SELECT `id` FROM `scan_sessions` WHERE `isActive` = 1
+                        )
+                    )
+                """)
+
+                // device_settings: single-row table seeded with id = 1.
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `device_settings` (
+                        `id` INTEGER PRIMARY KEY NOT NULL CHECK(`id` = 1),
+                        `deviceCloudId` TEXT DEFAULT NULL,
+                        `deviceName` TEXT DEFAULT NULL,
+                        `operatorName` TEXT DEFAULT NULL,
+                        `ownerId` TEXT DEFAULT NULL,
+                        `lastPulledAt` INTEGER NOT NULL DEFAULT 0,
+                        `lastPullErrorAt` INTEGER DEFAULT NULL,
+                        `lastPullError` TEXT DEFAULT NULL,
+                        `lastBannerSeenAt` INTEGER NOT NULL DEFAULT 0
+                    )
+                """)
+                database.execSQL("INSERT OR IGNORE INTO `device_settings` (`id`) VALUES (1)")
+
+                // sync_events: bounded log of remote changes feeding the banner.
+                database.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `sync_events` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `occurredAt` INTEGER NOT NULL,
+                        `type` TEXT NOT NULL,
+                        `sessionCloudId` TEXT DEFAULT NULL,
+                        `rdNumberCloudId` TEXT DEFAULT NULL,
+                        `originDeviceCloudId` TEXT DEFAULT NULL,
+                        `originDeviceName` TEXT DEFAULT NULL,
+                        `originOperatorName` TEXT DEFAULT NULL,
+                        `payloadSummary` TEXT NOT NULL
+                    )
+                """)
+                database.execSQL("CREATE INDEX IF NOT EXISTS `index_sync_events_occurredAt` ON `sync_events` (`occurredAt`)")
             }
         }
 
@@ -155,7 +287,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "rd_scanner_database"
                 )
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .fallbackToDestructiveMigrationOnDowngrade()
                 .build()
                 INSTANCE = instance
