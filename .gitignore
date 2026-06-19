@@ -62,6 +62,12 @@ keystore.properties
 keystore.properties.txt
 signing.properties
 
+# Local secrets - NEVER COMMIT THESE!
+git token.txt
+*.token
+.env
+.env.local
+
 # Google Services (if you add Firebase later)
 google-services.json
 

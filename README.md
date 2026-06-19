@@ -31,7 +31,7 @@ A specialized Android application designed for scanning and managing RD (Recurri
 - Spring-animated selection UI with haptic feedback
 
 ### 📤 Export Options
-- **CSV Export**: Structured data with LOT numbers, RD numbers, counts, and timestamps
+- **XLSX Export**: Structured spreadsheet (OOXML) with LOT numbers, RD numbers, counts, and timestamps
 - **TXT Export**: Human-readable format for easy sharing
 - **Copy to Clipboard**: Quick comma-separated list per LOT
 - **Share via Apps**: Direct sharing to WhatsApp, etc. with LOT image attachment
@@ -107,7 +107,7 @@ app/src/main/java/com/qrscanner/app/
 │       ├── Theme.kt
 │       └── Type.kt
 └── util/                    # Utility classes
-    ├── CsvExporter.kt
+    ├── XlsxExporter.kt
     ├── PdfGenerator.kt
     └── LotImageGenerator.kt
 ```

@@ -176,7 +176,7 @@ fun AppInfoScreen(
                             "Scan RD book QR codes with LOT management",
                             "Session-based scanning with sequential numbering",
                             "Share LOTs with image attachment for WhatsApp",
-                            "Export sessions as CSV or TXT",
+                            "Export sessions as XLSX or TXT",
                             "Generate QR code PDFs for RD numbers",
                             "Duplicate detection within session",
                             "Modern light orange theme"

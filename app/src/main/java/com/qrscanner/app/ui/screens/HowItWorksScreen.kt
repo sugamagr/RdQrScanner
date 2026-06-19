@@ -346,7 +346,7 @@ private fun HindiContent() {
             FeatureItem(
                 icon = Icons.Default.FolderOpen,
                 title = "सेशन एक्सपोर्ट करें",
-                description = "रिकॉर्ड रखने या आगे की प्रक्रिया के लिए पूरे सेशन को CSV या TXT फाइल के रूप में एक्सपोर्ट करें।"
+                description = "रिकॉर्ड रखने या आगे की प्रक्रिया के लिए पूरे सेशन को XLSX या TXT फाइल के रूप में एक्सपोर्ट करें।"
             )
         }
         
@@ -512,7 +512,7 @@ private fun EnglishContent() {
             FeatureItem(
                 icon = Icons.Default.FolderOpen,
                 title = "Export Sessions",
-                description = "Export complete sessions as CSV or TXT files for record-keeping or further processing."
+                description = "Export complete sessions as XLSX or TXT files for record-keeping or further processing."
             )
         }
         

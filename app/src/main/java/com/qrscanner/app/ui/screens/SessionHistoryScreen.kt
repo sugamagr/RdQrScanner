@@ -101,7 +101,7 @@ import com.qrscanner.app.ui.theme.PrimaryOrange
 import com.qrscanner.app.ui.theme.PrimaryOrangeLight
 import com.qrscanner.app.ui.theme.TextSecondary
 import com.qrscanner.app.ui.theme.WarningAmber
-import com.qrscanner.app.util.CsvExporter
+import com.qrscanner.app.util.XlsxExporter
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -538,7 +538,7 @@ fun SessionHistoryScreen(
                                             val rdNumbersPerLot = lots.map { lot ->
                                                 app.database.rdNumberDao().getNumbersForLotSync(lot.id).map { it.number }
                                             }
-                                            val file = CsvExporter.exportSessionToXlsx(context, lots, rdNumbersPerLot, session.displayNumber)
+                                            val file = XlsxExporter.exportSessionToXlsx(context, lots, rdNumbersPerLot, session.displayNumber)
                                             if (file != null) {
                                                 val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", file)
                                                 val intent = Intent(Intent.ACTION_SEND).apply {
@@ -573,7 +573,7 @@ fun SessionHistoryScreen(
                                             val rdNumbersPerLot = lots.map { lot ->
                                                 app.database.rdNumberDao().getNumbersForLotSync(lot.id).map { it.number }
                                             }
-                                            val file = CsvExporter.exportSessionToTxt(context, lots, rdNumbersPerLot, session.displayNumber)
+                                            val file = XlsxExporter.exportSessionToTxt(context, lots, rdNumbersPerLot, session.displayNumber)
                                             if (file != null) {
                                                 val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", file)
                                                 val intent = Intent(Intent.ACTION_SEND).apply {
