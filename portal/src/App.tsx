@@ -4,6 +4,7 @@ import { SignInPage } from './pages/SignIn';
 import { SessionsPage } from './pages/Sessions';
 import { SessionDetailPage } from './pages/SessionDetail';
 import { DevicesPage } from './pages/Devices';
+import { SearchPage } from './pages/Search';
 import { AppShell } from './components/AppShell';
 
 export default function App() {
@@ -27,6 +28,7 @@ export default function App() {
       <Routes>
         <Route path="/sessions" element={<SessionsPage />} />
         <Route path="/sessions/:sessionId" element={<SessionDetailPage />} />
+        <Route path="/search" element={<SearchPage />} />
         <Route path="/devices" element={<DevicesPage />} />
         <Route path="*" element={<Navigate to="/sessions" replace />} />
       </Routes>

@@ -91,3 +91,79 @@ export async function fetchDevices(): Promise<DeviceRow[]> {
   if (error) throw error;
   return (data ?? []) as DeviceRow[];
 }
+
+export interface RdSearchHit {
+  rd: RdNumberRow;
+  lot: Pick<ScanLotRow, 'id' | 'lot_number' | 'session_id'>;
+  session: Pick<ScanSessionRow, 'id' | 'display_number' | 'operator_name' | 'end_time'>;
+}
+
+/**
+ * Search rd_numbers by partial number. Limited to 100 hits — at scale
+ * the owner should narrow the query rather than scroll thousands of
+ * matches. Uses `ilike` for case-insensitive partial match. Postgres
+ * trigram index lands in Phase 5 hardening.
+ */
+export async function searchRdNumbers(query: string): Promise<RdSearchHit[]> {
+  const trimmed = query.trim();
+  if (trimmed.length < 2) return [];
+
+  const escaped = trimmed.replace(/[%_\\]/g, (c) => `\\${c}`);
+  const { data, error } = await supabase
+    .from('rd_numbers')
+    .select(
+      `
+      id, owner_id, lot_id, number, position, scanned_at, months_paid, months_list,
+      created_at, updated_at, deleted_at,
+      lot:scan_lots!inner(id, lot_number, session_id,
+        session:scan_sessions!inner(id, display_number, operator_name, end_time, deleted_at)
+      )
+    `
+    )
+    .ilike('number', `%${escaped}%`)
+    .is('deleted_at', null)
+    .order('scanned_at', { ascending: false })
+    .limit(100);
+
+  if (error) throw error;
+  if (!data) return [];
+
+  const hits: RdSearchHit[] = [];
+  for (const row of data as unknown as Array<
+    RdNumberRow & {
+      lot: ScanLotRow & {
+        session: ScanSessionRow & { deleted_at: string | null };
+      };
+    }
+  >) {
+    if (row.lot?.session?.deleted_at) continue;
+    if (!row.lot || !row.lot.session) continue;
+    hits.push({
+      rd: {
+        id: row.id,
+        owner_id: row.owner_id,
+        lot_id: row.lot_id,
+        number: row.number,
+        position: row.position,
+        scanned_at: row.scanned_at,
+        months_paid: row.months_paid,
+        months_list: row.months_list,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        deleted_at: row.deleted_at,
+      },
+      lot: {
+        id: row.lot.id,
+        lot_number: row.lot.lot_number,
+        session_id: row.lot.session_id,
+      },
+      session: {
+        id: row.lot.session.id,
+        display_number: row.lot.session.display_number,
+        operator_name: row.lot.session.operator_name,
+        end_time: row.lot.session.end_time,
+      },
+    });
+  }
+  return hits;
+}
