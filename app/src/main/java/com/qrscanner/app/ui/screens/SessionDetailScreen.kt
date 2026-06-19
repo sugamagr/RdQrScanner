@@ -427,7 +427,7 @@ private fun LotCard(
                 showEditDialog = false
                 scope.launch {
                     changes.forEach { (id, months) ->
-                        app.database.rdNumberDao().updateMonths(id, months)
+                        app.database.rdNumberDao().updateMonths(id, months, null)
                     }
                     if (changes.isNotEmpty()) {
                         Toast.makeText(

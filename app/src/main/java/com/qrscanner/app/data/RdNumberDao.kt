@@ -48,8 +48,8 @@ interface RdNumberDao {
     """)
     suspend fun deleteForSession(sessionId: Long)
 
-    @Query("UPDATE rd_numbers SET monthsPaid = :months WHERE id = :id")
-    suspend fun updateMonths(id: Long, months: Int)
+    @Query("UPDATE rd_numbers SET monthsPaid = :months, monthsList = :monthsList WHERE id = :id")
+    suspend fun updateMonths(id: Long, months: Int, monthsList: String?)
 
     @Query("SELECT COUNT(*) FROM rd_numbers WHERE lotId = :lotId AND monthsPaid > 1")
     fun observeDefaultCountForLot(lotId: Long): Flow<Int>
