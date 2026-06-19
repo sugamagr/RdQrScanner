@@ -196,7 +196,6 @@ private fun RDCameraScreen(
     // ask -> (optional edit) -> post-save sequence.
     var showDefaulterAskDialog by remember { mutableStateOf(false) }
     var showDefaulterEditDialog by remember { mutableStateOf(false) }
-    var defaulterLotId by remember { mutableStateOf<Long?>(null) }
     var defaulterLotNumber by remember { mutableIntStateOf(0) }
     var defaulterRows by remember { mutableStateOf<List<RdNumber>>(emptyList()) }
     var pendingPostSave by remember { mutableStateOf<PostSave?>(null) }
@@ -381,7 +380,6 @@ private fun RDCameraScreen(
             currentLotNumber++
             currentLotNumbers.clear()
 
-            defaulterLotId = lotId
             defaulterLotNumber = savedLotNumber
             defaulterRows = savedRows
             pendingPostSave = if (alsoEndSession) PostSave.EndSession else PostSave.Continue
@@ -405,7 +403,6 @@ private fun RDCameraScreen(
                 currentLotNumber++
                 currentLotNumbers.clear()
 
-                defaulterLotId = lotId
                 defaulterLotNumber = savedLotNumber
                 defaulterRows = app.database.rdNumberDao().getNumbersForLotSync(lotId)
                 pendingPostSave = PostSave.EndSession

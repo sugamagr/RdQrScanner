@@ -68,6 +68,9 @@ git token.txt
 .env
 .env.local
 
+# Tooling runtime artifacts
+.omo/
+
 # Google Services (if you add Firebase later)
 google-services.json
 

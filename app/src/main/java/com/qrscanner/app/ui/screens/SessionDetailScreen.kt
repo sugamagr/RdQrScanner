@@ -45,6 +45,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -134,7 +135,7 @@ fun SessionDetailScreen(
                     Text(
                         text = buildString {
                             append("${lots.size} LOTs • $totalRdNumbers RD Numbers")
-                            if (totalDefaults > 0) append(" • $totalDefaults default")
+                            if (totalDefaults > 0) append(" • $totalDefaults default${if (totalDefaults == 1) "" else "s"}")
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = TextSecondary
@@ -273,7 +274,7 @@ private fun LotCard(lot: ScanLot) {
                         Text(
                             text = buildString {
                                 append("$rdNumberCount RD Numbers")
-                                if (defaultCount > 0) append(" • $defaultCount default")
+                                if (defaultCount > 0) append(" • $defaultCount default${if (defaultCount == 1) "" else "s"}")
                                 append(" • ${timeFormat.format(Date(lot.timestamp))}")
                             },
                             style = MaterialTheme.typography.bodySmall,

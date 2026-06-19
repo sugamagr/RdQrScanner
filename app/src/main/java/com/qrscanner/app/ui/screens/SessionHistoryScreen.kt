@@ -790,7 +790,7 @@ private fun SessionCard(
                                     .padding(horizontal = 8.dp, vertical = 2.dp)
                             ) {
                                 Text(
-                                    text = "$defaultCount default",
+                                    text = "$defaultCount default${if (defaultCount == 1) "" else "s"}",
                                     style = MaterialTheme.typography.labelSmall.copy(
                                         fontWeight = FontWeight.SemiBold,
                                         color = WarningAmber
