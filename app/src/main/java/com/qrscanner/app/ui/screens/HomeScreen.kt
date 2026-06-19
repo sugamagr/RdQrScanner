@@ -52,6 +52,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.qrscanner.app.QRScannerApp
+import com.qrscanner.app.cloud.CloudSessionStatus
+import com.qrscanner.app.data.sync.SyncPillState
+import com.qrscanner.app.data.sync.SyncSummary
+import com.qrscanner.app.ui.components.SyncStatusPill
 import com.qrscanner.app.ui.theme.AccentCoral
 import com.qrscanner.app.ui.theme.AccentMint
 import com.qrscanner.app.ui.theme.PrimaryOrange
@@ -73,6 +77,40 @@ fun HomeScreen(
     val context = LocalContext.current
     val app = context.applicationContext as QRScannerApp
     val completedSessions by app.database.scanSessionDao().getCompletedSessions().collectAsState(initial = emptyList())
+
+    // Sync pill state: derive NOT_SIGNED_IN from CloudClient.sessionStatus
+    // because SyncRepository.summaryFlow only emits states reachable during a
+    // push (it never transitions to NOT_SIGNED_IN itself).
+    val pendingFromDb by app.database.scanSessionDao().observePendingCount()
+        .collectAsState(initial = 0)
+    val sessionStatus by app.cloudClient.sessionStatus.collectAsState(
+        initial = CloudSessionStatus.Initializing
+    )
+    val repoSummary by app.syncRepository.summaryFlow.collectAsState(
+        initial = SyncSummary(
+            state = SyncPillState.INITIALIZING,
+            pendingCount = pendingFromDb,
+            lastSuccessfulPushAt = null,
+            lastSuccessfulPullAt = null,
+            lastErrorMessage = null
+        )
+    )
+    val displayedSummary = remember(repoSummary, pendingFromDb, sessionStatus) {
+        when (sessionStatus) {
+            is CloudSessionStatus.NotAuthenticated,
+            is CloudSessionStatus.RefreshFailure -> repoSummary.copy(state = SyncPillState.NOT_SIGNED_IN)
+            is CloudSessionStatus.Initializing -> repoSummary.copy(state = SyncPillState.INITIALIZING)
+            is CloudSessionStatus.Authenticated -> {
+                val pillState = when {
+                    repoSummary.state == SyncPillState.SYNCING -> SyncPillState.SYNCING
+                    repoSummary.state == SyncPillState.ERROR -> SyncPillState.ERROR
+                    pendingFromDb > 0 -> SyncPillState.PENDING
+                    else -> SyncPillState.SYNCED
+                }
+                repoSummary.copy(state = pillState, pendingCount = pendingFromDb)
+            }
+        }
+    }
     
     val todayFormatter = remember { SimpleDateFormat("yyyyMMdd", Locale.getDefault()) }
     val displayDateFormatter = remember { SimpleDateFormat("EEEE, MMMM d, yyyy", Locale.getDefault()) }
@@ -107,6 +145,15 @@ fun HomeScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Spacer(modifier = Modifier.height(12.dp))
+
+            SyncStatusPill(
+                summary = displayedSummary,
+                onTap = { /* T2.10: tap target wired in Phase 5 diagnostics screen */ },
+                modifier = Modifier
+                    .align(Alignment.End)
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
             
             // App Logo
             Box(
