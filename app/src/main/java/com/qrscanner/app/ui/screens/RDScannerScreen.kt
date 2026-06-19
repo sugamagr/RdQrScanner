@@ -94,6 +94,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
@@ -888,7 +889,13 @@ private fun RDCameraScreen(
         
         // Finish LOT Dialog - Custom styled
         if (showFinishLotDialog) {
-            Dialog(onDismissRequest = { showFinishLotDialog = false }) {
+            Dialog(
+                onDismissRequest = { /* require explicit choice */ },
+                properties = DialogProperties(
+                    dismissOnBackPress = false,
+                    dismissOnClickOutside = false
+                )
+            ) {
                 Surface(
                     shape = RoundedCornerShape(24.dp),
                     color = Color.White,
@@ -966,7 +973,13 @@ private fun RDCameraScreen(
         
         // End Session Dialog - Custom styled
         if (showEndSessionDialog) {
-            Dialog(onDismissRequest = { showEndSessionDialog = false }) {
+            Dialog(
+                onDismissRequest = { /* require explicit choice */ },
+                properties = DialogProperties(
+                    dismissOnBackPress = false,
+                    dismissOnClickOutside = false
+                )
+            ) {
                 Surface(
                     shape = RoundedCornerShape(24.dp),
                     color = Color.White,
