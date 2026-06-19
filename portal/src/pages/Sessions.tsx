@@ -41,14 +41,18 @@ export function SessionsPage() {
             }}
             className="flex items-center gap-2"
           >
-            <input
-              type="text"
-              inputMode="numeric"
-              placeholder="Search by session #"
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              className="w-44 rounded-pill border border-surface-border bg-surface px-3.5 py-1.5 text-sm placeholder:text-ink-muted sm:w-56"
-            />
+            <label className="contents">
+              <span className="sr-only">Search by session number</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                placeholder="Search by session #"
+                aria-label="Search by session number"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                className="w-44 rounded-pill border border-surface-border bg-surface px-3.5 py-1.5 text-sm placeholder:text-ink-muted sm:w-56"
+              />
+            </label>
             {committedSearch && (
               <button
                 type="button"
@@ -79,8 +83,8 @@ export function SessionsPage() {
       {isEmpty && <EmptyState search={committedSearch} />}
 
       {!isInitialLoad && rows.length > 0 && (
-        <div className="mt-6 overflow-hidden rounded-2xl border border-surface-border bg-surface shadow-card">
-          <table className="w-full text-left text-sm">
+        <div className="mt-6 overflow-x-auto rounded-2xl border border-surface-border bg-surface shadow-card">
+          <table className="w-full min-w-[640px] text-left text-sm">
             <thead className="border-b border-surface-border bg-surface-alt text-xs uppercase tracking-wide text-ink-secondary">
               <tr>
                 <th className="px-4 py-3 font-medium">#</th>
@@ -95,7 +99,7 @@ export function SessionsPage() {
               {rows.map((session) => (
                 <tr
                   key={session.id}
-                  className="border-b border-surface-border last:border-b-0 hover:bg-surface-alt"
+                  className="border-b border-surface-border transition-colors duration-150 last:border-b-0 hover:bg-surface-alt"
                 >
                   <td className="px-4 py-3 align-middle">
                     <Link
@@ -118,7 +122,7 @@ export function SessionsPage() {
                   </td>
                   <td className="px-4 py-3 align-middle">
                     {session.default_count > 0 ? (
-                      <span className="inline-flex items-center rounded-pill bg-warn/10 px-2.5 py-0.5 text-xs font-medium text-warn">
+                      <span className="inline-flex items-center rounded-pill bg-warn/15 px-2.5 py-0.5 text-xs font-semibold text-warn">
                         {formatNumber(session.default_count)}
                       </span>
                     ) : (
