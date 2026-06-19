@@ -25,13 +25,20 @@ import java.util.UUID
  */
 class SyncRepository(
     private val database: AppDatabase,
-    private val cloudClient: CloudClient
+    private val cloudClient: CloudClient,
+    private val notifier: com.qrscanner.app.notifications.SyncNotifier
 ) {
 
     private val sessionDao = database.scanSessionDao()
     private val lotDao = database.scanLotDao()
     private val rdNumberDao = database.rdNumberDao()
     private val deviceSettingsDao = database.deviceSettingsDao()
+
+    // Track consecutive runPush failure cycles. Spec §15.5.2 fires the
+    // sync_error notification on the 3rd consecutive failure and re-fires
+    // every additional 6 failures so the notification stays sticky without
+    // spamming on every flaky-network retry tick.
+    private var consecutiveFailures: Int = 0
 
     private val mutableSummary = MutableStateFlow(
         SyncSummary(
@@ -208,6 +215,23 @@ class SyncRepository(
                 false
             }
 
+            // Fire per-session success notification (spec §15.5.2 Channel A,
+            // T2.11) BEFORE the orphan-children check below — we want to
+            // confirm to the user that the session reached cloud even if a
+            // late rd_number fix-up is still pending.
+            if (rdAllOk) {
+                runCatching {
+                    val settings = deviceSettingsDao.get()
+                    val deviceName = settings?.deviceName ?: ""
+                    notifier.notifySessionSynced(
+                        displayNumber = sess.displayNumber,
+                        totalLots = sess.totalLots,
+                        totalRdNumbers = sess.totalRdNumbers,
+                        deviceName = deviceName
+                    )
+                }
+            }
+
             // BLOCKER fix (oracle adversarial #7): if any child rd_number
             // failed, propagate that to the session so it stays in the
             // DIRTY/SYNC_ERROR set and is revisited on the next push run.
@@ -242,6 +266,17 @@ class SyncRepository(
                     lastErrorMessage = firstError.message ?: firstError.toString()
                 )
             }
+            consecutiveFailures += 1
+            // Spec §15.5.2: surface the error notification on the 3rd
+            // consecutive failure and re-fire every additional 6 so the
+            // user isn't spammed on every retry tick but the badge stays
+            // sticky.
+            val shouldNotify = consecutiveFailures == ERROR_NOTIFY_THRESHOLD ||
+                (consecutiveFailures > ERROR_NOTIFY_THRESHOLD &&
+                    (consecutiveFailures - ERROR_NOTIFY_THRESHOLD) % ERROR_NOTIFY_REFIRE_EVERY == 0)
+            if (shouldNotify) {
+                runCatching { notifier.notifySyncError(remaining) }
+            }
             Result.failure(firstError)
         } else {
             updateSummary {
@@ -252,6 +287,8 @@ class SyncRepository(
                     lastErrorMessage = null
                 )
             }
+            consecutiveFailures = 0
+            runCatching { notifier.clearSyncError() }
             Result.success(Unit)
         }
     }
@@ -394,5 +431,10 @@ class SyncRepository(
 
     private fun updateSummary(transform: (SyncSummary) -> SyncSummary) {
         mutableSummary.value = transform(mutableSummary.value)
+    }
+
+    companion object {
+        private const val ERROR_NOTIFY_THRESHOLD = 3
+        private const val ERROR_NOTIFY_REFIRE_EVERY = 6
     }
 }

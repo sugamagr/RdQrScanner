@@ -10,6 +10,7 @@ import com.qrscanner.app.cloud.CloudClient
 import com.qrscanner.app.cloud.SupabaseCloudClient
 import com.qrscanner.app.data.AppDatabase
 import com.qrscanner.app.data.sync.SyncRepository
+import com.qrscanner.app.notifications.SyncNotifier
 import com.qrscanner.app.work.SyncWorkScheduler
 
 /**
@@ -56,8 +57,12 @@ class QRScannerApp : Application(), Configuration.Provider {
         SupabaseCloudClient(this)
     }
 
+    val syncNotifier: SyncNotifier by lazy {
+        SyncNotifier(this)
+    }
+
     val syncRepository: SyncRepository by lazy {
-        SyncRepository(database, cloudClient)
+        SyncRepository(database, cloudClient, syncNotifier)
     }
 
     val syncScheduler: SyncWorkScheduler by lazy {
