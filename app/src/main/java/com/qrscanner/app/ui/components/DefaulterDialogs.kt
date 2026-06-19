@@ -13,6 +13,8 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -28,10 +30,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.EditCalendar
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.Button
@@ -46,12 +51,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -63,7 +71,64 @@ import com.qrscanner.app.data.RdNumber
 import com.qrscanner.app.ui.theme.PrimaryOrange
 import com.qrscanner.app.ui.theme.TextSecondary
 import com.qrscanner.app.ui.theme.WarningAmber
+import com.qrscanner.app.util.MonthYear
 import kotlinx.coroutines.delay
+
+/**
+ * Per-row edit state captured by [DefaulterEditDialog].
+ *
+ * Invariant: `months.size == count`. Mutations go through [withCount] /
+ * [withMonths] / [shiftWindow] / [swapMonth] so the invariant is impossible
+ * to violate from the caller side.
+ */
+data class DefaulterRowDraft(
+    val count: Int,
+    val months: List<MonthYear>
+) {
+    fun withCount(newCount: Int, today: MonthYear = MonthYear.current()): DefaulterRowDraft {
+        val safe = newCount.coerceIn(RdNumber.MONTHS_MIN, RdNumber.MONTHS_MAX)
+        if (safe == count) return this
+        val newMonths = when {
+            safe > count -> {
+                // Extend the window backward from the current oldest, so adding
+                // a month means 'one more month of arrears'.
+                val oldest = months.lastOrNull() ?: today
+                val extra = (1..(safe - count)).map { delta ->
+                    var cursor = oldest
+                    repeat(delta) { cursor = cursor.minusOneMonth() }
+                    cursor
+                }
+                months + extra
+            }
+            else -> months.take(safe)
+        }
+        return DefaulterRowDraft(safe, newMonths)
+    }
+
+    fun shiftWindow(forward: Boolean, today: MonthYear = MonthYear.current()): DefaulterRowDraft {
+        if (months.isEmpty()) return this
+        val newest = months.first()
+        if (forward && newest >= today) return this
+        val shifted = months.map { if (forward) it.plusOneMonth() else it.minusOneMonth() }
+        return copy(months = shifted)
+    }
+
+    fun swapMonth(index: Int, picked: MonthYear): DefaulterRowDraft {
+        if (index !in months.indices) return this
+        if (picked in months) return this
+        val updated = months.toMutableList().apply { this[index] = picked }
+        return copy(months = updated)
+    }
+
+    fun encodeOrNull(): String? = if (count <= 1) null else MonthYear.encodeList(months)
+
+    companion object {
+        fun fromRow(row: RdNumber, today: MonthYear = MonthYear.current()): DefaulterRowDraft {
+            val resolved = MonthYear.resolveOrAuto(row.monthsList, row.monthsPaid, today)
+            return DefaulterRowDraft(row.monthsPaid, resolved)
+        }
+    }
+}
 
 /**
  * Asks whether the just-saved LOT contains any defaulter accounts (paid > 1 month).
@@ -131,26 +196,40 @@ fun DefaulterAskDialog(
 }
 
 /**
- * Editable list of RD numbers with a per-row month stepper bounded to
- * [RdNumber.MONTHS_MIN]..[RdNumber.MONTHS_MAX].
+ * Editable list of RD numbers with a per-row stepper, month-window chip
+ * strip, and a < > pair to shift the window earlier / later. Long-pressing
+ * a chip swaps that single month via [MonthPickerDialog].
  *
- * The dialog tracks the diff locally and only emits changed rows to [onSave],
- * so the caller writes the minimum set of UPDATEs.
+ * The dialog tracks a [DefaulterRowDraft] per row locally and only emits
+ * changed rows (different count or different month list) to [onSave], so
+ * the caller writes the minimum set of UPDATEs.
+ *
+ * Each change is `(newCount, encodedMonthsList?)`. The list is null when
+ * the row is being demoted back to 1 month (non-defaulter).
  */
 @Composable
 fun DefaulterEditDialog(
     lotNumber: Int,
     numbers: List<RdNumber>,
     onDismiss: () -> Unit,
-    onSave: (changes: Map<Long, Int>) -> Unit
+    onSave: (changes: Map<Long, Pair<Int, String?>>) -> Unit
 ) {
-    val draft = remember(numbers) {
-        mutableStateMapOf<Long, Int>().apply {
-            numbers.forEach { put(it.id, it.monthsPaid) }
-        }
+    val today = remember { MonthYear.current() }
+    val initial = remember(numbers) {
+        numbers.associate { it.id to DefaulterRowDraft.fromRow(it, today) }
     }
-    val changedCount = numbers.count { (draft[it.id] ?: it.monthsPaid) != it.monthsPaid }
-    val defaulterCount = numbers.count { (draft[it.id] ?: it.monthsPaid) > 1 }
+    val draft = remember(initial) {
+        mutableStateMapOf<Long, DefaulterRowDraft>().apply { putAll(initial) }
+    }
+
+    val changedCount = numbers.count { rd ->
+        val original = initial[rd.id] ?: return@count false
+        val current = draft[rd.id] ?: return@count false
+        current.count != original.count || current.months != original.months
+    }
+    val defaulterCount = numbers.count { (draft[it.id]?.count ?: it.monthsPaid) > 1 }
+
+    var pickerTarget by remember { mutableStateOf<PickerTarget?>(null) }
 
     Dialog(
         onDismissRequest = { /* prevent accidental loss of in-progress edits */ },
@@ -164,7 +243,7 @@ fun DefaulterEditDialog(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp)
-                .heightIn(max = 640.dp),
+                .heightIn(max = 720.dp),
             shape = RoundedCornerShape(24.dp),
             color = Color.White,
             tonalElevation = 8.dp
@@ -173,7 +252,7 @@ fun DefaulterEditDialog(
                 DialogHeader(
                     title = "LOT $lotNumber defaulters",
                     subtitle = if (defaulterCount > 0) {
-                        "$defaulterCount marked • ${numbers.size} total"
+                        "$defaulterCount marked • ${numbers.size} total · long-press a chip to swap"
                     } else {
                         "Tap + on rows that paid more than one month"
                     }
@@ -184,14 +263,27 @@ fun DefaulterEditDialog(
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 380.dp),
+                        .heightIn(max = 440.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(numbers, key = { it.id }) { rdNumber ->
+                        val current = draft[rdNumber.id] ?: DefaulterRowDraft.fromRow(rdNumber, today)
                         DefaulterRow(
                             number = rdNumber.number,
-                            months = draft[rdNumber.id] ?: rdNumber.monthsPaid,
-                            onMonthsChange = { draft[rdNumber.id] = it }
+                            draftState = current,
+                            today = today,
+                            onCountChange = { newCount ->
+                                draft[rdNumber.id] = current.withCount(newCount, today)
+                            },
+                            onShiftEarlier = {
+                                draft[rdNumber.id] = current.shiftWindow(forward = false, today = today)
+                            },
+                            onShiftLater = {
+                                draft[rdNumber.id] = current.shiftWindow(forward = true, today = today)
+                            },
+                            onLongPressChip = { index ->
+                                pickerTarget = PickerTarget(rdNumber.id, index)
+                            }
                         )
                     }
                 }
@@ -214,13 +306,12 @@ fun DefaulterEditDialog(
 
                     Button(
                         onClick = {
-                            val changes = numbers
-                                .mapNotNull { rd ->
-                                    val newValue = (draft[rd.id] ?: rd.monthsPaid)
-                                        .coerceIn(RdNumber.MONTHS_MIN, RdNumber.MONTHS_MAX)
-                                    if (newValue != rd.monthsPaid) rd.id to newValue else null
-                                }
-                                .toMap()
+                            val changes = numbers.mapNotNull { rd ->
+                                val before = initial[rd.id] ?: return@mapNotNull null
+                                val after = draft[rd.id] ?: return@mapNotNull null
+                                if (after.count == before.count && after.months == before.months) return@mapNotNull null
+                                rd.id to (after.count to after.encodeOrNull())
+                            }.toMap()
                             onSave(changes)
                         },
                         modifier = Modifier.weight(2f),
@@ -234,7 +325,29 @@ fun DefaulterEditDialog(
             }
         }
     }
+
+    pickerTarget?.let { target ->
+        val current = draft[target.rowId] ?: return@let
+        val existing = current.months
+        val initialSelection = existing.getOrNull(target.chipIndex) ?: today
+        val disabled = existing
+            .withIndex()
+            .filter { it.index != target.chipIndex }
+            .map { it.value }
+            .toSet()
+        MonthPickerDialog(
+            initialSelection = initialSelection,
+            disabledMonths = disabled,
+            onDismiss = { pickerTarget = null },
+            onPick = { picked ->
+                draft[target.rowId] = current.swapMonth(target.chipIndex, picked)
+                pickerTarget = null
+            }
+        )
+    }
 }
+
+private data class PickerTarget(val rowId: Long, val chipIndex: Int)
 
 @Composable
 private fun DialogHeader(title: String, subtitle: String) {
@@ -270,35 +383,148 @@ private fun DialogHeader(title: String, subtitle: String) {
 @Composable
 private fun DefaulterRow(
     number: String,
-    months: Int,
-    onMonthsChange: (Int) -> Unit
+    draftState: DefaulterRowDraft,
+    today: MonthYear,
+    onCountChange: (Int) -> Unit,
+    onShiftEarlier: () -> Unit,
+    onShiftLater: () -> Unit,
+    onLongPressChip: (Int) -> Unit
 ) {
-    val isDefaulter = months > 1
+    val isDefaulter = draftState.count > 1
     val rowBg by animateColorAsState(
         targetValue = if (isDefaulter) PrimaryOrange.copy(alpha = 0.08f) else Color(0xFFF7F8FA),
         animationSpec = tween(220),
         label = "rowBg"
     )
 
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(rowBg, RoundedCornerShape(14.dp))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = number,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Medium
+                ),
+                modifier = Modifier.weight(1f)
+            )
+
+            MonthStepper(
+                months = draftState.count,
+                onMonthsChange = onCountChange
+            )
+        }
+
+        if (isDefaulter) {
+            Spacer(modifier = Modifier.height(8.dp))
+            MonthChipStrip(
+                months = draftState.months,
+                today = today,
+                onShiftEarlier = onShiftEarlier,
+                onShiftLater = onShiftLater,
+                onLongPressChip = onLongPressChip
+            )
+        }
+    }
+}
+
+@Composable
+private fun MonthChipStrip(
+    months: List<MonthYear>,
+    today: MonthYear,
+    onShiftEarlier: () -> Unit,
+    onShiftLater: () -> Unit,
+    onLongPressChip: (Int) -> Unit
+) {
+    val canShiftLater = months.firstOrNull()?.let { it < today } ?: false
+    val scrollState = rememberScrollState()
+
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        ChipShiftButton(
+            icon = Icons.Default.ChevronLeft,
+            enabled = true,
+            onClick = onShiftEarlier
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .horizontalScroll(scrollState),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            months.forEachIndexed { index, month ->
+                MonthChip(
+                    label = month.formatShort(),
+                    onLongPress = { onLongPressChip(index) }
+                )
+            }
+        }
+        Spacer(modifier = Modifier.width(6.dp))
+        ChipShiftButton(
+            icon = Icons.Default.ChevronRight,
+            enabled = canShiftLater,
+            onClick = onShiftLater
+        )
+    }
+}
+
+@Composable
+private fun MonthChip(
+    label: String,
+    onLongPress: () -> Unit
+) {
+    val haptics = LocalHapticFeedback.current
+    Box(
+        modifier = Modifier
+            .background(
+                color = WarningAmber.copy(alpha = 0.18f),
+                shape = RoundedCornerShape(10.dp)
+            )
+            .pointerInput(label) {
+                detectTapGestures(
+                    onLongPress = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onLongPress()
+                    }
+                )
+            }
+            .padding(horizontal = 10.dp, vertical = 6.dp)
     ) {
         Text(
-            text = number,
-            style = MaterialTheme.typography.bodyMedium.copy(
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Medium
-            ),
-            modifier = Modifier.weight(1f)
+            text = label,
+            style = MaterialTheme.typography.labelMedium.copy(
+                fontWeight = FontWeight.Bold,
+                color = WarningAmber
+            )
         )
+    }
+}
 
-        MonthStepper(
-            months = months,
-            onMonthsChange = onMonthsChange
+@Composable
+private fun ChipShiftButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(28.dp)
+            .background(
+                color = if (enabled) Color.White else Color(0xFFF1F3F5),
+                shape = CircleShape
+            )
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = if (enabled) PrimaryOrange else Color(0xFFCBD0D6),
+            modifier = Modifier.size(16.dp)
         )
     }
 }

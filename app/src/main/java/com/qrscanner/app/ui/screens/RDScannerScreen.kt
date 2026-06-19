@@ -1152,8 +1152,9 @@ private fun RDCameraScreen(
                     showDefaulterEditDialog = false
                     defaulterLotId = null
                     scope.launch {
-                        changes.forEach { (id, months) ->
-                            app.database.rdNumberDao().updateMonths(id, months, null)
+                        changes.forEach { (id, valueAndList) ->
+                            val (months, monthsList) = valueAndList
+                            app.database.rdNumberDao().updateMonths(id, months, monthsList)
                         }
                         if (changes.isNotEmpty()) {
                             Toast.makeText(
