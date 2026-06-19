@@ -13,8 +13,10 @@ interface ScanSessionDao {
     @Query("SELECT * FROM scan_sessions ORDER BY startTime DESC")
     fun getAllSessions(): Flow<List<ScanSession>>
     
-    // Only get completed sessions with actual data, ordered by displayNumber
-    @Query("SELECT * FROM scan_sessions WHERE isActive = 0 AND totalLots > 0 ORDER BY displayNumber DESC")
+    // Only get completed sessions with actual data, ordered by displayNumber.
+    // deletedAt IS NULL excludes soft-deleted sessions so they disappear from
+    // history the instant the user taps delete (Phase 2 T2.6).
+    @Query("SELECT * FROM scan_sessions WHERE isActive = 0 AND totalLots > 0 AND deletedAt IS NULL ORDER BY displayNumber DESC")
     fun getCompletedSessions(): Flow<List<ScanSession>>
     
     @Query("SELECT * FROM scan_sessions WHERE isActive = 1 ORDER BY startTime DESC LIMIT 1")
@@ -80,6 +82,23 @@ interface ScanSessionDao {
      */
     @Query("UPDATE scan_sessions SET syncStatus = 'DIRTY' WHERE syncStatus = 'SYNCING'")
     suspend fun recoverStuckSyncing()
+
+    /**
+     * Soft-deletes a session by stamping deletedAt + bumping updatedAt +
+     * flipping syncStatus to DIRTY so the push worker propagates the
+     * tombstone to cloud. Called by [SyncRepository.softDeleteSession] only
+     * for already-synced sessions (cloudId != null); never-pushed sessions
+     * are hard-deleted by the caller because there's nothing in cloud to
+     * tombstone.
+     */
+    @Query(
+        """
+        UPDATE scan_sessions
+        SET deletedAt = :now, updatedAt = :now, syncStatus = 'DIRTY'
+        WHERE id = :id
+        """
+    )
+    suspend fun softDelete(id: Long, now: Long)
 
     @Query("SELECT COUNT(*) FROM scan_sessions WHERE syncStatus IN ('DIRTY','SYNC_ERROR') AND isActive = 0")
     fun observePendingCount(): Flow<Int>
@@ -169,6 +188,15 @@ interface ScanLotDao {
 
     @Query("UPDATE scan_lots SET syncStatus = 'DIRTY' WHERE syncStatus = 'SYNCING'")
     suspend fun recoverStuckSyncing()
+
+    @Query(
+        """
+        UPDATE scan_lots
+        SET deletedAt = :now, updatedAt = :now, syncStatus = 'DIRTY'
+        WHERE sessionId = :sessionId
+        """
+    )
+    suspend fun softDeleteForSession(sessionId: Long, now: Long)
 
     @Query(
         """

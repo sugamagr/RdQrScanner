@@ -625,9 +625,12 @@ fun SessionHistoryScreen(
                     TextButton(onClick = {
                         scope.launch {
                             try {
-                                app.database.rdNumberDao().deleteForSession(session.id)
-                                app.database.scanLotDao().deleteLotsForSession(session.id)
-                                app.database.scanSessionDao().delete(session)
+                                // Phase 2 T2.6: soft-delete if the session was ever
+                                // pushed (cloudId set) so the tombstone propagates
+                                // to cloud + other devices; hard-delete otherwise.
+                                // SyncRepository picks the right path.
+                                app.syncRepository.softDeleteSession(session.id)
+                                try { app.syncScheduler.enqueuePush() } catch (_: Throwable) {}
                                 Toast.makeText(context, "Session deleted", Toast.LENGTH_SHORT).show()
                             } catch (_: Exception) {
                                 Toast.makeText(context, "Delete failed", Toast.LENGTH_SHORT).show()
@@ -661,10 +664,9 @@ fun SessionHistoryScreen(
                         scope.launch {
                             try {
                                 toDelete.forEach { id ->
-                                    app.database.rdNumberDao().deleteForSession(id)
-                                    app.database.scanLotDao().deleteLotsForSession(id)
-                                    app.database.scanSessionDao().deleteById(id)
+                                    app.syncRepository.softDeleteSession(id)
                                 }
+                                try { app.syncScheduler.enqueuePush() } catch (_: Throwable) {}
                                 Toast.makeText(context, "Deleted $count session${if (count > 1) "s" else ""}", Toast.LENGTH_SHORT).show()
                             } catch (_: Exception) {
                                 Toast.makeText(context, "Delete failed", Toast.LENGTH_SHORT).show()
@@ -698,10 +700,9 @@ fun SessionHistoryScreen(
                         scope.launch {
                             try {
                                 completedSessions.forEach { session ->
-                                    app.database.rdNumberDao().deleteForSession(session.id)
-                                    app.database.scanLotDao().deleteLotsForSession(session.id)
-                                    app.database.scanSessionDao().delete(session)
+                                    app.syncRepository.softDeleteSession(session.id)
                                 }
+                                try { app.syncScheduler.enqueuePush() } catch (_: Throwable) {}
                                 Toast.makeText(context, "All sessions cleared", Toast.LENGTH_SHORT).show()
                             } catch (_: Exception) {
                                 Toast.makeText(context, "Failed to clear sessions", Toast.LENGTH_SHORT).show()

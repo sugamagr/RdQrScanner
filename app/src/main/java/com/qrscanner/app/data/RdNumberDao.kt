@@ -88,6 +88,15 @@ interface RdNumberDao {
     @Query(
         """
         UPDATE rd_numbers
+        SET deletedAt = :now, updatedAt = :now, syncStatus = 'DIRTY'
+        WHERE lotId IN (SELECT id FROM scan_lots WHERE sessionId = :sessionId)
+        """
+    )
+    suspend fun softDeleteForSession(sessionId: Long, now: Long)
+
+    @Query(
+        """
+        UPDATE rd_numbers
         SET syncStatus = 'DIRTY', updatedAt = :updatedAt
         WHERE lotId IN (SELECT id FROM scan_lots WHERE sessionId = :sessionId) AND syncStatus = 'LOCAL_ONLY'
         """

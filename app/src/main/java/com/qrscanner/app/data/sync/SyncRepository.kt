@@ -75,6 +75,40 @@ class SyncRepository(
     }
 
     /**
+     * Deletes a session from history. Picks hard-delete vs soft-delete
+     * based on whether the session was ever pushed to cloud:
+     *
+     * - **Never-pushed** (cloudId == null): hard-delete the session +
+     *   its lots + rd_numbers. Nothing in cloud to tombstone.
+     *
+     * - **Already pushed** (cloudId != null): cascade soft-delete the
+     *   session subtree by stamping deletedAt + bumping updatedAt +
+     *   flipping syncStatus to DIRTY. The push worker picks up the
+     *   tombstones and propagates them to cloud, which broadcasts
+     *   them via realtime to other devices per spec §11.
+     *
+     * Wrapped in withTransaction so a process kill mid-delete can't
+     * leave parent soft-deleted while children are still alive.
+     */
+    suspend fun softDeleteSession(sessionId: Long) {
+        val session = sessionDao.getSessionById(sessionId) ?: return
+        val now = System.currentTimeMillis()
+        if (session.cloudId == null) {
+            database.withTransaction {
+                rdNumberDao.deleteForSession(sessionId)
+                lotDao.deleteLotsForSession(sessionId)
+                sessionDao.deleteById(sessionId)
+            }
+        } else {
+            database.withTransaction {
+                rdNumberDao.softDeleteForSession(sessionId, now)
+                lotDao.softDeleteForSession(sessionId, now)
+                sessionDao.softDelete(sessionId, now)
+            }
+        }
+    }
+
+    /**
      * Push phase per spec §8. Walks DIRTY/SYNC_ERROR sessions in
      * updated_at ASC order. For each: pushes the session first, then
      * its DIRTY/SYNC_ERROR LOTs, then each LOT's DIRTY/SYNC_ERROR RD
