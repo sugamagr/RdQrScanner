@@ -3,7 +3,7 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 
 export function SignInPage() {
-  const { session, signIn } = useAuth();
+  const { session, signIn, expiryReason } = useAuth();
   const location = useLocation() as { state?: { from?: string } };
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -39,6 +39,15 @@ export function SignInPage() {
             Sign in with your shop owner account.
           </p>
         </div>
+
+        {expiryReason && !error && (
+          <div
+            role="status"
+            className="mb-4 rounded-xl border border-warn/20 bg-warn/5 px-3.5 py-2.5 text-xs text-warn"
+          >
+            {expiryReason}
+          </div>
+        )}
 
         <form
           onSubmit={handleSubmit}
