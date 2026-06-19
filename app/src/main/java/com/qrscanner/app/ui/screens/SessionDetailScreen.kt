@@ -58,7 +58,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.qrscanner.app.QRScannerApp
-import com.qrscanner.app.data.RdNumber
 import com.qrscanner.app.data.ScanLot
 import com.qrscanner.app.data.ScanSession
 import com.qrscanner.app.ui.components.DefaulterEditDialog
@@ -448,6 +447,7 @@ private fun LotCard(
         DefaulterEditDialog(
             lotNumber = lot.lotNumber,
             numbers = rdNumberEntities,
+            anchorTimestamp = lot.timestamp,
             onDismiss = { showEditDialog = false },
             onSave = { changes ->
                 showEditDialog = false

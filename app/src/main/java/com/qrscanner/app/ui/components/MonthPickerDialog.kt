@@ -242,7 +242,9 @@ private fun MonthCell(
             style = MaterialTheme.typography.labelLarge.copy(
                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
                 color = textColor
-            )
+            ),
+            maxLines = 1,
+            softWrap = false
         )
     }
 }

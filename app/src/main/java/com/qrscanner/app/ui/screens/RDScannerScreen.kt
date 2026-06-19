@@ -68,6 +68,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -214,6 +215,7 @@ private fun RDCameraScreen(
     var showDefaulterEditDialog by rememberSaveable { mutableStateOf(false) }
     var defaulterLotNumber by rememberSaveable { mutableIntStateOf(0) }
     var defaulterLotId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var defaulterLotTimestamp by rememberSaveable { mutableLongStateOf(0L) }
     var defaulterRows by remember { mutableStateOf<List<RdNumber>>(emptyList()) }
     var pendingPostSave by rememberSaveable(stateSaver = PostSaveSaver) {
         mutableStateOf<PostSave?>(null)
@@ -521,6 +523,7 @@ private fun RDCameraScreen(
 
             defaulterLotId = lotId
             defaulterLotNumber = savedLotNumber
+            defaulterLotTimestamp = System.currentTimeMillis()
             defaulterRows = savedRows
             pendingPostSave = if (alsoEndSession) PostSave.EndSession else PostSave.Continue
             showDefaulterAskDialog = true
@@ -542,6 +545,7 @@ private fun RDCameraScreen(
 
                 defaulterLotId = lotId
                 defaulterLotNumber = savedLotNumber
+                defaulterLotTimestamp = System.currentTimeMillis()
                 defaulterRows = savedRows
                 pendingPostSave = PostSave.EndSession
                 showDefaulterAskDialog = true
@@ -1142,6 +1146,8 @@ private fun RDCameraScreen(
             DefaulterEditDialog(
                 lotNumber = defaulterLotNumber,
                 numbers = defaulterRows,
+                anchorTimestamp = defaulterLotTimestamp.takeIf { it > 0 }
+                    ?: System.currentTimeMillis(),
                 onDismiss = {
                     showDefaulterEditDialog = false
                     defaulterLotId = null

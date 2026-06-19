@@ -211,10 +211,11 @@ fun DefaulterAskDialog(
 fun DefaulterEditDialog(
     lotNumber: Int,
     numbers: List<RdNumber>,
+    anchorTimestamp: Long,
     onDismiss: () -> Unit,
     onSave: (changes: Map<Long, Pair<Int, String?>>) -> Unit
 ) {
-    val today = remember { MonthYear.current() }
+    val today = remember(anchorTimestamp) { MonthYear.fromEpochMillis(anchorTimestamp) }
     val initial = remember(numbers) {
         numbers.associate { it.id to DefaulterRowDraft.fromRow(it, today) }
     }
@@ -499,7 +500,9 @@ private fun MonthChip(
             style = MaterialTheme.typography.labelMedium.copy(
                 fontWeight = FontWeight.Bold,
                 color = WarningAmber
-            )
+            ),
+            maxLines = 1,
+            softWrap = false
         )
     }
 }
