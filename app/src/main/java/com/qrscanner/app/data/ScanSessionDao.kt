@@ -87,6 +87,17 @@ interface ScanSessionDao {
     suspend fun updateDisplayNumber(id: Long, displayNumber: Int)
 
     /**
+     * Finalized sessions still stuck in LOCAL_ONLY. Targets two recovery cases:
+     * (a) rotation-during-finalize orphans where scope cancelled between
+     * endSession and markSessionForSync, (b) v5→v6 historical sessions
+     * that the MIGRATION_5_6 backfill flipped to DIRTY but were then
+     * de-promoted somehow (defensive). Called by [SyncRepository.runPush]
+     * as part of its startup sweep.
+     */
+    @Query("SELECT * FROM scan_sessions WHERE isActive = 0 AND syncStatus = 'LOCAL_ONLY' AND deletedAt IS NULL")
+    suspend fun getOrphanFinalizedSessions(): List<ScanSession>
+
+    /**
      * Soft-deletes a session by stamping deletedAt + bumping updatedAt +
      * flipping syncStatus to DIRTY so the push worker propagates the
      * tombstone to cloud. Called by [SyncRepository.softDeleteSession] only

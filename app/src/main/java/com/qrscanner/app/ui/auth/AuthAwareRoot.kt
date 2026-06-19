@@ -136,9 +136,15 @@ fun AuthAwareRoot() {
                     scope.launch {
                         try {
                             app.cloudClient.signIn(email, password)
+                            // Auto-push after sign-in success so any pre-existing
+                            // DIRTY sessions (e.g. historical from a v5→v6
+                            // upgrade, or left over from a prior sign-out) flow
+                            // to cloud without waiting for the next finalize
+                            // (oracle adversarial #6).
+                            runCatching { app.syncScheduler.enqueuePush() }
                         } catch (e: CloudException) {
                             signInError = e.toUserMessage()
-                        } catch (e: Throwable) {
+                        } catch (e: Exception) {
                             signInError = e.message ?: "unknown error"
                         } finally {
                             signInLoading = false
@@ -184,10 +190,15 @@ fun AuthAwareRoot() {
                                     updatedAt = nowIso
                                 )
                             )
+                            // Auto-push after first-run setup so historical DIRTY
+                            // sessions (v5→v6 migration backfill) flow to cloud
+                            // immediately instead of waiting for the next finalize
+                            // (oracle regression W5 + spec §17 contract).
+                            runCatching { app.syncScheduler.enqueuePush() }
                         } catch (e: CloudException) {
                             firstRunError = e.toUserMessage()
                             android.util.Log.w("AuthAwareRoot", "first-run cloud push failed", e)
-                        } catch (e: Throwable) {
+                        } catch (e: Exception) {
                             firstRunError = e.message ?: "Couldn't save device. Try again."
                             android.util.Log.w("AuthAwareRoot", "first-run unexpected failure", e)
                         } finally {

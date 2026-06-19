@@ -475,7 +475,10 @@ private fun RDCameraScreen(
             try {
                 app.syncRepository.markSessionForSync(session.id)
                 app.syncScheduler.enqueuePush()
-            } catch (e: Throwable) {
+            } catch (e: Exception) {
+                // Narrowed from Throwable so Errors (OOM etc.) propagate
+                // cleanly instead of being silently swallowed (oracle
+                // regression W1).
                 android.util.Log.w("RDScannerScreen", "finalize: deferred sync enqueue", e)
             }
             Toast.makeText(

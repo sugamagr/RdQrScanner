@@ -3,6 +3,8 @@ package com.qrscanner.app.data.sync
 import androidx.room.withTransaction
 import com.qrscanner.app.cloud.CloudClient
 import com.qrscanner.app.cloud.CloudException
+import com.qrscanner.app.cloud.dto.DeviceDto
+import com.qrscanner.app.cloud.mappers.IsoTime
 import com.qrscanner.app.cloud.mappers.LotMapper
 import com.qrscanner.app.cloud.mappers.RdNumberMapper
 import com.qrscanner.app.cloud.mappers.SessionMapper
@@ -147,13 +149,20 @@ class SyncRepository(
         // call — runCloud's 401 mapping converts that to AuthExpired.
         val ownerId = session.ownerId
 
-        // Recover from a worker killed mid-push: flip any SYNCING rows
-        // back to DIRTY so they're visible to getDirtyForPush. Without
-        // this they're frozen forever.
+        // Two-pass recovery before each push:
+        //   1. SYNCING → DIRTY for rows left by a worker killed mid-push.
+        //   2. Finalized (isActive=0) sessions stuck at LOCAL_ONLY get
+        //      promoted to DIRTY. This covers (a) rotation-mid-finalize
+        //      orphans (scope cancels between endSession and
+        //      markSessionForSync), and (b) historical sessions from a
+        //      v5→v6 migration where the user finalized them before
+        //      completing first-run setup — they'd be unreachable from
+        //      getDirtyForPush otherwise (oracle warnings #5, #7).
         database.withTransaction {
             sessionDao.recoverStuckSyncing()
             lotDao.recoverStuckSyncing()
             rdNumberDao.recoverStuckSyncing()
+            promoteOrphanFinalizedSessions()
         }
 
         val dirtySessions = sessionDao.getDirtyForPush()
@@ -189,18 +198,39 @@ class SyncRepository(
                 continue
             }
 
-            try {
+            val rdAllOk = try {
                 pushRdNumbersForLots(lotIdMap, ownerId)
             } catch (e: CloudException.AuthExpired) {
                 updateSummary { it.copy(state = SyncPillState.ERROR, lastErrorMessage = "auth expired") }
                 return Result.failure(e)
             } catch (e: Throwable) {
                 if (firstError == null) firstError = e
-                continue
+                false
             }
 
-            pushedSessionCount++
+            // BLOCKER fix (oracle adversarial #7): if any child rd_number
+            // failed, propagate that to the session so it stays in the
+            // DIRTY/SYNC_ERROR set and is revisited on the next push run.
+            // Without this the rd_numbers are orphaned: getDirtyForPush
+            // only returns DIRTY/SYNC_ERROR sessions, and once the parent
+            // session is SYNCED its DIRTY/SYNC_ERROR children are
+            // unreachable from the per-session loop.
+            if (!rdAllOk) {
+                sessionDao.markSyncError(sess.id, "one or more rd_numbers failed; will retry")
+                if (firstError == null) firstError = IllegalStateException("rd_number child failure")
+            } else {
+                pushedSessionCount++
+            }
         }
+
+        // BLOCKER fix (oracle correctness #1): bump the device's last_seen_at
+        // on every successful push cycle. The portal's Devices page reads
+        // this; without the update the owner can't tell if a phone is
+        // actively syncing or hasn't been used in weeks. Wrapped in
+        // runCatching so a transient failure here doesn't mask a successful
+        // data push.
+        runCatching { bumpDeviceLastSeen(ownerId) }
+            .onFailure { android.util.Log.w("SyncRepository", "device last_seen_at bump failed", it) }
 
         val now = System.currentTimeMillis()
         val remaining = sessionDao.getDirtyForPush(limit = 1).size
@@ -224,6 +254,53 @@ class SyncRepository(
             }
             Result.success(Unit)
         }
+    }
+
+    /**
+     * Stamps cloud identity + flips to DIRTY any finalized sessions
+     * that are still LOCAL_ONLY. Used by [runPush]'s startup sweep to
+     * recover orphans from rotation-during-finalize and v5→v6
+     * historical sessions that were never pushed.
+     */
+    private suspend fun promoteOrphanFinalizedSessions() {
+        val settings = deviceSettingsDao.get() ?: return
+        val deviceCloudId = settings.deviceCloudId ?: return
+        val operatorName = settings.operatorName
+        val orphans = sessionDao.getOrphanFinalizedSessions()
+        val now = System.currentTimeMillis()
+        for (orphan in orphans) {
+            val cloudId = orphan.cloudId ?: UUID.randomUUID().toString()
+            sessionDao.stampFinalizeMetadata(
+                sessionId = orphan.id,
+                cloudId = cloudId,
+                deviceCloudId = deviceCloudId,
+                operatorName = operatorName,
+                updatedAt = now
+            )
+            sessionDao.markSessionDirty(orphan.id, now)
+            lotDao.markLotsDirtyForSession(orphan.id, now)
+            rdNumberDao.markRdNumbersDirtyForSession(orphan.id, now)
+        }
+    }
+
+    private suspend fun bumpDeviceLastSeen(ownerId: String) {
+        val settings = deviceSettingsDao.get() ?: return
+        val cloudId = settings.deviceCloudId ?: return
+        val deviceName = settings.deviceName ?: return
+        val nowIso = IsoTime.fromEpochMillis(System.currentTimeMillis())
+        cloudClient.upsertDevice(
+            DeviceDto(
+                id = cloudId,
+                ownerId = ownerId,
+                deviceName = deviceName,
+                deviceModel = android.os.Build.MODEL,
+                firstSeenAt = nowIso,
+                lastSeenAt = nowIso,
+                appVersion = null,
+                createdAt = nowIso,
+                updatedAt = nowIso
+            )
+        )
     }
 
     private suspend fun pushSession(sess: ScanSession, ownerId: String): String {
@@ -270,30 +347,38 @@ class SyncRepository(
         return cloudId
     }
 
+    /** Returns true iff every rd_number across every lot pushed successfully. */
     private suspend fun pushRdNumbersForLots(
         lotIdMap: Map<Long, String>,
         ownerId: String
-    ) {
+    ): Boolean {
+        var allOk = true
         for ((lotLocalId, lotCloudId) in lotIdMap) {
             val rdNumbers = rdNumberDao.getDirtyForLot(lotLocalId)
             for (rd in rdNumbers) {
-                pushRdNumber(rd, lotCloudId, ownerId)
+                if (!pushRdNumber(rd, lotCloudId, ownerId)) {
+                    allOk = false
+                }
             }
         }
+        return allOk
     }
 
-    private suspend fun pushRdNumber(rd: RdNumber, lotCloudId: String, ownerId: String) {
+    /** Returns true on success, false on non-auth failure (parent re-marks SYNC_ERROR). AuthExpired re-throws. */
+    private suspend fun pushRdNumber(rd: RdNumber, lotCloudId: String, ownerId: String): Boolean {
         val cloudId = rd.cloudId ?: UUID.randomUUID().toString()
         rdNumberDao.markSyncing(rd.id)
-        try {
+        return try {
             val dto = RdNumberMapper.toDto(rd.copy(cloudId = cloudId), lotCloudId).copy(ownerId = ownerId)
             cloudClient.upsertRdNumber(dto)
             rdNumberDao.markSynced(rd.id, System.currentTimeMillis(), cloudId)
+            true
         } catch (e: CloudException.AuthExpired) {
             rdNumberDao.markSyncError(rd.id, "auth expired")
             throw e
         } catch (e: Throwable) {
             rdNumberDao.markSyncError(rd.id, e.message ?: e.toString())
+            false
         }
     }
 
