@@ -72,13 +72,7 @@ interface ScanLotDao {
     
     @Query("SELECT * FROM scan_lots WHERE sessionId = :sessionId ORDER BY lotNumber ASC")
     suspend fun getLotsForSessionSync(sessionId: Long): List<ScanLot>
-    
-    @Query("SELECT * FROM scan_lots WHERE id = :id")
-    suspend fun getLotById(id: Long): ScanLot?
-    
-    @Query("SELECT MAX(lotNumber) FROM scan_lots WHERE sessionId = :sessionId")
-    suspend fun getMaxLotNumber(sessionId: Long): Int?
-    
+
     @Insert
     suspend fun insert(lot: ScanLot): Long
     
