@@ -452,9 +452,13 @@ private fun LotCard(
             onSave = { changes ->
                 showEditDialog = false
                 scope.launch {
+                    val now = System.currentTimeMillis()
                     changes.forEach { (id, valueAndList) ->
                         val (months, monthsList) = valueAndList
                         app.database.rdNumberDao().updateMonths(id, months, monthsList)
+                        // Flip back to DIRTY so the push worker picks it up — see
+                        // RDScannerScreen for the rationale (Phase 2 T2.5).
+                        app.database.rdNumberDao().markDirty(id, now)
                     }
                     if (changes.isNotEmpty()) {
                         Toast.makeText(
@@ -462,6 +466,11 @@ private fun LotCard(
                             "Updated ${changes.size} row${if (changes.size == 1) "" else "s"}",
                             Toast.LENGTH_SHORT
                         ).show()
+                        try {
+                            app.syncScheduler.enqueuePush()
+                        } catch (e: Throwable) {
+                            android.util.Log.w("SessionDetailScreen", "defaulter edit: deferred sync enqueue", e)
+                        }
                     }
                 }
             }

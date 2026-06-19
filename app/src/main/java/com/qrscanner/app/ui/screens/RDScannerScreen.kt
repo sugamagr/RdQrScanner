@@ -1169,9 +1169,15 @@ private fun RDCameraScreen(
                     showDefaulterEditDialog = false
                     defaulterLotId = null
                     scope.launch {
+                        val now = System.currentTimeMillis()
                         changes.forEach { (id, valueAndList) ->
                             val (months, monthsList) = valueAndList
                             app.database.rdNumberDao().updateMonths(id, months, monthsList)
+                            // Flip the edited row back to DIRTY so the push worker
+                            // picks it up. updateMonths leaves syncStatus untouched,
+                            // so a row already SYNCED from a prior push would be
+                            // invisible to runPush otherwise (Phase 2 T2.5).
+                            app.database.rdNumberDao().markDirty(id, now)
                         }
                         if (changes.isNotEmpty()) {
                             Toast.makeText(
@@ -1179,6 +1185,11 @@ private fun RDCameraScreen(
                                 "Marked ${changes.size} defaulter${if (changes.size == 1) "" else "s"}",
                                 Toast.LENGTH_SHORT
                             ).show()
+                            try {
+                                app.syncScheduler.enqueuePush()
+                            } catch (e: Throwable) {
+                                android.util.Log.w("RDScannerScreen", "defaulter edit: deferred sync enqueue", e)
+                            }
                         }
                         pendingPostSave?.let { executePostSave(it) }
                         pendingPostSave = null
