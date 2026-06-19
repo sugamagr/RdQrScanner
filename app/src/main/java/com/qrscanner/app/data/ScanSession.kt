@@ -24,7 +24,29 @@ data class ScanSession(
      * On relaunch, [adoptSession] reads this instead of inferring the in-progress
      * LOT from row counts, so a just-finished LOT can never be misidentified.
      */
-    val activeLotId: Long? = null
+    val activeLotId: Long? = null,
+
+    /**
+     * Cloud UUID of the [DeviceSettings] row that originated this session.
+     * Stamped at finalize time so the portal can answer 'which phone scanned
+     * this?'. Remains null for sessions started before v6 until the user
+     * signs in and the push worker backfills.
+     */
+    val deviceCloudId: String? = null,
+
+    /**
+     * Free-text operator name captured from [DeviceSettings.operatorName] at
+     * finalize time, e.g. 'Ravi'. Persisted on the session so an operator
+     * switch on the same phone doesn't retroactively rewrite older sessions.
+     */
+    val operatorName: String? = null,
+
+    val cloudId: String? = null,
+    val syncStatus: SyncStatus = SyncStatus.LOCAL_ONLY,
+    val updatedAt: Long = System.currentTimeMillis(),
+    val syncedAt: Long? = null,
+    val lastSyncError: String? = null,
+    val deletedAt: Long? = null
 )
 
 @Entity(
@@ -44,7 +66,14 @@ data class ScanLot(
     val id: Long = 0,
     val sessionId: Long,
     val lotNumber: Int,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+
+    val cloudId: String? = null,
+    val syncStatus: SyncStatus = SyncStatus.LOCAL_ONLY,
+    val updatedAt: Long = System.currentTimeMillis(),
+    val syncedAt: Long? = null,
+    val lastSyncError: String? = null,
+    val deletedAt: Long? = null
 )
 
 // Validation helper
