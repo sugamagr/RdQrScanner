@@ -83,6 +83,9 @@ interface ScanSessionDao {
     @Query("UPDATE scan_sessions SET syncStatus = 'DIRTY' WHERE syncStatus = 'SYNCING'")
     suspend fun recoverStuckSyncing()
 
+    @Query("UPDATE scan_sessions SET displayNumber = :displayNumber WHERE id = :id")
+    suspend fun updateDisplayNumber(id: Long, displayNumber: Int)
+
     /**
      * Soft-deletes a session by stamping deletedAt + bumping updatedAt +
      * flipping syncStatus to DIRTY so the push worker propagates the

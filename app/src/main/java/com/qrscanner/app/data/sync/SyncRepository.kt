@@ -51,14 +51,29 @@ class SyncRepository(
      * transaction so a process kill between any pair can never leave a
      * session half-promoted (e.g. cloudId set but children still
      * LOCAL_ONLY would be unsyncable forever).
+     *
+     * The cloud's [CloudClient.nextDisplayNumber] RPC is invoked BEFORE the
+     * transaction (network IO never runs inside Room transactions). The
+     * RPC acquires a Postgres advisory lock per spec §5 so two phones
+     * finalizing simultaneously cannot collide on the same display number
+     * (Phase 2 T2.7). On failure (offline, paused project, auth expired,
+     * etc.) we fall back to the local tentative number — the push
+     * pipeline's pushSession reconciles by overwriting local
+     * displayNumber if the server returns a different value.
      */
     suspend fun markSessionForSync(sessionId: Long) {
         val settings = deviceSettingsDao.get()
         val deviceCloudId = settings?.deviceCloudId
             ?: throw IllegalStateException("markSessionForSync called before first-run setup")
+        val ownerId = settings.ownerId
+            ?: throw IllegalStateException("markSessionForSync called before first-run setup")
         val operatorName = settings.operatorName
         val cloudId = UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
+
+        val claimedDisplayNumber: Int? = runCatching { cloudClient.nextDisplayNumber(ownerId) }
+            .onFailure { android.util.Log.w("SyncRepository", "nextDisplayNumber RPC failed; using local tentative number", it) }
+            .getOrNull()
 
         database.withTransaction {
             sessionDao.stampFinalizeMetadata(
@@ -68,6 +83,9 @@ class SyncRepository(
                 operatorName = operatorName,
                 updatedAt = now
             )
+            if (claimedDisplayNumber != null) {
+                sessionDao.updateDisplayNumber(sessionId, claimedDisplayNumber)
+            }
             sessionDao.markSessionDirty(sessionId, now)
             lotDao.markLotsDirtyForSession(sessionId, now)
             rdNumberDao.markRdNumbersDirtyForSession(sessionId, now)
