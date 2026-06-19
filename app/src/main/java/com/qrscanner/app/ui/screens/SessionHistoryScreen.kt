@@ -671,9 +671,7 @@ fun SessionHistoryScreen(
                         val toDelete = selectedIds
                         scope.launch {
                             try {
-                                toDelete.forEach { id ->
-                                    app.syncRepository.softDeleteSession(id)
-                                }
+                                app.syncRepository.softDeleteSessions(toDelete)
                                 try { app.syncScheduler.enqueuePush() } catch (_: Throwable) {}
                                 Toast.makeText(context, "Deleted $count session${if (count > 1) "s" else ""}", Toast.LENGTH_SHORT).show()
                             } catch (_: Exception) {
@@ -707,9 +705,7 @@ fun SessionHistoryScreen(
                     TextButton(onClick = {
                         scope.launch {
                             try {
-                                completedSessions.forEach { session ->
-                                    app.syncRepository.softDeleteSession(session.id)
-                                }
+                                app.syncRepository.softDeleteSessions(completedSessions.map { it.id })
                                 try { app.syncScheduler.enqueuePush() } catch (_: Throwable) {}
                                 Toast.makeText(context, "All sessions cleared", Toast.LENGTH_SHORT).show()
                             } catch (_: Exception) {

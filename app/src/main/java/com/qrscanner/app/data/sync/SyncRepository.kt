@@ -137,6 +137,35 @@ class SyncRepository(
     }
 
     /**
+     * Bulk variant of [softDeleteSession] for History's "delete selected"
+     * and "clear all" paths. All N sessions are deleted inside a SINGLE
+     * Room transaction so partial cancellation can't leave the UI with a
+     * half-deleted subset (F2 from Phase 3 boundary review).
+     *
+     * Hard-delete (never-pushed) and soft-delete (already-pushed) rows are
+     * batched in the same transaction — the per-session branch is decided
+     * by inspecting cloudId inside the transaction.
+     */
+    suspend fun softDeleteSessions(sessionIds: Collection<Long>) {
+        if (sessionIds.isEmpty()) return
+        val now = System.currentTimeMillis()
+        database.withTransaction {
+            for (id in sessionIds) {
+                val session = sessionDao.getSessionById(id) ?: continue
+                if (session.cloudId == null) {
+                    rdNumberDao.deleteForSession(id)
+                    lotDao.deleteLotsForSession(id)
+                    sessionDao.deleteById(id)
+                } else {
+                    rdNumberDao.softDeleteForSession(id, now)
+                    lotDao.softDeleteForSession(id, now)
+                    sessionDao.softDelete(id, now)
+                }
+            }
+        }
+    }
+
+    /**
      * Push phase per spec §8. Walks DIRTY/SYNC_ERROR sessions in
      * updated_at ASC order. For each: pushes the session first, then
      * its DIRTY/SYNC_ERROR LOTs, then each LOT's DIRTY/SYNC_ERROR RD
