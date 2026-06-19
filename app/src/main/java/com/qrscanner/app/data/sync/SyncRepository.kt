@@ -95,6 +95,15 @@ class SyncRepository(
         // call — runCloud's 401 mapping converts that to AuthExpired.
         val ownerId = session.ownerId
 
+        // Recover from a worker killed mid-push: flip any SYNCING rows
+        // back to DIRTY so they're visible to getDirtyForPush. Without
+        // this they're frozen forever.
+        database.withTransaction {
+            sessionDao.recoverStuckSyncing()
+            lotDao.recoverStuckSyncing()
+            rdNumberDao.recoverStuckSyncing()
+        }
+
         val dirtySessions = sessionDao.getDirtyForPush()
         if (dirtySessions.isEmpty()) {
             updateSummary { it.copy(state = SyncPillState.SYNCED, pendingCount = 0) }

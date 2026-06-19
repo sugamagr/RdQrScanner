@@ -72,6 +72,15 @@ interface ScanSessionDao {
     @Query("UPDATE scan_sessions SET syncStatus = 'SYNC_ERROR', lastSyncError = :error WHERE id = :id")
     suspend fun markSyncError(id: Long, error: String)
 
+    /**
+     * Reverts any session left in SYNCING after a worker was killed
+     * mid-push back to DIRTY so the next push run picks it up. Without
+     * this sweep the row is invisible to [getDirtyForPush] and frozen
+     * forever. Called as the first DAO interaction of [SyncRepository.runPush].
+     */
+    @Query("UPDATE scan_sessions SET syncStatus = 'DIRTY' WHERE syncStatus = 'SYNCING'")
+    suspend fun recoverStuckSyncing()
+
     @Query("SELECT COUNT(*) FROM scan_sessions WHERE syncStatus IN ('DIRTY','SYNC_ERROR') AND isActive = 0")
     fun observePendingCount(): Flow<Int>
 
@@ -157,6 +166,9 @@ interface ScanLotDao {
 
     @Query("UPDATE scan_lots SET syncStatus = 'SYNC_ERROR', lastSyncError = :error WHERE id = :id")
     suspend fun markSyncError(id: Long, error: String)
+
+    @Query("UPDATE scan_lots SET syncStatus = 'DIRTY' WHERE syncStatus = 'SYNCING'")
+    suspend fun recoverStuckSyncing()
 
     @Query(
         """

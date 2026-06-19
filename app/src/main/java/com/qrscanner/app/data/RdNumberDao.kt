@@ -82,6 +82,9 @@ interface RdNumberDao {
     @Query("UPDATE rd_numbers SET syncStatus = 'SYNC_ERROR', lastSyncError = :error WHERE id = :id")
     suspend fun markSyncError(id: Long, error: String)
 
+    @Query("UPDATE rd_numbers SET syncStatus = 'DIRTY' WHERE syncStatus = 'SYNCING'")
+    suspend fun recoverStuckSyncing()
+
     @Query(
         """
         UPDATE rd_numbers
