@@ -420,9 +420,140 @@ class SyncRepository(
         }
     }
 
-    /** Pull phase per spec §8 + §11. Filled in by Phase 3 T3.1. */
+    /**
+     * Pull phase per spec §8 + §11. Queries cloud for rows with
+     * updated_at > device_settings.lastPulledAt, merges into local Room
+     * with last-writer-wins by updatedAt, advances the cursor.
+     *
+     * Per-row outcomes:
+     *  - **Local missing**: insert via the mapper. Stamps syncStatus=SYNCED.
+     *  - **Local present + remote newer**: mergeFromCloud UPDATE filtered
+     *    by `WHERE id = :id AND updatedAt <= :updatedAt`. Idempotent.
+     *  - **Local present + local newer**: merge UPDATE is a no-op (the
+     *    WHERE filter excludes it). The local change pushes on the
+     *    next runPush cycle. Spec §11's silent-loser pattern.
+     *  - **Orphan child** (parent cloudId not yet local): skip + log.
+     *    The cloud's FK CASCADE makes orphans impossible in normal
+     *    operation; if one shows up it's a cloud-side integrity issue.
+     *
+     * One runPull = one delta page. Pagination is via the cursor across
+     * cycles — pull more by calling runPull again (e.g. realtime trigger
+     * in T3.4, or the lifecycle-scoped 5-min poll).
+     */
     suspend fun runPull(): Result<Unit> {
-        return Result.failure(NotImplementedError("runPull() is Phase 3 T3.1"))
+        val cloudSession = cloudClient.currentSession()
+            ?: return Result.failure(CloudException.AuthExpired())
+        val ownerId = cloudSession.ownerId
+        val settings = deviceSettingsDao.get()
+            ?: return Result.failure(IllegalStateException("device_settings missing; first-run setup incomplete"))
+        val since = settings.lastPulledAt
+
+        val delta = try {
+            cloudClient.pullChangesSince(ownerId, since)
+        } catch (e: CloudException.AuthExpired) {
+            updateSummary { it.copy(state = SyncPillState.ERROR, lastErrorMessage = "auth expired") }
+            return Result.failure(e)
+        } catch (e: Throwable) {
+            deviceSettingsDao.recordPullError(
+                timestamp = System.currentTimeMillis(),
+                error = e.message ?: e.toString()
+            )
+            updateSummary { it.copy(lastErrorMessage = e.message ?: e.toString()) }
+            return Result.failure(e)
+        }
+
+        database.withTransaction {
+            mergeSessions(delta.sessions)
+            mergeLots(delta.lots)
+            mergeRdNumbers(delta.rdNumbers)
+            if (delta.highWaterMark > since) {
+                deviceSettingsDao.updateLastPulledAt(delta.highWaterMark)
+            }
+        }
+
+        val now = System.currentTimeMillis()
+        updateSummary { it.copy(lastSuccessfulPullAt = now, lastErrorMessage = null) }
+        return Result.success(Unit)
+    }
+
+    private suspend fun mergeSessions(dtos: List<com.qrscanner.app.cloud.dto.ScanSessionDto>) {
+        for (dto in dtos) {
+            val existing = sessionDao.findByCloudId(dto.id)
+            val updatedAt = IsoTime.toEpochMillis(dto.updatedAt)
+            val deletedAt = IsoTime.toEpochMillisOrNull(dto.deletedAt)
+            if (existing == null) {
+                sessionDao.insert(SessionMapper.toEntity(dto))
+            } else {
+                sessionDao.mergeFromCloud(
+                    id = existing.id,
+                    cloudId = dto.id,
+                    deviceCloudId = dto.deviceId,
+                    operatorName = dto.operatorName,
+                    displayNumber = dto.displayNumber,
+                    startTime = IsoTime.toEpochMillis(dto.startTime),
+                    endTime = IsoTime.toEpochMillis(dto.endTime),
+                    totalLots = dto.totalLots,
+                    totalRdNumbers = dto.totalRdNumbers,
+                    updatedAt = updatedAt,
+                    deletedAt = deletedAt
+                )
+            }
+        }
+    }
+
+    private suspend fun mergeLots(dtos: List<com.qrscanner.app.cloud.dto.ScanLotDto>) {
+        for (dto in dtos) {
+            val parent = sessionDao.findByCloudId(dto.sessionId)
+            if (parent == null) {
+                android.util.Log.w("SyncRepository", "pull: skipping lot ${dto.id} — parent session ${dto.sessionId} not local")
+                continue
+            }
+            val existing = lotDao.findByCloudId(dto.id)
+            val updatedAt = IsoTime.toEpochMillis(dto.updatedAt)
+            val deletedAt = IsoTime.toEpochMillisOrNull(dto.deletedAt)
+            if (existing == null) {
+                lotDao.insert(LotMapper.toEntity(dto).copy(sessionId = parent.id))
+            } else {
+                lotDao.mergeFromCloud(
+                    id = existing.id,
+                    cloudId = dto.id,
+                    sessionId = parent.id,
+                    lotNumber = dto.lotNumber,
+                    timestamp = IsoTime.toEpochMillis(dto.timestamp),
+                    updatedAt = updatedAt,
+                    deletedAt = deletedAt
+                )
+            }
+        }
+    }
+
+    private suspend fun mergeRdNumbers(dtos: List<com.qrscanner.app.cloud.dto.RdNumberDto>) {
+        for (dto in dtos) {
+            val parent = lotDao.findByCloudId(dto.lotId)
+            if (parent == null) {
+                android.util.Log.w("SyncRepository", "pull: skipping rd_number ${dto.id} — parent lot ${dto.lotId} not local")
+                continue
+            }
+            val existing = rdNumberDao.findByCloudId(dto.id)
+            val updatedAt = IsoTime.toEpochMillis(dto.updatedAt)
+            val deletedAt = IsoTime.toEpochMillisOrNull(dto.deletedAt)
+            if (existing == null) {
+                rdNumberDao.insert(RdNumberMapper.toEntity(dto).copy(lotId = parent.id))
+            } else {
+                rdNumberDao.mergeFromCloud(
+                    id = existing.id,
+                    cloudId = dto.id,
+                    lotId = parent.id,
+                    number = dto.number,
+                    position = dto.position,
+                    scannedAt = IsoTime.toEpochMillis(dto.scannedAt),
+                    monthsPaid = dto.monthsPaid,
+                    monthsList = dto.monthsList,
+                    updatedAt = updatedAt,
+                    deletedAt = deletedAt
+                )
+            }
+        }
     }
 
     /** Realtime targeted pull. Filled in by Phase 3 T3.4. */
