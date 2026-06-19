@@ -862,6 +862,158 @@ UI observes `syncRepository.summaryFlow` for the status pill. Workers call `sync
 
 ---
 
+## 15.5 Notifications (in-app banner + system tray)
+
+Two surfaces. Both required. Both held to the same Dribbble-level bar as the rest of the app (PrimaryOrange / WarningAmber / AccentMint palette, spring motion tokens, 24dp corner radius, no slop).
+
+### 15.5.1 In-app "recent changes since last open" banner
+
+**Surface:** dismissible horizontal card under `HomeScreen` top bar.
+
+**Trigger:** on `HomeScreen` first composition (or return to foreground after >5 min), compute the `SyncEvent` log delta since `device_settings.lastBannerSeenAt`. If empty → no banner. If non-empty → render banner, set `lastBannerSeenAt` only when user dismisses or navigates from it (not on first render — gives the user a chance to actually read).
+
+**Visual contract:**
+- 12dp inset from screen edges, 16dp internal padding.
+- Background: `PrimaryOrange.copy(alpha = 0.08f)` on white card.
+- Leading icon: `Icons.Default.NotificationsActive`, tint `PrimaryOrange`, 24dp.
+- Title (`titleSmall`, `FontWeight.SemiBold`, `PrimaryOrange`): 1 line, e.g. "3 recent updates".
+- Body (`bodySmall`, `TextSecondary`): max 2 lines, ellipsized. Aggregated summary: `"Counter Phone finalized Session #47 · Ravi marked 2 defaulters · Owner edited Session #42"`.
+- Trailing dismiss `IconButton` (`Icons.Default.Close`, 20dp, `TextSecondary`).
+- Tap the body → navigate to most-recent event's target screen (session detail / history).
+- Animations: enter `slideInVertically + fadeIn` spring `DampingRatioMediumLow`. Exit `slideOutVertically + fadeOut` tween 220ms.
+- Auto-dismiss after 8s of visibility OR on swipe-right (use `swipeable` modifier).
+- `rememberSaveable` for visibility flag.
+
+**Aggregation rule:** events from the same `deviceCloudId` within a 60s window collapse into one line. Defaulter edits from the same operator within 60s collapse into one line ("Ravi marked 2 defaulters"). Maximum 3 lines in the body; older events drop off but remain in a "view all" detail view (deferred to v2).
+
+**Event types feeding the banner:**
+- Cross-device session finalized (`scan_sessions` insert from `device_id != mine`).
+- Cross-device defaulter edit (`rd_numbers` update where `monthsPaid` or `monthsList` changed, `deviceId != mine`).
+- Portal defaulter edit (`rd_numbers` update where source is not a phone).
+- Session deletion by another device.
+
+**NOT feeding the banner:**
+- Your own phone's events. The status pill is your feedback.
+- Active-session events (active sessions don't sync, so this is moot).
+- Sync errors. Those go to the status pill + system notification per below.
+
+### 15.5.2 System-tray (OS-level) notifications
+
+Three triggers ship in v1, all selected by owner. Each is a distinct channel for user-level control.
+
+**Channel A — `sync_success` (NotificationManager.IMPORTANCE_LOW):**
+- Fires when **this phone's** push succeeds for a finalized session.
+- Title: `"Session #47 synced"`.
+- Body: `"12 LOTs, 247 RD numbers uploaded · Counter Phone"`.
+- Tap → opens app to that session's detail.
+- Silent (no sound), no vibration.
+- Auto-cancel on tap.
+
+**Channel B — `sync_error` (NotificationManager.IMPORTANCE_DEFAULT):**
+- Fires after 3 consecutive failed push retries on the same session.
+- Title: `"Sync paused"`.
+- Body: `"3 sessions waiting · tap to retry"`.
+- Tap → opens app to Settings → Sync diagnostics, where "Retry now" is the primary action.
+- Default sound, no vibration.
+- Auto-cancel on tap.
+- Re-fires every additional 6 failures (not every retry) to avoid spam.
+
+**Channel C — `remote_edit` (NotificationManager.IMPORTANCE_LOW):**
+- Fires when a portal-side defaulter edit lands on this phone via pull/realtime.
+- Title: `"Owner edited a session"`.
+- Body: `"Session #42 · 3 defaulter months updated"`.
+- Tap → opens app to that session's detail.
+- Silent, no vibration.
+- Auto-cancel on tap.
+- Multi-edit aggregation: edits to same session within 30s collapse to a single notification with updated count.
+
+**Cross-device session-finalized notifications** (the one you decided NOT to ship): NOT in v1. Phone A finalizing a session shows up only in Phone B's in-app banner, not in its system tray. Defensible because finalizations are frequent and the banner is enough surface area. Reconsider in v2 if you ever say "I missed that Phone B uploaded".
+
+### 15.5.3 Permission flow
+
+Android 13+ (API 33+) requires the `POST_NOTIFICATIONS` runtime permission. Manifest:
+
+```xml
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+```
+
+**Flow:**
+1. User signs in successfully on a fresh install.
+2. `FirstRunSetupScreen` captures device name + operator name.
+3. After "Continue" tap, navigate to a new `NotificationPermissionScreen`.
+4. Full-screen rationale: bell icon (96dp, PrimaryOrange.copy(alpha=0.12f) circle background), title "Stay in sync", body "We'll let you know when other phones in your shop upload new sessions or when the owner edits anything from the web."
+5. Two buttons: "Enable notifications" (primary, PrimaryOrange) → calls `ActivityResultContracts.RequestPermission()` for `POST_NOTIFICATIONS`. "Skip" (text button, TextSecondary) → proceeds without prompting; user can enable later from Settings.
+6. After permission resolves (granted, denied, or skipped) → HomeScreen.
+7. If denied: a one-time soft prompt in Settings ("Enable notifications" row with `Switch` that opens system settings on tap). No nagging in HomeScreen.
+
+For API < 33: skip the screen entirely. Notifications work without runtime permission on older Android.
+
+### 15.5.4 Notification content & i18n
+
+All strings live in `res/values/strings.xml` (English) and `res/values-hi/strings.xml` (Hindi). Pattern:
+
+```xml
+<string name="notif_sync_success_title">Session #%d synced</string>
+<string name="notif_sync_success_body">%1$d LOTs, %2$d RD numbers uploaded · %3$s</string>
+```
+
+```xml
+<!-- values-hi -->
+<string name="notif_sync_success_title">सेशन #%d सिंक हो गया</string>
+<string name="notif_sync_success_body">%1$d LOTs, %2$d RD numbers अपलोड किए गए · %3$s</string>
+```
+
+`NotificationCompat.Builder` reads from string resources via `context.getString(R.string.xxx, args...)`. Locale is auto-resolved from device settings; no manual locale handling needed.
+
+### 15.5.5 Sync event log (powers the banner)
+
+New Room table `sync_events`:
+
+```kotlin
+@Entity(tableName = "sync_events")
+data class SyncEvent(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val occurredAt: Long,                  // epoch ms, server-side updated_at preferred
+    val type: SyncEventType,               // enum
+    val sessionCloudId: String?,           // FK by cloud id; nullable for device events
+    val rdNumberCloudId: String?,
+    val originDeviceCloudId: String?,      // who caused it; null for portal
+    val originDeviceName: String?,         // denormalized for fast banner render
+    val originOperatorName: String?,       // denormalized
+    val payloadSummary: String              // pre-rendered "marked 2 defaulters" etc.
+)
+
+enum class SyncEventType {
+    REMOTE_SESSION_FINALIZED,
+    REMOTE_DEFAULTER_EDIT,
+    PORTAL_DEFAULTER_EDIT,
+    REMOTE_SESSION_DELETED
+}
+```
+
+Populated by `SyncRepository.handleRemoteChange()` after a pull/realtime payload is merged. Bounded to the last 100 rows (older rows pruned in a periodic worker). The banner reads:
+
+```kotlin
+@Query("SELECT * FROM sync_events WHERE occurredAt > :since ORDER BY occurredAt DESC LIMIT 20")
+suspend fun getEventsSince(since: Long): List<SyncEvent>
+```
+
+Banner composer reads the events, aggregates per §15.5.1, renders the card.
+
+### 15.5.6 Notification channels (Android 8+)
+
+Created once in `QRScannerApp.onCreate()`:
+
+| Channel id | Importance | Sound | Vibration | User label |
+|---|---|---|---|---|
+| `sync_success` | LOW | none | none | "Sync confirmations" |
+| `sync_error` | DEFAULT | default | none | "Sync problems" |
+| `remote_edit` | LOW | none | none | "Updates from owner" |
+
+User can disable per channel via system Settings → Notifications. We respect those preferences.
+
+---
+
 ## 16. Portal architecture
 
 ### Tech stack
@@ -1096,6 +1248,85 @@ Work items:
 ### Total: 12–18 focused days
 
 Calendar: spread realistically over 3–4 weeks.
+
+---
+
+## 18.5 Continuous QC Cadence (mandatory at short intervals)
+
+The defaulter feature shipped clean only because we ran 5 oracle review rounds (29 oracle invocations + 5 main-chat sweeps) with main-chat static verification between each. The same cadence applies here, formalized so an unattended overnight build can't skip it.
+
+### The cycle
+
+After **every meaningful unit of work** — defined below — the following sequence runs before moving to the next unit:
+
+1. **Main-chat static sweep** (≤2 min, blocking):
+   - Forward-reference scan for local fns inside `@Composable`.
+   - Unused-import scan (with `getValue`/`setValue` false-positive guard for `by` delegates).
+   - Same-package redundant-import scan.
+   - Cross-file signature audit for any changed function (`grep -rn 'funName\b'` and verify every call site matches).
+   - LSP diagnostics on every touched file (`lsp_diagnostics` tool).
+
+2. **Oracle review fan-out** (parallel, 3–5 oracles, varying angles):
+   - Oracle A: correctness of the unit itself (data model, state machine, idempotency).
+   - Oracle B: regression check (does anything before this unit still work?).
+   - Oracle C: adversarial / edge cases (race conditions, partial failures, weird input).
+   - Oracle D (when UI changed): Compose hygiene, recomposition keys, motion tokens, color tokens.
+   - Oracle E (when schema changed): migration safety, FK integrity, RLS policy correctness.
+
+3. **Synthesize findings into a table** (severity-tagged), apply blockers + warnings, document accepted notes, push the fix commit.
+
+4. **Visual QA** (when UI changed): load `/visual-qa` skill, capture screenshot evidence, get dual read-only verdict (design + functional integrity, visual fidelity + i18n precision). Required for any banner/notification/portal page.
+
+### What counts as a "meaningful unit"
+
+| Unit | QC required? |
+|---|---|
+| New DAO method | yes |
+| New Room migration | yes |
+| New Composable surface (screen, dialog, banner) | yes (+ visual QA) |
+| New Worker (sync push, sync pull) | yes |
+| Conflict resolution merge logic edit | yes |
+| New cloud schema column / RLS policy | yes |
+| New API call site / endpoint | yes |
+| Bug fix touching > 1 file | yes |
+| Typo / comment / KDoc only | no |
+| Trivial rename via Edit replaceAll | no |
+| Dependency version bump with no behavior change | no |
+
+### Phase-boundary review (heavier)
+
+At the end of each Phase (1 through 5), in addition to per-unit QC:
+
+1. **Full oracle round** (5–6 oracles in parallel, same shape as our rounds 1–5):
+   - Schema / data layer correctness
+   - State machine / concurrency
+   - UI / Compose hygiene
+   - Exports / serialization
+   - Regression vs prior phase
+   - Edge cases / adversarial
+
+2. **Main-chat sweep** synthesizing oracle findings against the spec contract.
+
+3. **Acceptance criteria checklist** (§19) must be checked off with evidence (test output, screenshot, Supabase Studio screenshot, etc.) before declaring phase complete.
+
+4. **Update spec** to reflect anything reality forced different from plan. Commit as `docs(spec): update §X for phase N divergence`.
+
+### Why this is non-negotiable for overnight work
+
+The cadence is the only mechanism that detects:
+- Forward-reference bugs (Kotlin doesn't hoist local fns inside `@Composable`).
+- FK cascade misconfigurations that compile but corrupt at runtime.
+- Race conditions in the sync state machine that only fire under flaky-network conditions I can't easily reproduce.
+- Visual regressions on the banner / notifications under both en and hi locales.
+
+Without it, I can produce 12 days of code that looks done and isn't. With it, every commit pushed has been reviewed from 4–6 orthogonal angles and the next morning I can defend every line.
+
+### Cadence guard rails
+
+- **No unit may move to "complete"** without the per-unit QC table showing zero unaddressed blockers + warnings.
+- **No phase may close** without the heavier review running cleanly.
+- **If 2+ consecutive units produce blockers** in oracle review, pause the loop. Commit a `docs/STOPPED_AT.md` describing the pattern and switch to lower-priority work until owner reviews.
+- **Notepad discipline**: every QC round logs `## Findings` with file:line refs and `## Learnings` with patterns to apply forward. Survives context loss across multi-day execution.
 
 ---
 
@@ -1365,6 +1596,6 @@ Items we've consciously left for later. If any of these become "I need this now"
 
 Before any code is written, this document must be approved by the owner (Sugam). Approval = explicit "go" message on the chat thread where this lives, OR a `chore(docs): approve CLOUD_SYNC_SPEC v1` commit by you to this repo.
 
-The current state of approval: **NOT APPROVED.** Awaiting owner review.
+The current state of approval: **APPROVED v1** by Sugam Agrawal in chat on the day this line was committed. Subsequent amendments must be explicit commits to this file with rationale in the message.
 
 Once approved, this document is frozen except for in-flight ammendments during the build, which must be explicit commits to this file with rationale in the message. If a phase finishes and reality diverged from the spec, update the spec to reflect what shipped, then continue.
