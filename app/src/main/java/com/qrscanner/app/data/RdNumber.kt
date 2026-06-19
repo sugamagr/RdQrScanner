@@ -27,5 +27,19 @@ data class RdNumber(
     val lotId: Long,
     val number: String,
     val position: Int,
-    val scannedAt: Long = System.currentTimeMillis()
-)
+    val scannedAt: Long = System.currentTimeMillis(),
+    /**
+     * Number of months this account has paid for in the current cycle.
+     *
+     * Normal RD payments are monthly, so the default is 1. Values greater
+     * than 1 indicate a defaulter who is paying multiple months at once
+     * (e.g. catching up after missed payments). Bounded to [MONTHS_MIN]..[MONTHS_MAX].
+     */
+    val monthsPaid: Int = MONTHS_DEFAULT
+) {
+    companion object {
+        const val MONTHS_MIN = 1
+        const val MONTHS_MAX = 36
+        const val MONTHS_DEFAULT = 1
+    }
+}

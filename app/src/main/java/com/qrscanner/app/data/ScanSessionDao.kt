@@ -42,7 +42,21 @@ interface ScanSessionDao {
     // End session with display number
     @Query("UPDATE scan_sessions SET isActive = 0, endTime = :endTime, totalLots = :totalLots, totalRdNumbers = :totalRdNumbers, displayNumber = :displayNumber WHERE id = :id")
     suspend fun endSession(id: Long, endTime: Long, totalLots: Int, totalRdNumbers: Int, displayNumber: Int)
+
+    @Query("""
+        SELECT sl.sessionId AS sessionId, COUNT(rn.id) AS count
+        FROM rd_numbers rn
+        INNER JOIN scan_lots sl ON rn.lotId = sl.id
+        WHERE rn.monthsPaid > 1
+        GROUP BY sl.sessionId
+    """)
+    fun getDefaultCountsBySession(): Flow<List<SessionDefaultCount>>
 }
+
+data class SessionDefaultCount(
+    val sessionId: Long,
+    val count: Int
+)
 
 @Dao
 interface ScanLotDao {

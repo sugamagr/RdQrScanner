@@ -38,4 +38,17 @@ interface RdNumberDao {
         (SELECT id FROM scan_lots WHERE sessionId = :sessionId)
     """)
     suspend fun deleteForSession(sessionId: Long)
+
+    @Query("UPDATE rd_numbers SET monthsPaid = :months WHERE id = :id")
+    suspend fun updateMonths(id: Long, months: Int)
+
+    @Query("SELECT COUNT(*) FROM rd_numbers WHERE lotId = :lotId AND monthsPaid > 1")
+    fun observeDefaultCountForLot(lotId: Long): Flow<Int>
+
+    @Query("""
+        SELECT COUNT(*) FROM rd_numbers rn
+        INNER JOIN scan_lots sl ON rn.lotId = sl.id
+        WHERE sl.sessionId = :sessionId AND rn.monthsPaid > 1
+    """)
+    fun observeDefaultCountForSession(sessionId: Long): Flow<Int>
 }
