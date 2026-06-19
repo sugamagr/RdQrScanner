@@ -73,6 +73,46 @@ class SyncNotifier(private val context: Context) {
     }
 
     /**
+     * Batched 'N sessions synced' summary used when a single push cycle
+     * pushes more than [BULK_SUMMARY_THRESHOLD] sessions (v5→v6 first
+     * push, backlog catchup after offline period, etc.). One notification
+     * instead of N spam notifications.
+     *
+     * Fixed id so a subsequent batch replaces rather than stacks. Body
+     * shows the latest 3 display numbers as a 'and 47 more' tail so the
+     * user sees recent activity without scrolling 50 notifications.
+     */
+    fun notifyBulkSessionsSynced(syncedDisplayNumbers: List<Int>) {
+        if (!canPostNotifications()) return
+        if (syncedDisplayNumbers.isEmpty()) return
+
+        val count = syncedDisplayNumbers.size
+        val title = context.resources.getQuantityString(
+            R.plurals.notif_sync_bulk_title,
+            count,
+            count
+        )
+        val sortedDesc = syncedDisplayNumbers.sortedDescending()
+        val recentLabel = sortedDesc.take(3).joinToString(", ") { "#$it" }
+        val body = if (count > 3) {
+            context.getString(R.string.notif_sync_bulk_body_extra, recentLabel, count - 3)
+        } else {
+            context.getString(R.string.notif_sync_bulk_body_short, recentLabel)
+        }
+
+        val notification = NotificationCompat.Builder(context, QRScannerApp.CHANNEL_SYNC_SUCCESS)
+            .setSmallIcon(android.R.drawable.stat_sys_upload_done)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setAutoCancel(true)
+            .setContentIntent(buildOpenAppIntent(requestCode = NOTIF_ID_BULK_SUCCESS))
+            .build()
+
+        runCatching { manager.notify(NOTIF_ID_BULK_SUCCESS, notification) }
+    }
+
+    /**
      * Fires (or refreshes) the sync-error notification. Called by
      * SyncRepository when the failure streak reaches the configured
      * threshold. Re-firing with the same id [NOTIF_ID_ERROR] replaces
@@ -130,7 +170,9 @@ class SyncNotifier(private val context: Context) {
     }
 
     companion object {
+        const val BULK_SUMMARY_THRESHOLD = 5
         private const val NOTIF_ID_ERROR = 9001
+        private const val NOTIF_ID_BULK_SUCCESS = 9002
         private const val NOTIF_ID_SUCCESS_BASE = 10_000
     }
 }

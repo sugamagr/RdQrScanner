@@ -12,6 +12,7 @@ import com.qrscanner.app.data.AppDatabase
 import com.qrscanner.app.data.RdNumber
 import com.qrscanner.app.data.ScanLot
 import com.qrscanner.app.data.ScanSession
+import com.qrscanner.app.notifications.SyncNotifier
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -26,7 +27,7 @@ import java.util.UUID
 class SyncRepository(
     private val database: AppDatabase,
     private val cloudClient: CloudClient,
-    private val notifier: com.qrscanner.app.notifications.SyncNotifier
+    private val notifier: SyncNotifier
 ) {
 
     private val sessionDao = database.scanSessionDao()
@@ -183,6 +184,15 @@ class SyncRepository(
 
         var firstError: Throwable? = null
         var pushedSessionCount = 0
+        // Buffer success notifications; small batches fire per-session
+        // (responsive), batches > BULK_SUMMARY_THRESHOLD collapse into one
+        // tray slot (avoids spam on v5→v6 first push / offline backlog).
+        data class SyncedNotice(
+            val displayNumber: Int,
+            val totalLots: Int,
+            val totalRdNumbers: Int
+        )
+        val pendingNotices = mutableListOf<SyncedNotice>()
 
         for (sess in dirtySessions) {
             val sessionCloudId = try {
@@ -216,21 +226,17 @@ class SyncRepository(
                 false
             }
 
-            // Fire per-session success notification (spec §15.5.2 Channel A,
-            // T2.11) BEFORE the orphan-children check below — we want to
-            // confirm to the user that the session reached cloud even if a
-            // late rd_number fix-up is still pending.
+            // Buffer success per spec §15.5.2 Channel A (T2.11); we fire
+            // the actual notifications after the loop so a large batch
+            // collapses into one bulk summary instead of N tray slots.
             if (rdAllOk) {
-                runCatching {
-                    val settings = deviceSettingsDao.get()
-                    val deviceName = settings?.deviceName ?: ""
-                    notifier.notifySessionSynced(
+                pendingNotices.add(
+                    SyncedNotice(
                         displayNumber = sess.displayNumber,
                         totalLots = sess.totalLots,
-                        totalRdNumbers = sess.totalRdNumbers,
-                        deviceName = deviceName
+                        totalRdNumbers = sess.totalRdNumbers
                     )
-                }
+                )
             }
 
             // BLOCKER fix (oracle adversarial #7): if any child rd_number
@@ -256,6 +262,26 @@ class SyncRepository(
         // data push.
         runCatching { bumpDeviceLastSeen(ownerId) }
             .onFailure { android.util.Log.w("SyncRepository", "device last_seen_at bump failed", it) }
+
+        // Drain buffered success notices: per-session for small batches,
+        // single bulk summary above the threshold (spec §15.5.2 minimal-noise).
+        if (pendingNotices.isNotEmpty()) {
+            runCatching {
+                if (pendingNotices.size > SyncNotifier.BULK_SUMMARY_THRESHOLD) {
+                    notifier.notifyBulkSessionsSynced(pendingNotices.map { it.displayNumber })
+                } else {
+                    val deviceName = deviceSettingsDao.get()?.deviceName ?: ""
+                    for (n in pendingNotices) {
+                        notifier.notifySessionSynced(
+                            displayNumber = n.displayNumber,
+                            totalLots = n.totalLots,
+                            totalRdNumbers = n.totalRdNumbers,
+                            deviceName = deviceName
+                        )
+                    }
+                }
+            }
+        }
 
         val now = System.currentTimeMillis()
         val remaining = sessionDao.getDirtyForPush(limit = 1).size

@@ -13,6 +13,12 @@
     <!-- Notification bodies (spec §15.5.2) -->
     <string name="notif_sync_success_title">Session #%1$d synced</string>
     <string name="notif_sync_success_body">%1$d LOTs, %2$d RD numbers uploaded · %3$s</string>
+    <plurals name="notif_sync_bulk_title">
+        <item quantity="one">%d session synced</item>
+        <item quantity="other">%d sessions synced</item>
+    </plurals>
+    <string name="notif_sync_bulk_body_short">Latest: %1$s</string>
+    <string name="notif_sync_bulk_body_extra">Latest: %1$s · and %2$d more</string>
     <string name="notif_sync_error_title">Sync paused</string>
     <plurals name="notif_sync_error_body">
         <item quantity="one">%d session waiting · tap to retry</item>
