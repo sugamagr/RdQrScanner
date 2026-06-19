@@ -29,6 +29,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.EditCalendar
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Share
@@ -54,12 +55,16 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.qrscanner.app.QRScannerApp
+import com.qrscanner.app.data.RdNumber
 import com.qrscanner.app.data.ScanLot
 import com.qrscanner.app.data.ScanSession
+import com.qrscanner.app.ui.components.DefaulterEditDialog
 import com.qrscanner.app.ui.theme.AccentMint
 import com.qrscanner.app.ui.theme.PrimaryOrange
 import com.qrscanner.app.ui.theme.TextSecondary
+import com.qrscanner.app.ui.theme.WarningAmber
 import com.qrscanner.app.util.LotImageGenerator
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -73,6 +78,9 @@ fun SessionDetailScreen(
     val app = context.applicationContext as QRScannerApp
 
     val lots by app.database.scanLotDao().getLotsForSession(sessionId).collectAsState(initial = emptyList())
+    val totalDefaults by app.database.rdNumberDao()
+        .observeDefaultCountForSession(sessionId)
+        .collectAsState(initial = 0)
     var session by remember { mutableStateOf<ScanSession?>(null) }
 
     LaunchedEffect(sessionId) {
@@ -124,7 +132,10 @@ fun SessionDetailScreen(
                         )
                     )
                     Text(
-                        text = "${lots.size} LOTs • $totalRdNumbers RD Numbers",
+                        text = buildString {
+                            append("${lots.size} LOTs • $totalRdNumbers RD Numbers")
+                            if (totalDefaults > 0) append(" • $totalDefaults default")
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = TextSecondary
                     )
@@ -155,15 +166,18 @@ fun SessionDetailScreen(
 private fun LotCard(lot: ScanLot) {
     val context = LocalContext.current
     val app = context.applicationContext as QRScannerApp
+    val scope = rememberCoroutineScope()
     var isExpanded by remember { mutableStateOf(false) }
+    var showEditDialog by remember { mutableStateOf(false) }
     val timeFormat = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
 
-    // Load RD numbers reactively from the new entity table
     val rdNumberEntities by app.database.rdNumberDao()
         .getNumbersForLot(lot.id)
         .collectAsState(initial = emptyList())
     val rdNumberStrings = rdNumberEntities.map { it.number }
     val rdNumberCount = rdNumberStrings.size
+    val defaulters = rdNumberEntities.filter { it.monthsPaid > 1 }
+    val defaultCount = defaulters.size
 
     fun copyToClipboard() {
         try {
@@ -176,29 +190,36 @@ private fun LotCard(lot: ScanLot) {
         }
     }
 
+    fun buildShareText(): String {
+        val numbers = rdNumberStrings.joinToString(", ")
+        if (defaulters.isEmpty()) return numbers
+        val defaulterLine = defaulters.joinToString(", ") { "${it.number} (${it.monthsPaid}m)" }
+        return "$numbers\n\nDefaulters: $defaulterLine"
+    }
+
     fun shareViaWithImage() {
         try {
             val imageFile = LotImageGenerator.generateLotImage(
                 context,
                 lot.lotNumber,
-                rdNumberCount
+                rdNumberCount,
+                defaultCount
             )
-
-            val rdNumbersString = rdNumberStrings.joinToString(", ")
+            val shareText = buildShareText()
 
             if (imageFile != null) {
                 val imageUri = LotImageGenerator.getShareableUri(context, imageFile)
                 val intent = Intent(Intent.ACTION_SEND).apply {
                     type = "image/*"
                     putExtra(Intent.EXTRA_STREAM, imageUri)
-                    putExtra(Intent.EXTRA_TEXT, rdNumbersString)
+                    putExtra(Intent.EXTRA_TEXT, shareText)
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
                 context.startActivity(Intent.createChooser(intent, "Share LOT"))
             } else {
                 val intent = Intent(Intent.ACTION_SEND).apply {
                     type = "text/plain"
-                    putExtra(Intent.EXTRA_TEXT, rdNumbersString)
+                    putExtra(Intent.EXTRA_TEXT, shareText)
                 }
                 context.startActivity(Intent.createChooser(intent, "Share LOT"))
             }
@@ -250,7 +271,11 @@ private fun LotCard(lot: ScanLot) {
                             )
                         )
                         Text(
-                            text = "$rdNumberCount RD Numbers • ${timeFormat.format(Date(lot.timestamp))}",
+                            text = buildString {
+                                append("$rdNumberCount RD Numbers")
+                                if (defaultCount > 0) append(" • $defaultCount default")
+                                append(" • ${timeFormat.format(Date(lot.timestamp))}")
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = TextSecondary
                         )
@@ -282,6 +307,19 @@ private fun LotCard(lot: ScanLot) {
                         )
                     }
 
+                    IconButton(
+                        onClick = { showEditDialog = true },
+                        enabled = rdNumberEntities.isNotEmpty(),
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.EditCalendar,
+                            contentDescription = "Edit defaulters",
+                            tint = WarningAmber,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
                     Icon(
                         imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                         contentDescription = if (isExpanded) "Collapse" else "Expand",
@@ -300,7 +338,7 @@ private fun LotCard(lot: ScanLot) {
                         .background(Color(0xFFFFF8F0), RoundedCornerShape(12.dp))
                         .padding(12.dp)
                 ) {
-                    rdNumberStrings.forEachIndexed { index, number ->
+                    rdNumberEntities.forEachIndexed { index, rd ->
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -314,12 +352,32 @@ private fun LotCard(lot: ScanLot) {
                                 modifier = Modifier.width(28.dp)
                             )
                             Text(
-                                text = number,
+                                text = rd.number,
                                 style = MaterialTheme.typography.bodyMedium.copy(
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Medium
-                                )
+                                ),
+                                modifier = Modifier.weight(1f)
                             )
+                            if (rd.monthsPaid > 1) {
+                                Box(
+                                    modifier = Modifier
+                                        .background(
+                                            WarningAmber.copy(alpha = 0.16f),
+                                            RoundedCornerShape(10.dp)
+                                        )
+                                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                                ) {
+                                    Text(
+                                        text = "${rd.monthsPaid} mo",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Bold,
+                                            color = WarningAmber
+                                        )
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -334,5 +392,28 @@ private fun LotCard(lot: ScanLot) {
                 )
             }
         }
+    }
+
+    if (showEditDialog) {
+        DefaulterEditDialog(
+            lotNumber = lot.lotNumber,
+            numbers = rdNumberEntities,
+            onDismiss = { showEditDialog = false },
+            onSave = { changes ->
+                showEditDialog = false
+                scope.launch {
+                    changes.forEach { (id, months) ->
+                        app.database.rdNumberDao().updateMonths(id, months)
+                    }
+                    if (changes.isNotEmpty()) {
+                        Toast.makeText(
+                            context,
+                            "Updated ${changes.size} row${if (changes.size == 1) "" else "s"}",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
+            }
+        )
     }
 }

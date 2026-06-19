@@ -123,6 +123,10 @@ fun SessionHistoryScreen(
     val scope = rememberCoroutineScope()
 
     val completedSessions by app.database.scanSessionDao().getCompletedSessions().collectAsState(initial = emptyList())
+    val defaultCountsList by app.database.scanSessionDao().getDefaultCountsBySession().collectAsState(initial = emptyList())
+    val defaultCountMap = remember(defaultCountsList) {
+        defaultCountsList.associate { it.sessionId to it.count }
+    }
 
     // Dialogs
     var sessionToDelete by remember { mutableStateOf<ScanSession?>(null) }
@@ -455,6 +459,7 @@ fun SessionHistoryScreen(
                                 ) {
                                     SessionCard(
                                         session = session,
+                                        defaultCount = defaultCountMap[session.id] ?: 0,
                                         isSelectionMode = isSelectionMode,
                                         isSelected = session.id in selectedIds,
                                         onClick = {
@@ -715,6 +720,7 @@ fun SessionHistoryScreen(
 @Composable
 private fun SessionCard(
     session: ScanSession,
+    defaultCount: Int,
     isSelectionMode: Boolean,
     isSelected: Boolean,
     onClick: () -> Unit,
@@ -773,6 +779,25 @@ private fun SessionCard(
                         Text("Session #${session.displayNumber}", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold))
                         Spacer(modifier = Modifier.height(2.dp))
                         Text("$startTime → $endTime", style = MaterialTheme.typography.bodySmall, color = TextSecondary)
+                        if (defaultCount > 0) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Box(
+                                modifier = Modifier
+                                    .background(
+                                        WarningAmber.copy(alpha = 0.14f),
+                                        RoundedCornerShape(8.dp)
+                                    )
+                                    .padding(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = "$defaultCount default",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = WarningAmber
+                                    )
+                                )
+                            }
+                        }
                     }
                 }
 
