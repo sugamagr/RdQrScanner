@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.EditCalendar
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Numbers
 import androidx.compose.material.icons.filled.PictureAsPdf
@@ -344,6 +345,14 @@ private fun HindiContent() {
         
         item {
             FeatureItem(
+                icon = Icons.Default.EditCalendar,
+                title = "डिफॉल्टर मार्क करें",
+                description = "एक LOT स्कैन करने के बाद, उन खातों को मार्क करें जिनके लिए एक से अधिक महीने का भुगतान हुआ है। डिफॉल्टर की संख्या LOT कार्ड और सभी एक्सपोर्ट में दिखेगी।"
+            )
+        }
+
+        item {
+            FeatureItem(
                 icon = Icons.Default.FolderOpen,
                 title = "सेशन एक्सपोर्ट करें",
                 description = "रिकॉर्ड रखने या आगे की प्रक्रिया के लिए पूरे सेशन को XLSX या TXT फाइल के रूप में एक्सपोर्ट करें।"
@@ -508,6 +517,14 @@ private fun EnglishContent() {
             )
         }
         
+        item {
+            FeatureItem(
+                icon = Icons.Default.EditCalendar,
+                title = "Mark Defaulters",
+                description = "After scanning a LOT, mark any account that paid for more than one month. The default count appears on the LOT card and in all exports."
+            )
+        }
+
         item {
             FeatureItem(
                 icon = Icons.Default.FolderOpen,

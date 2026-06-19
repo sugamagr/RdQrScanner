@@ -541,7 +541,7 @@ fun SessionHistoryScreen(
                                         try {
                                             val lots = app.database.scanLotDao().getLotsForSessionSync(session.id)
                                             val rdNumbersPerLot = lots.map { lot ->
-                                                app.database.rdNumberDao().getNumbersForLotSync(lot.id).map { it.number }
+                                                app.database.rdNumberDao().getNumbersForLotSync(lot.id)
                                             }
                                             val file = XlsxExporter.exportSessionToXlsx(context, lots, rdNumbersPerLot, session.displayNumber)
                                             if (file != null) {
@@ -576,7 +576,7 @@ fun SessionHistoryScreen(
                                         try {
                                             val lots = app.database.scanLotDao().getLotsForSessionSync(session.id)
                                             val rdNumbersPerLot = lots.map { lot ->
-                                                app.database.rdNumberDao().getNumbersForLotSync(lot.id).map { it.number }
+                                                app.database.rdNumberDao().getNumbersForLotSync(lot.id)
                                             }
                                             val file = XlsxExporter.exportSessionToTxt(context, lots, rdNumbersPerLot, session.displayNumber)
                                             if (file != null) {

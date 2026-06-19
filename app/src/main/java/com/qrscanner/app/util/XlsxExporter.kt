@@ -3,6 +3,7 @@ package com.qrscanner.app.util
 import android.content.Context
 import android.os.Environment
 import androidx.core.content.FileProvider
+import com.qrscanner.app.data.RdNumber
 import com.qrscanner.app.data.ScanLot
 import java.io.File
 import java.io.FileOutputStream
@@ -22,7 +23,7 @@ object XlsxExporter {
     fun exportSessionToXlsx(
         context: Context,
         lots: List<ScanLot>,
-        rdNumbersPerLot: List<List<String>>,
+        rdNumbersPerLot: List<List<RdNumber>>,
         sessionDisplayNumber: Int
     ): File? {
         if (lots.isEmpty()) return null
@@ -106,29 +107,32 @@ object XlsxExporter {
   </cellXfs>
 </styleSheet>"""
 
-    private fun sheet1Xml(lots: List<ScanLot>, rdNumbersPerLot: List<List<String>>): String {
+    private fun sheet1Xml(lots: List<ScanLot>, rdNumbersPerLot: List<List<RdNumber>>): String {
         val sb = StringBuilder()
         sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>")
         sb.append("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">")
         sb.append("<sheetData>")
 
-        // Header row (bold)
         sb.append("<row r=\"1\">")
         sb.append(strCell("A1", "LOT #", bold = true))
         sb.append(strCell("B1", "RD Numbers", bold = true))
         sb.append(strCell("C1", "Count", bold = true))
-        sb.append(strCell("D1", "Timestamp", bold = true))
+        sb.append(strCell("D1", "Default Count", bold = true))
+        sb.append(strCell("E1", "Defaulters", bold = true))
+        sb.append(strCell("F1", "Timestamp", bold = true))
         sb.append("</row>")
 
-        // One row per LOT
         lots.forEachIndexed { index, lot ->
-            val numbers = rdNumbersPerLot.getOrElse(index) { emptyList() }
-            val rowNum = index + 2  // 1-based, after header
+            val rows = rdNumbersPerLot.getOrElse(index) { emptyList() }
+            val defaulters = rows.filter { it.monthsPaid > 1 }
+            val rowNum = index + 2
             sb.append("<row r=\"$rowNum\">")
             sb.append(numCell("A$rowNum", lot.lotNumber))
-            sb.append(strCell("B$rowNum", numbers.joinToString(", ")))
-            sb.append(numCell("C$rowNum", numbers.size))
-            sb.append(strCell("D$rowNum", dateFormat.format(Date(lot.timestamp))))
+            sb.append(strCell("B$rowNum", rows.joinToString(", ") { it.number }))
+            sb.append(numCell("C$rowNum", rows.size))
+            sb.append(numCell("D$rowNum", defaulters.size))
+            sb.append(strCell("E$rowNum", defaulters.joinToString("; ") { "${it.number}: ${it.monthsPaid}m" }))
+            sb.append(strCell("F$rowNum", dateFormat.format(Date(lot.timestamp))))
             sb.append("</row>")
         }
 
@@ -158,7 +162,7 @@ object XlsxExporter {
     fun exportSessionToTxt(
         context: Context,
         lots: List<ScanLot>,
-        rdNumbersPerLot: List<List<String>>,
+        rdNumbersPerLot: List<List<RdNumber>>,
         sessionDisplayNumber: Int
     ): File? {
         if (lots.isEmpty()) return null
@@ -173,16 +177,33 @@ object XlsxExporter {
                 writer.append("RD Book Scanner - Session #$sessionDisplayNumber\n")
                 writer.append("=".repeat(40) + "\n\n")
 
+                var totalDefaulters = 0
                 lots.forEachIndexed { index, lot ->
-                    val numbers = rdNumbersPerLot.getOrElse(index) { emptyList() }
-                    writer.append("LOT ${lot.lotNumber} (${numbers.size} numbers):\n")
-                    writer.append(numbers.joinToString(", "))
-                    writer.append("\n\n")
+                    val rows = rdNumbersPerLot.getOrElse(index) { emptyList() }
+                    val defaulters = rows.filter { it.monthsPaid > 1 }
+                    totalDefaulters += defaulters.size
+
+                    val header = if (defaulters.isEmpty()) {
+                        "LOT ${lot.lotNumber} (${rows.size} numbers):"
+                    } else {
+                        "LOT ${lot.lotNumber} (${rows.size} numbers, ${defaulters.size} defaulter${if (defaulters.size == 1) "" else "s"}):"
+                    }
+                    writer.append("$header\n")
+                    writer.append(rows.joinToString(", ") { it.number })
+                    writer.append("\n")
+                    if (defaulters.isNotEmpty()) {
+                        writer.append("Defaulters: ")
+                        writer.append(defaulters.joinToString(", ") { "${it.number} (${it.monthsPaid}m)" })
+                        writer.append("\n")
+                    }
+                    writer.append("\n")
                 }
 
                 val totalNumbers = rdNumbersPerLot.sumOf { it.size }
                 writer.append("-".repeat(40) + "\n")
-                writer.append("Total: ${lots.size} LOTs, $totalNumbers RD Numbers\n")
+                writer.append("Total: ${lots.size} LOTs, $totalNumbers RD Numbers")
+                if (totalDefaulters > 0) writer.append(", $totalDefaulters defaulters")
+                writer.append("\n")
             }
 
             file

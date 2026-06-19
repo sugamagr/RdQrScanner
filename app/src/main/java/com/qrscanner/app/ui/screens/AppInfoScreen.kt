@@ -179,6 +179,7 @@ fun AppInfoScreen(
                             "Export sessions as XLSX or TXT",
                             "Generate QR code PDFs for RD numbers",
                             "Duplicate detection within session",
+                            "Track defaulter accounts — mark RD numbers paid for multiple months",
                             "Modern light orange theme"
                         )
                     )
