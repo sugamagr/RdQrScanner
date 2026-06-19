@@ -467,6 +467,17 @@ private fun RDCameraScreen(
                 totalRdNumbers = allSessionNumbers.size,
                 displayNumber = displayNumber
             )
+            // Promote the subtree to DIRTY + enqueue the push worker (Phase 2 T2.4).
+            // Wrapped in try/catch because markSessionForSync requires DeviceSettings
+            // to be populated — a user who finalized a session before completing
+            // first-run setup (edge case after MIGRATION_5_6) would otherwise see
+            // finalize fail. Toast + continue: the data is saved, sync just waits.
+            try {
+                app.syncRepository.markSessionForSync(session.id)
+                app.syncScheduler.enqueuePush()
+            } catch (e: Throwable) {
+                android.util.Log.w("RDScannerScreen", "finalize: deferred sync enqueue", e)
+            }
             Toast.makeText(
                 context,
                 "Session #$displayNumber saved! $totalLotsInSession LOTs, ${allSessionNumbers.size} RD numbers",
