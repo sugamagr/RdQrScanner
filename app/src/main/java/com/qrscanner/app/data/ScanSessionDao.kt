@@ -83,6 +83,42 @@ interface ScanSessionDao {
     @Query("UPDATE scan_sessions SET syncStatus = 'DIRTY' WHERE syncStatus = 'SYNCING'")
     suspend fun recoverStuckSyncing()
 
+    /**
+     * Promotes any SYNCED session that has DIRTY/SYNC_ERROR children
+     * (lots OR rd_numbers) back to DIRTY so the next push iteration
+     * picks it up.
+     *
+     * Covers two orphan classes:
+     * 1. Defaulter edit on an already-synced session: T2.5 flips the
+     *    rd_number to DIRTY but leaves the parent SYNCED. getDirtyForPush
+     *    only iterates DIRTY/SYNC_ERROR sessions, so the edit would
+     *    never reach cloud.
+     * 2. Worker killed mid-push: a lot or rd_number flipped to SYNCING,
+     *    recoverStuckSyncing flips it back to DIRTY, but the parent
+     *    session was already marked SYNCED earlier in the same push.
+     *    Same orphan pattern.
+     *
+     * Called by [SyncRepository.runPush] in the startup sweep alongside
+     * recoverStuckSyncing.
+     */
+    @Query(
+        """
+        UPDATE scan_sessions
+        SET syncStatus = 'DIRTY', updatedAt = strftime('%s','now') * 1000
+        WHERE syncStatus = 'SYNCED'
+          AND deletedAt IS NULL
+          AND id IN (
+              SELECT sessionId FROM scan_lots
+              WHERE syncStatus IN ('DIRTY','SYNC_ERROR')
+              UNION
+              SELECT sl.sessionId FROM scan_lots sl
+              INNER JOIN rd_numbers rn ON rn.lotId = sl.id
+              WHERE rn.syncStatus IN ('DIRTY','SYNC_ERROR')
+          )
+        """
+    )
+    suspend fun promoteSessionsWithDirtyChildren()
+
     @Query("UPDATE scan_sessions SET displayNumber = :displayNumber WHERE id = :id")
     suspend fun updateDisplayNumber(id: Long, displayNumber: Int)
 

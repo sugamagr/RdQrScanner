@@ -170,6 +170,7 @@ class SyncRepository(
             lotDao.recoverStuckSyncing()
             rdNumberDao.recoverStuckSyncing()
             promoteOrphanFinalizedSessions()
+            sessionDao.promoteSessionsWithDirtyChildren()
         }
 
         val dirtySessions = sessionDao.getDirtyForPush()
