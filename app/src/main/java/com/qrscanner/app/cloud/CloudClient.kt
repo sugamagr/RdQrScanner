@@ -104,7 +104,16 @@ data class CloudDelta(
     val sessions: List<ScanSessionDto>,
     val lots: List<ScanLotDto>,
     val rdNumbers: List<RdNumberDto>,
-    val highWaterMark: Long
+    val highWaterMark: Long,
+    /**
+     * True iff ANY table page came back at the implementation's
+     * configured page size — i.e. more rows may exist beyond
+     * [highWaterMark]. Phase 5 T5.4 (F6 finding): the repo's
+     * drain loop uses this to keep pulling until a page comes
+     * back partial, so first-run with 5000 rows finishes in one
+     * runPull cycle instead of 10+ poll ticks.
+     */
+    val pageWasFull: Boolean = false
 )
 
 /** Realtime payload identifying what changed (the repo follows up with a targeted pull). */

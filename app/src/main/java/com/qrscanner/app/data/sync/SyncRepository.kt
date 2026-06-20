@@ -528,51 +528,70 @@ class SyncRepository(
         val ownerId = cloudSession.ownerId
         val settings = deviceSettingsDao.get()
             ?: return Result.failure(IllegalStateException("device_settings missing; first-run setup incomplete"))
-        val since = settings.lastPulledAt
-
-        val delta = try {
-            cloudClient.pullChangesSince(ownerId, since)
-        } catch (e: CloudException.AuthExpired) {
-            updateSummary { it.copy(state = SyncPillState.ERROR, lastErrorMessage = "auth expired") }
-            return Result.failure(e)
-        } catch (e: CloudException.SchemaMissing) {
-            updateSummary {
-                it.copy(state = SyncPillState.SCHEMA_MISSING, lastErrorMessage = e.message)
-            }
-            return Result.failure(e)
-        } catch (e: Throwable) {
-            deviceSettingsDao.recordPullError(
-                timestamp = System.currentTimeMillis(),
-                error = e.message ?: e.toString()
-            )
-            updateSummary { it.copy(lastErrorMessage = e.message ?: e.toString()) }
-            return Result.failure(e)
-        }
 
         // Own-device cloudId — banner events originating from this phone are
         // suppressed so the user doesn't see "Counter Phone synced Session #47"
-        // about themselves (spec §15.5.3). May be null on the rare first-pull
-        // after sign-in before first-run setup; null comparisons against
-        // null always fail the equality, so no spurious suppression.
+        // about themselves (spec §15.5.3).
         val ownDeviceCloudId = settings.deviceCloudId
 
-        val notices = database.withTransaction {
-            val emitted = mutableListOf<RemoteEditNotice>()
-            emitted += mergeSessions(delta.sessions, ownDeviceCloudId)
-            mergeLots(delta.lots)
-            emitted += mergeRdNumbers(delta.rdNumbers, delta.sessions, ownDeviceCloudId)
-            if (delta.highWaterMark > since) {
-                deviceSettingsDao.updateLastPulledAt(delta.highWaterMark)
+        // Phase 5 T5.4 (F6 finding): drain until a partial page comes back.
+        // First-run sign-in with thousands of cloud rows previously needed
+        // 10+ poll ticks to fully sync; the drain loop wraps that into a
+        // single runPull cycle. Bounded by MAX_DRAIN_PAGES for safety so
+        // a runaway cursor (clock skew, repeated identical updated_at) can
+        // never spin forever. The cursor advances inside each iteration
+        // via deviceSettingsDao.updateLastPulledAt, so a worker kill
+        // mid-drain just resumes from the last persisted high-water mark.
+        val allNotices = mutableListOf<RemoteEditNotice>()
+        var sinceCursor = settings.lastPulledAt
+        var pages = 0
+        while (true) {
+            pages++
+            val delta = try {
+                cloudClient.pullChangesSince(ownerId, sinceCursor)
+            } catch (e: CloudException.AuthExpired) {
+                updateSummary { it.copy(state = SyncPillState.ERROR, lastErrorMessage = "auth expired") }
+                return Result.failure(e)
+            } catch (e: CloudException.SchemaMissing) {
+                updateSummary {
+                    it.copy(state = SyncPillState.SCHEMA_MISSING, lastErrorMessage = e.message)
+                }
+                return Result.failure(e)
+            } catch (e: Throwable) {
+                deviceSettingsDao.recordPullError(
+                    timestamp = System.currentTimeMillis(),
+                    error = e.message ?: e.toString()
+                )
+                updateSummary { it.copy(lastErrorMessage = e.message ?: e.toString()) }
+                return Result.failure(e)
             }
-            for (notice in emitted) {
-                syncEventDao.insert(notice.toEvent())
+
+            val priorCursor = sinceCursor
+            val notices = database.withTransaction {
+                val emitted = mutableListOf<RemoteEditNotice>()
+                emitted += mergeSessions(delta.sessions, ownDeviceCloudId)
+                mergeLots(delta.lots)
+                emitted += mergeRdNumbers(delta.rdNumbers, delta.sessions, ownDeviceCloudId)
+                if (delta.highWaterMark > priorCursor) {
+                    deviceSettingsDao.updateLastPulledAt(delta.highWaterMark)
+                }
+                for (notice in emitted) {
+                    syncEventDao.insert(notice.toEvent())
+                }
+                emitted.toList()
             }
-            emitted.toList()
+            allNotices += notices
+            sinceCursor = delta.highWaterMark
+
+            val shouldContinue = delta.pageWasFull &&
+                delta.highWaterMark > priorCursor &&
+                pages < MAX_DRAIN_PAGES
+            if (!shouldContinue) break
         }
 
         val now = System.currentTimeMillis()
         updateSummary { it.copy(lastSuccessfulPullAt = now, lastErrorMessage = null) }
-        notifyRemoteEdits(notices)
+        notifyRemoteEdits(allNotices)
         return Result.success(Unit)
     }
 
@@ -818,5 +837,10 @@ class SyncRepository(
     companion object {
         private const val ERROR_NOTIFY_THRESHOLD = 3
         private const val ERROR_NOTIFY_REFIRE_EVERY = 6
+        // Phase 5 T5.4: hard upper bound on drain-loop iterations. With
+        // PULL_PAGE_SIZE = 500 this covers up to 10k rows per cycle which
+        // exceeds any realistic shop's data set. If a runaway cursor ever
+        // hit this we'd want to log + bail out rather than spin.
+        private const val MAX_DRAIN_PAGES = 20
     }
 }

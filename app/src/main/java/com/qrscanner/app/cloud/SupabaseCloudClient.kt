@@ -250,12 +250,18 @@ class SupabaseCloudClient(
             rdNumbers.maxOfOrNull { com.qrscanner.app.cloud.mappers.IsoTime.toEpochMillis(it.updatedAt) } ?: since
         )
 
+        val anyPageFull = devices.size >= PULL_PAGE_SIZE ||
+            sessions.size >= PULL_PAGE_SIZE ||
+            lots.size >= PULL_PAGE_SIZE ||
+            rdNumbers.size >= PULL_PAGE_SIZE
+
         CloudDelta(
             devices = devices,
             sessions = sessions,
             lots = lots,
             rdNumbers = rdNumbers,
-            highWaterMark = highWater
+            highWaterMark = highWater,
+            pageWasFull = anyPageFull
         )
     }
 
