@@ -23,6 +23,15 @@ data class RdNumberDto(
     @SerialName("scanned_at") val scannedAt: String,
     @SerialName("months_paid") val monthsPaid: Int,
     @SerialName("months_list") val monthsList: String? = null,
+    /**
+     * Phase 5 T5.6 (F9). Cloud devices.id of whoever last wrote this row.
+     * Phones stamp own deviceId on every push; the portal leaves this NULL.
+     * The merge attribution check at SyncRepository compares this value
+     * against own deviceCloudId to distinguish own / other-phone / portal
+     * edits. Nullable + default null so cloud rows from pre-T5.6 phones
+     * keep deserializing.
+     */
+    @SerialName("last_editor_device_id") val lastEditorDeviceId: String? = null,
     @SerialName("created_at") val createdAt: String,
     @SerialName("updated_at") val updatedAt: String,
     @SerialName("deleted_at") val deletedAt: String? = null

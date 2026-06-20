@@ -103,6 +103,12 @@ export async function updateRdNumberMonths(params: {
     .update({
       months_paid: monthsPaid,
       months_list: monthsList,
+      // Phase 5 T5.6 (F9): explicitly nullify the editor stamp so the
+      // phone merge attributes this edit to 'Portal' instead of inheriting
+      // the prior phone's deviceId. Without this, a phone-stamped row
+      // edited via portal would still surface as 'another phone' in
+      // the banner + Channel C notification.
+      last_editor_device_id: null,
     })
     .eq('id', id);
   if (error) throw error;
@@ -130,7 +136,7 @@ export async function searchRdNumbers(query: string): Promise<RdSearchHit[]> {
     .select(
       `
       id, owner_id, lot_id, number, position, scanned_at, months_paid, months_list,
-      created_at, updated_at, deleted_at,
+      last_editor_device_id, created_at, updated_at, deleted_at,
       lot:scan_lots!inner(id, lot_number, session_id,
         session:scan_sessions!inner(id, display_number, operator_name, end_time, deleted_at)
       )
@@ -164,6 +170,7 @@ export async function searchRdNumbers(query: string): Promise<RdSearchHit[]> {
         scanned_at: row.scanned_at,
         months_paid: row.months_paid,
         months_list: row.months_list,
+        last_editor_device_id: row.last_editor_device_id,
         created_at: row.created_at,
         updated_at: row.updated_at,
         deleted_at: row.deleted_at,

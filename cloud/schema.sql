@@ -75,18 +75,30 @@ create index if not exists scan_lots_owner_idx
     on public.scan_lots (owner_id);
 
 create table if not exists public.rd_numbers (
-    id           uuid primary key default gen_random_uuid(),
-    owner_id     uuid not null references auth.users(id) on delete cascade,
-    lot_id       uuid not null references public.scan_lots(id) on delete cascade,
-    number       text not null,
-    position     int not null,
-    scanned_at   timestamptz not null,
-    months_paid  int not null default 1 check (months_paid between 1 and 36),
-    months_list  text,
-    created_at   timestamptz not null default now(),
-    updated_at   timestamptz not null default now(),
-    deleted_at   timestamptz
+    id                    uuid primary key default gen_random_uuid(),
+    owner_id              uuid not null references auth.users(id) on delete cascade,
+    lot_id                uuid not null references public.scan_lots(id) on delete cascade,
+    number                text not null,
+    position              int not null,
+    scanned_at            timestamptz not null,
+    months_paid           int not null default 1 check (months_paid between 1 and 36),
+    months_list           text,
+    -- Phase 5 T5.6 (F9 finding). Cloud-side device.id of the last writer.
+    -- Phones stamp their own devices.id; the portal stamps NULL so the
+    -- pull-merge attribution can distinguish "Portal" from "another phone"
+    -- without inferring from the parent session's deviceId (which is the
+    -- ORIGINAL scanner, not the editor).
+    last_editor_device_id uuid references public.devices(id) on delete set null,
+    created_at            timestamptz not null default now(),
+    updated_at            timestamptz not null default now(),
+    deleted_at            timestamptz
 );
+-- Idempotent column add for upgrades from earlier schema versions.
+do $$ begin
+    alter table public.rd_numbers
+        add column if not exists last_editor_device_id uuid references public.devices(id) on delete set null;
+exception when undefined_column then null;
+end $$;
 create index if not exists rd_numbers_lot_position_idx
     on public.rd_numbers (lot_id, position);
 create index if not exists rd_numbers_owner_idx

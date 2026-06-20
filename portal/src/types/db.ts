@@ -51,6 +51,7 @@ export interface RdNumberRow {
   scanned_at: string;
   months_paid: number;
   months_list: string | null;
+  last_editor_device_id: string | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;

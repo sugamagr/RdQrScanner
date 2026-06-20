@@ -263,7 +263,7 @@ class SyncRepository(
             }
 
             val rdAllOk = try {
-                pushRdNumbersForLots(lotIdMap, ownerId)
+                pushRdNumbersForLots(lotIdMap, ownerId, sess.deviceCloudId)
             } catch (e: CloudException.AuthExpired) {
                 updateSummary { it.copy(state = SyncPillState.ERROR, lastErrorMessage = "auth expired") }
                 return Result.failure(e)
@@ -468,13 +468,14 @@ class SyncRepository(
     /** Returns true iff every rd_number across every lot pushed successfully. */
     private suspend fun pushRdNumbersForLots(
         lotIdMap: Map<Long, String>,
-        ownerId: String
+        ownerId: String,
+        editorDeviceCloudId: String?
     ): Boolean {
         var allOk = true
         for ((lotLocalId, lotCloudId) in lotIdMap) {
             val rdNumbers = rdNumberDao.getDirtyForLot(lotLocalId)
             for (rd in rdNumbers) {
-                if (!pushRdNumber(rd, lotCloudId, ownerId)) {
+                if (!pushRdNumber(rd, lotCloudId, ownerId, editorDeviceCloudId)) {
                     allOk = false
                 }
             }
@@ -483,11 +484,18 @@ class SyncRepository(
     }
 
     /** Returns true on success, false on non-auth failure (parent re-marks SYNC_ERROR). AuthExpired re-throws. */
-    private suspend fun pushRdNumber(rd: RdNumber, lotCloudId: String, ownerId: String): Boolean {
+    private suspend fun pushRdNumber(
+        rd: RdNumber,
+        lotCloudId: String,
+        ownerId: String,
+        editorDeviceCloudId: String?
+    ): Boolean {
         val cloudId = rd.cloudId ?: UUID.randomUUID().toString()
         rdNumberDao.markSyncing(rd.id)
         return try {
-            val dto = RdNumberMapper.toDto(rd.copy(cloudId = cloudId), lotCloudId).copy(ownerId = ownerId)
+            val dto = RdNumberMapper
+                .toDto(rd.copy(cloudId = cloudId), lotCloudId, editorDeviceCloudId)
+                .copy(ownerId = ownerId)
             cloudClient.upsertRdNumber(dto)
             rdNumberDao.markSynced(rd.id, System.currentTimeMillis(), cloudId)
             true
@@ -762,11 +770,17 @@ class SyncRepository(
             val updatedAt = IsoTime.toEpochMillis(dto.updatedAt)
             val deletedAt = IsoTime.toEpochMillisOrNull(dto.deletedAt)
             val parentSessionDto = lotToSession[dto.lotId]
-            // Use the SESSION's deviceId for own-device suppression — the
-            // rd_number row itself doesn't carry the origin device, only
-            // the parent session does.
-            val isOwn = parentSessionDto?.deviceId == ownDeviceCloudId &&
-                ownDeviceCloudId != null
+            // Phase 5 T5.6 (F9 fix): attribution now uses the rd_number's
+            // own last_editor_device_id (cloud column), set by whoever
+            // wrote the row. Phones stamp own deviceId on push; portal
+            // writes leave it NULL. Falls back to the parent session's
+            // deviceId only for legacy rows pushed before T5.6 where the
+            // column is null AND parent session has a deviceId.
+            val editorCloudId = dto.lastEditorDeviceId
+                ?: parentSessionDto?.deviceId?.ifBlank { null }
+            val isOwn = editorCloudId != null && editorCloudId == ownDeviceCloudId
+            val isPortal = dto.lastEditorDeviceId == null &&
+                (parentSessionDto?.deviceId?.isBlank() ?: false)
             if (existing == null) {
                 rdNumberDao.insert(RdNumberMapper.toEntity(dto).copy(lotId = parent.id))
             } else {
@@ -792,17 +806,18 @@ class SyncRepository(
                 val changed = priorMonthsPaid != dto.monthsPaid ||
                     priorMonthsList != dto.monthsList
                 if (!isOwn && changed && deletedAt == null && parentSessionDto != null) {
+                    val isPortalEdit = dto.lastEditorDeviceId == null || isPortal
                     notices += RemoteEditNotice(
-                        type = if (parentSessionDto.deviceId.isBlank())
+                        type = if (isPortalEdit)
                             SyncEventType.PORTAL_DEFAULTER_EDIT
                         else
                             SyncEventType.REMOTE_DEFAULTER_EDIT,
                         displayNumber = parentSessionDto.displayNumber,
                         sessionCloudId = parentSessionDto.id,
                         rdNumberCloudId = dto.id,
-                        originDeviceCloudId = parentSessionDto.deviceId.ifBlank { null },
+                        originDeviceCloudId = if (isPortalEdit) null else editorCloudId,
                         originDeviceName = null,
-                        originOperatorName = parentSessionDto.operatorName,
+                        originOperatorName = if (isPortalEdit) null else parentSessionDto.operatorName,
                         occurredAt = updatedAt,
                         summary = "edited defaulter on RD #${dto.number}"
                     )

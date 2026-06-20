@@ -18,7 +18,7 @@ import com.qrscanner.app.data.SyncStatus
  */
 internal object RdNumberMapper {
 
-    fun toDto(rdNumber: RdNumber, lotCloudId: String): RdNumberDto {
+    fun toDto(rdNumber: RdNumber, lotCloudId: String, editorDeviceCloudId: String?): RdNumberDto {
         val cloudId = requireNotNull(rdNumber.cloudId) {
             "RdNumber.cloudId must be set before pushing (id=${rdNumber.id})"
         }
@@ -31,6 +31,7 @@ internal object RdNumberMapper {
             scannedAt = IsoTime.fromEpochMillis(rdNumber.scannedAt),
             monthsPaid = rdNumber.monthsPaid,
             monthsList = rdNumber.monthsList,
+            lastEditorDeviceId = editorDeviceCloudId,
             createdAt = IsoTime.fromEpochMillis(rdNumber.scannedAt),
             updatedAt = IsoTime.fromEpochMillis(rdNumber.updatedAt),
             deletedAt = IsoTime.fromEpochMillisOrNull(rdNumber.deletedAt)
