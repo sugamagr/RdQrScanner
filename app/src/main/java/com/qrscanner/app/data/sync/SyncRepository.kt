@@ -14,6 +14,7 @@ import com.qrscanner.app.data.ScanLot
 import com.qrscanner.app.data.ScanSession
 import com.qrscanner.app.data.SyncEvent
 import com.qrscanner.app.data.SyncEventType
+import com.qrscanner.app.data.SyncStatus
 import com.qrscanner.app.notifications.SyncNotifier
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
