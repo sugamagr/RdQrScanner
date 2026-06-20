@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './lib/auth';
+import { useRealtimeSync } from './lib/useRealtimeSync';
 import { SignInPage } from './pages/SignIn';
 import { SessionsPage } from './pages/Sessions';
 import { SessionDetailPage } from './pages/SessionDetail';
@@ -23,6 +24,11 @@ export default function App() {
     );
   }
 
+  return <AuthedRoot />;
+}
+
+function AuthedRoot() {
+  useRealtimeSync();
   return (
     <AppShell>
       <Routes>
