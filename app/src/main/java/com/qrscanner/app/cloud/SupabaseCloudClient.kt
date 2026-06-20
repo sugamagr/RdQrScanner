@@ -462,7 +462,7 @@ private class EncryptedSessionManager(context: Context) : SessionManager {
     private val delegate = SettingsSessionManager(settings, key = SESSION_KEY)
 
     override suspend fun saveSession(session: UserSession) = delegate.saveSession(session)
-    override suspend fun loadSessionOrNull(): UserSession? = delegate.loadSessionOrNull()
+    override suspend fun loadSession(): UserSession? = delegate.loadSession()
     override suspend fun deleteSession() = delegate.deleteSession()
 
     companion object {
