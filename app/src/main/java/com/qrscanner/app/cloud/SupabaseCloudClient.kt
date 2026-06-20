@@ -27,6 +27,7 @@ import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
+import io.github.jan.supabase.postgrest.query.filter.FilterOperator
 import io.github.jan.supabase.postgrest.rpc
 import io.github.jan.supabase.realtime.PostgresAction
 import io.github.jan.supabase.realtime.Realtime
@@ -285,21 +286,26 @@ class SupabaseCloudClient(
         supabase.realtime.connect()
         val channel = supabase.realtime.channel("rt:owner:$ownerId")
 
+        // supabase-kt 3.1.4: PostgresChangeFilter.filter is a private var
+        // exposed via filter(column, operator, value). Direct assignment
+        // (the 2.x API) breaks at compile. The four channels all scope
+        // by owner_id so RLS-equivalent filtering happens at the realtime
+        // server layer too, avoiding cross-tenant payload delivery.
         val sessionFlow = channel.postgresChangeFlow<PostgresAction>(schema = "public") {
             table = TABLE_SCAN_SESSIONS
-            filter = "owner_id=eq.$ownerId"
+            filter("owner_id", FilterOperator.EQ, ownerId)
         }
         val lotFlow = channel.postgresChangeFlow<PostgresAction>(schema = "public") {
             table = TABLE_SCAN_LOTS
-            filter = "owner_id=eq.$ownerId"
+            filter("owner_id", FilterOperator.EQ, ownerId)
         }
         val rdFlow = channel.postgresChangeFlow<PostgresAction>(schema = "public") {
             table = TABLE_RD_NUMBERS
-            filter = "owner_id=eq.$ownerId"
+            filter("owner_id", FilterOperator.EQ, ownerId)
         }
         val deviceFlow = channel.postgresChangeFlow<PostgresAction>(schema = "public") {
             table = TABLE_DEVICES
-            filter = "owner_id=eq.$ownerId"
+            filter("owner_id", FilterOperator.EQ, ownerId)
         }
 
         listOf(
