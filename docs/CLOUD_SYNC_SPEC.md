@@ -587,6 +587,14 @@ When backgrounded, the channels are closed. They reopen on next foreground.
 
 **Last-writer-wins, by `updated_at`. The losing side silently loses the data.**
 
+**Tie-breaker (Phase 5 T5.7 amendment, F5 finding):** when
+`remote.updated_at == local.updatedAt` exactly to the millisecond, **the
+local row wins.** Pull-merge DAO queries use `WHERE updatedAt < :remote`
+(strict less-than), not `<=`. Rationale: an equal-ms tie almost always
+means the local DIRTY row is the same logical edit as the cloud row
+that just echoed back via realtime — preserving local avoids clobbering
+a pending push with its own future state.
+
 Concretely, on pull, for each remote row:
 
 ```
@@ -598,15 +606,15 @@ if local is null:
 
 else if local.syncStatus in (DIRTY, SYNCING, SYNC_ERROR):
     -- We have local changes that haven't been pushed yet.
-    if remote.updated_at > local.updatedAt:
+    if remote.updated_at > local.updatedAt:   -- STRICT >
         -- Remote wins. Our local changes are silently dropped.
         OVERWRITE local with remote, mark SYNCED.
     else:
-        -- We win. Skip; we'll push our version on next push cycle.
+        -- We win (including ties). Skip; we'll push our version on next push cycle.
         do nothing.
 
 else:  -- local.syncStatus == SYNCED
-    if remote.updated_at > local.updatedAt:
+    if remote.updated_at > local.updatedAt:   -- STRICT >
         OVERWRITE local with remote.
     else:
         do nothing.
@@ -1031,6 +1039,28 @@ enum class SyncEventType {
 
 Populated by `SyncRepository.handleRemoteChange()` after a pull/realtime payload is merged. Bounded by two independent rules applied as an `OR` in the prune query: **keep at most the 100 most-recent rows** AND **drop anything older than 7 days regardless of count**. Whichever rule cuts more aggressively wins on any given prune pass. The periodic worker that runs the prune lands in Phase 5; until then `sync_events` is append-only.
 
+**Origin attribution rule (Phase 5 T5.6 amendment, F9 finding):** the
+`originDeviceCloudId` field is derived from the *row's own*
+`last_editor_device_id` cloud column, NOT inferred from the parent
+session's `device_id`. The parent session's `device_id` is the device
+that originally *scanned* the row, which is wrong for an edit that
+happened later from a different device — especially the portal, which
+never appears in `devices` at all. The cloud schema adds
+`rd_numbers.last_editor_device_id` (nullable, FK to `devices.id`).
+Phones stamp their own `deviceCloudId` on every push; the portal
+writes `null`. The merge then classifies events as follows:
+
+| `last_editor_device_id` | origin | event type |
+|---|---|---|
+| equals own deviceCloudId | self | suppressed (no banner, no Channel C) |
+| equals another device | another phone | `REMOTE_*` with `originLabel = operatorName` |
+| `null` | portal | `PORTAL_DEFAULTER_EDIT` with `originLabel = "Portal"` |
+
+Legacy rows from pre-T5.6 phones (column `null`, parent session has a
+non-blank `device_id`) fall back to the parent session's device for
+attribution to avoid mislabeling cross-device sync echoes as portal
+edits.
+
 The banner reads:
 
 ```kotlin
@@ -1051,6 +1081,66 @@ Created once in `QRScannerApp.onCreate()`:
 | `remote_edit` | LOW | none | none | "Updates from owner" |
 
 User can disable per channel via system Settings → Notifications. We respect those preferences.
+
+### 15.5.7 SCHEMA_MISSING pill state (Phase 5 T5.1 amendment)
+
+When the cloud schema hasn't been applied yet (owner forgot to paste
+`cloud/schema.sql` into Supabase Studio), PostgREST returns
+`PGRST205` / `PGRST202` or Postgres surfaces `42P01` / `42883`. The
+sync repository routes these to a distinct pill state `SCHEMA_MISSING`
+rather than the generic `ERROR`. Differences:
+
+- **Dot color:** `PrimaryOrange` (calm) instead of `ErrorRed`.
+- **Label:** "Cloud setup needed" instead of "Sync error · tap".
+- **Tray notification suppression:** the every-3rd-failure
+  `notifySyncError` is never fired — the pill copy already tells the
+  user what to do, and a tray alert about an unstarted system is
+  noise. Push/pull workers keep retrying with exponential backoff so
+  recovery is automatic once the schema is applied.
+
+Tap routes to the diagnostics screen (Phase 5 backlog) which renders a
+"paste cloud/schema.sql into Supabase Studio" hint.
+
+### 15.5.8 Drain-until-empty pull loop (Phase 5 T5.4 amendment)
+
+The `CloudClient.pullChangesSince` contract gains a `pageWasFull`
+boolean on `CloudDelta`. `SyncRepository.runPull` wraps its merge
+phase in a `while(pageWasFull && highWaterMark advanced && pages <
+MAX_DRAIN_PAGES)` loop so first-run sign-in with thousands of cloud
+rows drains in a single `runPull` cycle instead of waiting 10+
+foreground-poll ticks. `MAX_DRAIN_PAGES = 20` (10k row safety cap) +
+the `highWaterMark > prior` guard prevents infinite loops on a
+runaway cursor (clock skew producing identical timestamps).
+
+### 15.5.9 Mid-edit tombstone guard (Phase 5 T5.5 amendment)
+
+`SessionDetailScreen` observes a `Flow<ScanSession?>` from
+`ScanSessionDao.observeSessionById(id)` (filters
+`deletedAt IS NULL`). If a delete from another device arrives via
+pull while the user is on this screen, the Flow emits `null`. After
+the first non-null emission seeded the local state
+(`sessionEverLoaded = true`), any later null Toast-shows
+"Session deleted by another device" and calls `onNavigateBack()`.
+Prevents the user from editing a tombstoned session and pushing
+orphan edits.
+
+### 15.5.10 Concurrency: serialized push + pull (Phase 5 T5.2 amendment)
+
+`SyncRepository` holds a single `kotlinx.coroutines.sync.Mutex`
+shared across `runPush` and `runPull`. Realtime payload handler
+(which calls `runPull` directly), the 5-min foreground poll, the
+WorkManager push/pull workers, and one-shot enqueue calls all
+contend for the same lock. This eliminates two race classes:
+
+1. Two concurrent `runPull` invocations both writing
+   `device_settings.lastPulledAt` — if the slower finished last with
+   an older `highWaterMark`, the cursor regressed and rows were
+   re-processed.
+2. A pull's merge phase observing a push half-way through promoting
+   orphan-finalized sessions to DIRTY.
+
+Critical sections are bounded (~one delta page = <2s in normal
+network conditions), so the non-fair mutex doesn't risk starvation.
 
 ---
 
