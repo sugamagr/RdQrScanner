@@ -591,9 +591,14 @@ class SyncRepository(
             allNotices += notices
             sinceCursor = delta.highWaterMark
 
-            val shouldContinue = delta.pageWasFull &&
-                delta.highWaterMark > priorCursor &&
-                pages < MAX_DRAIN_PAGES
+            // Phase 5 T5.12: a full page that didn't advance the high-water
+            // mark means we're inside a same-millisecond tail (rare but real
+            // under bulk writes). Continue draining; the SupabaseCloudClient's
+            // (updated_at, id) secondary order keeps the page boundary stable
+            // and merge's findByCloudId dedupes any overlap. The mergeFromCloud
+            // LWW gate (updatedAt <) makes re-emitting already-applied rows a
+            // no-op. MAX_DRAIN_PAGES still bounds total work.
+            val shouldContinue = delta.pageWasFull && pages < MAX_DRAIN_PAGES
             if (!shouldContinue) break
         }
 

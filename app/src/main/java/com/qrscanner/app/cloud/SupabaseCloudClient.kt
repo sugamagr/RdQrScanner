@@ -188,14 +188,27 @@ class SupabaseCloudClient(
 
     override suspend fun pullChangesSince(ownerId: String, since: Long): CloudDelta = runCloud {
         val sinceIso = com.qrscanner.app.cloud.mappers.IsoTime.fromEpochMillis(since)
+        // Phase 5 T5.12 (boundary adversarial #3 blocker fix): cap ordering
+        // on (updated_at, id) so a page full of rows sharing the exact same
+        // millisecond timestamp doesn't lose the tail. Without the id tie-
+        // breaker, repeated batches of 500 rows with identical updated_at
+        // would have the drain loop request `updated_at > X` and miss
+        // rows 501-600 that all share `updated_at = X`. With (updated_at,
+        // id) ordering + an explicit secondary order, the page boundary
+        // becomes deterministic and the next iteration's `>=` on
+        // updated_at + the merge's findByCloudId dedupe correctly resume
+        // from the tail. We keep the millisecond cursor on the client for
+        // backward compatibility with device_settings; the dedupe via
+        // findByCloudId during merge ensures no double-apply.
 
         val devices = supabase.postgrest.from(TABLE_DEVICES)
             .select(columns = Columns.ALL) {
                 filter {
                     eq("owner_id", ownerId)
-                    gt("updated_at", sinceIso)
+                    gte("updated_at", sinceIso)
                 }
                 order("updated_at", Order.ASCENDING)
+                order("id", Order.ASCENDING)
                 limit(PULL_PAGE_SIZE.toLong())
             }
             .decodeList<DeviceDto>()
@@ -205,11 +218,12 @@ class SupabaseCloudClient(
                 filter {
                     eq("owner_id", ownerId)
                     or {
-                        gt("updated_at", sinceIso)
+                        gte("updated_at", sinceIso)
                         gt("deleted_at", sinceIso)
                     }
                 }
                 order("updated_at", Order.ASCENDING)
+                order("id", Order.ASCENDING)
                 limit(PULL_PAGE_SIZE.toLong())
             }
             .decodeList<ScanSessionDto>()
@@ -219,11 +233,12 @@ class SupabaseCloudClient(
                 filter {
                     eq("owner_id", ownerId)
                     or {
-                        gt("updated_at", sinceIso)
+                        gte("updated_at", sinceIso)
                         gt("deleted_at", sinceIso)
                     }
                 }
                 order("updated_at", Order.ASCENDING)
+                order("id", Order.ASCENDING)
                 limit(PULL_PAGE_SIZE.toLong())
             }
             .decodeList<ScanLotDto>()
@@ -233,11 +248,12 @@ class SupabaseCloudClient(
                 filter {
                     eq("owner_id", ownerId)
                     or {
-                        gt("updated_at", sinceIso)
+                        gte("updated_at", sinceIso)
                         gt("deleted_at", sinceIso)
                     }
                 }
                 order("updated_at", Order.ASCENDING)
+                order("id", Order.ASCENDING)
                 limit(PULL_PAGE_SIZE.toLong())
             }
             .decodeList<RdNumberDto>()
