@@ -73,7 +73,7 @@ function DefaultFallback({
             Details
           </summary>
           <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-words font-mono text-[11px]">
-            {error.message}
+            {error?.message ?? String(error)}
           </pre>
         </details>
         <div className="mt-5 flex justify-end gap-2">

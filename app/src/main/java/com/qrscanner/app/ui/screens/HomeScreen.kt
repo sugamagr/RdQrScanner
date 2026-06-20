@@ -1,5 +1,6 @@
 package com.qrscanner.app.ui.screens
 
+import android.widget.Toast
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -150,9 +151,23 @@ fun HomeScreen(
         ) {
             Spacer(modifier = Modifier.height(12.dp))
 
+            // Phase 5 T5.14 (boundary adversarial #1 fix): SCHEMA_MISSING
+            // tap kicks an immediate push attempt so the user doesn't have
+            // to wait up to 5 minutes after pasting cloud/schema.sql for
+            // the next foreground-poll tick. Other states fall through to
+            // the future diagnostics screen.
+            val syncScope = rememberCoroutineScope()
             SyncStatusPill(
                 summary = displayedSummary,
-                onTap = { /* T2.10: tap target wired in Phase 5 diagnostics screen */ },
+                onTap = {
+                    if (displayedSummary.state == SyncPillState.SCHEMA_MISSING) {
+                        syncScope.launch {
+                            try { app.syncScheduler.enqueuePush() } catch (_: Throwable) {}
+                            try { app.syncScheduler.enqueuePull() } catch (_: Throwable) {}
+                            Toast.makeText(context, "Retrying…", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                },
                 modifier = Modifier
                     .align(Alignment.End)
             )

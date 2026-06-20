@@ -475,6 +475,21 @@ private fun LotCard(
             onSave = { changes ->
                 showEditDialog = false
                 scope.launch {
+                    // Phase 5 T5.13 (boundary adversarial #6 fix): if the
+                    // parent session got tombstoned via pull while the
+                    // user had the dialog open, bail out instead of
+                    // pushing orphan edits that would resurrect a
+                    // soft-deleted rd_number on the next cloud merge.
+                    val parent = app.database.scanSessionDao().getSessionById(sessionId)
+                    if (parent == null || parent.deletedAt != null) {
+                        Toast.makeText(
+                            context,
+                            "Session was deleted — edit not saved",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        onNavigateBack()
+                        return@launch
+                    }
                     val now = System.currentTimeMillis()
                     changes.forEach { (id, valueAndList) ->
                         val (months, monthsList) = valueAndList
