@@ -18,6 +18,8 @@ import com.qrscanner.app.notifications.SyncNotifier
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.UUID
 
 /**
@@ -43,6 +45,16 @@ class SyncRepository(
     // every additional 6 failures so the notification stays sticky without
     // spamming on every flaky-network retry tick.
     private var consecutiveFailures: Int = 0
+
+    // Phase 5 T5.2 (F3 finding): serialize runPush + runPull so realtime
+    // (which calls runPull directly from handleRealtimeChange) cannot
+    // race with the 5-min foreground poll or WorkManager backstop. Without
+    // this, two concurrent runPull invocations both write to
+    // device_settings.lastPulledAt — if the slower finishes second with
+    // an older highWaterMark the cursor regresses and rows are
+    // re-processed. The mutex is non-fair (FIFO not guaranteed) but
+    // each section is short (one delta page) so starvation isn't a risk.
+    private val syncMutex = Mutex()
 
     private val mutableSummary = MutableStateFlow(
         SyncSummary(
@@ -181,7 +193,9 @@ class SyncRepository(
      * as SYNC_ERROR and return Result.failure(...) so WorkManager
      * retries with exponential backoff.
      */
-    suspend fun runPush(): Result<Unit> {
+    suspend fun runPush(): Result<Unit> = syncMutex.withLock { runPushLocked() }
+
+    private suspend fun runPushLocked(): Result<Unit> {
         val session = cloudClient.currentSession()
             ?: return Result.failure(CloudException.AuthExpired())
         // We snapshot via currentSession() and accept the small race
@@ -506,7 +520,9 @@ class SyncRepository(
      * cycles — pull more by calling runPull again (e.g. realtime trigger
      * in T3.4, or the lifecycle-scoped 5-min poll).
      */
-    suspend fun runPull(): Result<Unit> {
+    suspend fun runPull(): Result<Unit> = syncMutex.withLock { runPullLocked() }
+
+    private suspend fun runPullLocked(): Result<Unit> {
         val cloudSession = cloudClient.currentSession()
             ?: return Result.failure(CloudException.AuthExpired())
         val ownerId = cloudSession.ownerId
