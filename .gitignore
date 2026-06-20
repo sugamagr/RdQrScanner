@@ -28,6 +28,9 @@ proguard/
 # Log Files
 *.log
 
+# Playwright MCP tooling artifacts
+.playwright-mcp/
+
 # Android Studio Navigation editor temp files
 .navigation/
 
