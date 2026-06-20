@@ -84,13 +84,36 @@ fun SessionDetailScreen(
     val totalDefaults by app.database.rdNumberDao()
         .observeDefaultCountForSession(sessionId)
         .collectAsState(initial = 0)
+    // Phase 5 T5.5 (F7): observe the session as a Flow so a tombstone
+    // arriving from another device (or the portal) while the user is
+    // viewing this screen pops them back to History instead of stranding
+    // them on ghost data. The first emission seeds the session state;
+    // subsequent null emissions trigger the back navigation.
+    val sessionFlow by app.database.scanSessionDao()
+        .observeSessionById(sessionId)
+        .collectAsState(initial = null)
     var session by remember { mutableStateOf<ScanSession?>(null) }
+    var sessionEverLoaded by rememberSaveable { mutableStateOf(false) }
     var expandedLotIds by rememberSaveable(stateSaver = LongSetSaver) {
         mutableStateOf(emptySet<Long>())
     }
 
-    LaunchedEffect(sessionId) {
-        session = app.database.scanSessionDao().getSessionById(sessionId)
+    LaunchedEffect(sessionFlow) {
+        val next = sessionFlow
+        if (next != null) {
+            session = next
+            sessionEverLoaded = true
+        } else if (sessionEverLoaded) {
+            // Tombstone arrived after we'd already loaded — get out
+            // cleanly. Toast first so the user understands why the
+            // screen vanished. Then navigate back.
+            Toast.makeText(
+                context,
+                "Session deleted by another device",
+                Toast.LENGTH_SHORT
+            ).show()
+            onNavigateBack()
+        }
     }
 
     val totalRdNumbers = session?.totalRdNumbers ?: 0

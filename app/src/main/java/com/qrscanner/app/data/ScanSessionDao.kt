@@ -27,6 +27,16 @@ interface ScanSessionDao {
     
     @Query("SELECT * FROM scan_sessions WHERE id = :id")
     suspend fun getSessionById(id: Long): ScanSession?
+
+    /**
+     * Observe a single session by local id. Emits null after a soft-
+     * delete from another device arrives via pull (deletedAt set) — the
+     * detail screen subscribes to detect mid-edit tombstones and bounce
+     * the user back to History. Phase 5 T5.5 (F7 finding).
+     */
+    @Query("SELECT * FROM scan_sessions WHERE id = :id AND deletedAt IS NULL")
+    fun observeSessionById(id: Long): Flow<ScanSession?>
+
     
     // Get the next sequential display number
     @Query("SELECT COALESCE(MAX(displayNumber), 0) + 1 FROM scan_sessions WHERE isActive = 0 AND totalLots > 0")
