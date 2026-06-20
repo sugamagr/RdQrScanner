@@ -318,9 +318,14 @@ class SyncRepository(
         val now = System.currentTimeMillis()
         val remaining = sessionDao.getDirtyForPush(limit = 1).size
         return if (firstError != null) {
+            // Phase 5 T5.1: SchemaMissing is the user's setup, not a flaky
+            // network — route to SCHEMA_MISSING pill + suppress the
+            // sync-error tray spam. Diagnostics screen shows the one-shot
+            // "paste cloud/schema.sql" hint.
+            val isSchemaMissing = firstError is CloudException.SchemaMissing
             updateSummary {
                 it.copy(
-                    state = SyncPillState.ERROR,
+                    state = if (isSchemaMissing) SyncPillState.SCHEMA_MISSING else SyncPillState.ERROR,
                     pendingCount = remaining,
                     lastErrorMessage = firstError.message ?: firstError.toString()
                 )
@@ -329,10 +334,13 @@ class SyncRepository(
             // Spec §15.5.2: surface the error notification on the 3rd
             // consecutive failure and re-fire every additional 6 so the
             // user isn't spammed on every retry tick but the badge stays
-            // sticky.
-            val shouldNotify = consecutiveFailures == ERROR_NOTIFY_THRESHOLD ||
+            // sticky. Suppress entirely for SCHEMA_MISSING — the pill copy
+            // already tells the user what to do.
+            val shouldNotify = !isSchemaMissing && (
+                consecutiveFailures == ERROR_NOTIFY_THRESHOLD ||
                 (consecutiveFailures > ERROR_NOTIFY_THRESHOLD &&
                     (consecutiveFailures - ERROR_NOTIFY_THRESHOLD) % ERROR_NOTIFY_REFIRE_EVERY == 0)
+            )
             if (shouldNotify) {
                 runCatching { notifier.notifySyncError(remaining) }
             }
@@ -510,6 +518,11 @@ class SyncRepository(
             cloudClient.pullChangesSince(ownerId, since)
         } catch (e: CloudException.AuthExpired) {
             updateSummary { it.copy(state = SyncPillState.ERROR, lastErrorMessage = "auth expired") }
+            return Result.failure(e)
+        } catch (e: CloudException.SchemaMissing) {
+            updateSummary {
+                it.copy(state = SyncPillState.SCHEMA_MISSING, lastErrorMessage = e.message)
+            }
             return Result.failure(e)
         } catch (e: Throwable) {
             deviceSettingsDao.recordPullError(

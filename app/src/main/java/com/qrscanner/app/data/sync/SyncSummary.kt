@@ -33,5 +33,14 @@ enum class SyncPillState {
     SYNCED,
     PENDING,
     SYNCING,
-    ERROR
+    ERROR,
+    /**
+     * Cloud database schema has not been applied yet — phone signed in
+     * successfully but PostgREST returns table-not-found / RPC-not-found.
+     * Distinct from ERROR so the pill copy + dot color can be calmer
+     * (PrimaryOrange, not ErrorRed) and the diagnostics screen can show
+     * a one-shot "paste cloud/schema.sql into Supabase Studio" hint
+     * instead of unactionable error spam. Phase 5 T5.1, spec §15.5.4.
+     */
+    SCHEMA_MISSING
 }

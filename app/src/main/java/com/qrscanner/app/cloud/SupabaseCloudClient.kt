@@ -314,9 +314,12 @@ class SupabaseCloudClient(
             // generic "server error" (oracle round 6 BLOCKER #2).
             throw when (e.statusCode) {
                 400 -> if (looksLikeBadAuth(e)) CloudException.InvalidCredentials(e)
+                       else if (looksLikeSchemaMissing(e)) CloudException.SchemaMissing(e.error.orEmpty())
                        else CloudException.Server(e.statusCode, e.error)
                 401, 403 -> if (looksLikeBadAuth(e)) CloudException.InvalidCredentials(e)
                             else CloudException.AuthExpired(e)
+                404 -> if (looksLikeSchemaMissing(e)) CloudException.SchemaMissing(e.error.orEmpty())
+                       else CloudException.Server(e.statusCode, e.error)
                 409 -> CloudException.Conflict(e.message ?: "conflict")
                 in 500..599 -> CloudException.Server(e.statusCode, e.error)
                 else -> CloudException.Server(e.statusCode, e.error)
@@ -335,6 +338,24 @@ class SupabaseCloudClient(
         return "invalid_grant" in body ||
             "invalid login credentials" in body ||
             "invalid credentials" in body
+    }
+
+    /**
+     * PostgREST surfaces missing tables/RPCs with code `PGRST205` (table)
+     * or `PGRST202` (RPC), and Postgres throws `42P01 relation does not
+     * exist` / `42883 function does not exist` when the schema hasn't
+     * been applied. Match any of those to route to friendly
+     * "schema not applied" UI instead of perpetual retry. Phase 5 T5.1.
+     */
+    private fun looksLikeSchemaMissing(e: RestException): Boolean {
+        val body = (e.error.orEmpty() + " " + (e.message.orEmpty())).lowercase()
+        return "pgrst205" in body ||
+            "pgrst202" in body ||
+            "42p01" in body ||
+            "42883" in body ||
+            "could not find the table" in body ||
+            "could not find the function" in body ||
+            "relation" in body && "does not exist" in body
     }
 
     private fun UserSession.toCloud(): CloudSession {

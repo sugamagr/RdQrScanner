@@ -125,5 +125,12 @@ sealed class CloudException(message: String, cause: Throwable? = null) : Runtime
     class Network(cause: Throwable) : CloudException("network error: ${cause.message}", cause)
     class Server(val status: Int, body: String?) : CloudException("server $status: $body")
     class Conflict(message: String) : CloudException(message)
+    /**
+     * The cloud-side schema has not been applied yet (table missing / RPC
+     * missing). Phase 5 T5.1 + spec §15.5.4 — surfaces as a friendly
+     * "Cloud database setup pending" pill state instead of perpetual
+     * unactionable Sync error.
+     */
+    class SchemaMissing(val detail: String) : CloudException("schema missing: $detail")
     class Unknown(cause: Throwable) : CloudException("unknown: ${cause.message}", cause)
 }

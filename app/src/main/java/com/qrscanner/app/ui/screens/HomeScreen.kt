@@ -105,6 +105,7 @@ fun HomeScreen(
             is CloudSessionStatus.Initializing -> repoSummary.copy(state = SyncPillState.INITIALIZING)
             is CloudSessionStatus.Authenticated -> {
                 val pillState = when {
+                    repoSummary.state == SyncPillState.SCHEMA_MISSING -> SyncPillState.SCHEMA_MISSING
                     repoSummary.state == SyncPillState.SYNCING -> SyncPillState.SYNCING
                     repoSummary.state == SyncPillState.ERROR -> SyncPillState.ERROR
                     pendingFromDb > 0 -> SyncPillState.PENDING

@@ -134,6 +134,7 @@ private fun dotColorFor(state: SyncPillState): Color = when (state) {
     SyncPillState.PENDING -> WarningAmber
     SyncPillState.SYNCING -> PrimaryOrange
     SyncPillState.ERROR -> ErrorRed
+    SyncPillState.SCHEMA_MISSING -> PrimaryOrange
 }
 
 private fun labelFor(summary: SyncSummary): String = when (summary.state) {
@@ -143,4 +144,5 @@ private fun labelFor(summary: SyncSummary): String = when (summary.state) {
     SyncPillState.PENDING -> "${summary.pendingCount} pending"
     SyncPillState.SYNCING -> "Syncing…"
     SyncPillState.ERROR -> "Sync error · tap"
+    SyncPillState.SCHEMA_MISSING -> "Cloud setup needed"
 }
