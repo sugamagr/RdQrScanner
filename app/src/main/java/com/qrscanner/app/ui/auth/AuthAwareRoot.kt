@@ -11,6 +11,9 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -322,6 +325,7 @@ private fun CloudException.toUserMessage(): String = when (this) {
     is CloudException.NotConfigured -> "Cloud sync not configured."
     is CloudException.Server -> "Server error ($status). Try again in a moment."
     is CloudException.Conflict -> message ?: "Conflict during sign-in."
+    is CloudException.SchemaMissing -> "Cloud database setup pending — see SHIP_READY.md."
     is CloudException.Unknown -> message ?: "Unknown error."
 }
 

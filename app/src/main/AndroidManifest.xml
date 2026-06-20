@@ -23,6 +23,9 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Haptic feedback on scan + bulk-select interactions -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
     <application
         android:name=".QRScannerApp"
         android:allowBackup="true"

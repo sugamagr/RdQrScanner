@@ -193,6 +193,8 @@ fun SessionDetailScreen(
             ) {
                 items(lots, key = { it.id }) { lot ->
                     LotCard(
+                        sessionId = sessionId,
+                        onSessionTombstoned = onNavigateBack,
                         lot = lot,
                         sessionAnchor = sessionAnchor,
                         isExpanded = lot.id in expandedLotIds,
@@ -221,6 +223,8 @@ private val LongSetSaver: Saver<Set<Long>, List<Long>> = Saver(
 
 @Composable
 private fun LotCard(
+    sessionId: Long,
+    onSessionTombstoned: () -> Unit,
     lot: ScanLot,
     sessionAnchor: MonthYear,
     isExpanded: Boolean,
@@ -487,7 +491,7 @@ private fun LotCard(
                             "Session was deleted — edit not saved",
                             Toast.LENGTH_SHORT
                         ).show()
-                        onNavigateBack()
+                        onSessionTombstoned()
                         return@launch
                     }
                     val now = System.currentTimeMillis()

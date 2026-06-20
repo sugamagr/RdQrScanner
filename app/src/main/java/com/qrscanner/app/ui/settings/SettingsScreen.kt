@@ -21,7 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.PersonOutline
-import androidx.compose.material.icons.filled.SmartphoneOutlined
+import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.SyncAlt
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -127,7 +127,7 @@ fun SettingsScreen(
 
             SettingsCard {
                 LabeledValue(
-                    icon = Icons.Default.SmartphoneOutlined,
+                    icon = Icons.Default.Smartphone,
                     label = stringResource(R.string.settings_device_name),
                     value = deviceName
                 )

@@ -1,6 +1,7 @@
 package com.qrscanner.app.notifications
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
@@ -43,6 +44,7 @@ class SyncNotifier(private val context: Context) {
      * successive syncs collapse into a single most-recent entry instead
      * of stacking.
      */
+    @SuppressLint("MissingPermission") // canPostNotifications() gate above each notify()
     fun notifySessionSynced(
         displayNumber: Int,
         totalLots: Int,
@@ -83,6 +85,7 @@ class SyncNotifier(private val context: Context) {
      * shows the latest 3 display numbers as a 'and 47 more' tail so the
      * user sees recent activity without scrolling 50 notifications.
      */
+    @SuppressLint("MissingPermission") // canPostNotifications() gate inside
     fun notifyBulkSessionsSynced(syncedDisplayNumbers: List<Int>) {
         if (!canPostNotifications()) return
         if (syncedDisplayNumbers.isEmpty()) return
@@ -119,6 +122,7 @@ class SyncNotifier(private val context: Context) {
      * deterministic from (type, displayNumber) so successive edits to
      * the same session collapse into one tray slot.
      */
+    @SuppressLint("MissingPermission") // canPostNotifications() gate inside
     fun notifyRemoteEdit(type: SyncEventType, displayNumber: Int, originLabel: String) {
         if (!canPostNotifications()) return
         val (title, body) = when (type) {
@@ -156,6 +160,7 @@ class SyncNotifier(private val context: Context) {
      * the prior notification rather than stacking, so the user always
      * sees the current pending count.
      */
+    @SuppressLint("MissingPermission") // canPostNotifications() gate inside
     fun notifySyncError(pendingCount: Int) {
         if (!canPostNotifications()) return
         if (pendingCount <= 0) {
