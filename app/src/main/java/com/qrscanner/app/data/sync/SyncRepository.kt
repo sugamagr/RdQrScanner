@@ -786,7 +786,9 @@ class SyncRepository(
             } else {
                 val priorMonthsPaid = existing.monthsPaid
                 val priorMonthsList = existing.monthsList
-                rdNumberDao.mergeFromCloud(
+                val priorStatus = existing.syncStatus
+                val priorUpdatedAt = existing.updatedAt
+                val rowsAffected = rdNumberDao.mergeFromCloud(
                     id = existing.id,
                     cloudId = dto.id,
                     lotId = parent.id,
@@ -798,6 +800,23 @@ class SyncRepository(
                     updatedAt = updatedAt,
                     deletedAt = deletedAt
                 )
+                // Phase 5 T5.8 (F4): spec §11 line 626 explicitly requires a
+                // WARN log on every silent overwrite of a DIRTY/SYNCING/
+                // SYNC_ERROR row so post-hoc 'my edit vanished' debugging is
+                // possible. rowsAffected == 1 AND priorStatus was unpushed
+                // means the LWW gate just discarded a pending local edit.
+                if (rowsAffected == 1 && priorStatus != SyncStatus.SYNCED) {
+                    val priorMonthsListSummary = priorMonthsList ?: "<auto>"
+                    val newMonthsListSummary = dto.monthsList ?: "<auto>"
+                    android.util.Log.w(
+                        "SyncRepository",
+                        "Silent overwrite: rd_numbers.cloudId=${dto.id} " +
+                            "local.updatedAt=$priorUpdatedAt (status=$priorStatus) " +
+                            "remote.updatedAt=$updatedAt. " +
+                            "Discarded local change: monthsPaid $priorMonthsPaid->${dto.monthsPaid}, " +
+                            "monthsList [$priorMonthsListSummary]->[$newMonthsListSummary]"
+                    )
+                }
                 // Banner-worthy only when defaulter data actually changed
                 // AND the merge actually applied (LWW gate at mergeFromCloud
                 // ensures we only emit when remote.updatedAt > local). Mid-
