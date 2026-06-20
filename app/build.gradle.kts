@@ -25,7 +25,12 @@ android {
 
     defaultConfig {
         applicationId = "com.qrscanner.app"
-        minSdk = 26
+        // minSdk bumped 26 -> 30 (Android 11) so D8/R8 emits DEX format
+        // 040, which permits the space characters in SimpleName that
+        // Ktor 3.x + kotlinx-io + supabase-kt 3.x synthetic classes
+        // produce (e.g. 'use streaming syntax'). Android 11+ covers
+        // ~94% of active devices in 2026, acceptable per spec §15.
+        minSdk = 30
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
