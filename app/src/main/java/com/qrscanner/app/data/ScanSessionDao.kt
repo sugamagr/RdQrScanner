@@ -164,7 +164,7 @@ interface ScanSessionDao {
             syncedAt = :updatedAt,
             lastSyncError = NULL,
             deletedAt = :deletedAt
-        WHERE id = :id AND updatedAt <= :updatedAt
+        WHERE id = :id AND updatedAt < :updatedAt
         """
     )
     suspend fun mergeFromCloud(
@@ -322,7 +322,7 @@ interface ScanLotDao {
             syncedAt = :updatedAt,
             lastSyncError = NULL,
             deletedAt = :deletedAt
-        WHERE id = :id AND updatedAt <= :updatedAt
+        WHERE id = :id AND updatedAt < :updatedAt
         """
     )
     suspend fun mergeFromCloud(

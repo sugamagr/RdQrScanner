@@ -114,7 +114,7 @@ interface RdNumberDao {
             syncedAt = :updatedAt,
             lastSyncError = NULL,
             deletedAt = :deletedAt
-        WHERE id = :id AND updatedAt <= :updatedAt
+        WHERE id = :id AND updatedAt < :updatedAt
         """
     )
     suspend fun mergeFromCloud(
