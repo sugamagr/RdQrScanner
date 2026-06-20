@@ -19,6 +19,7 @@
 
 -- 0. Required extensions ----------------------------------------------
 create extension if not exists "pgcrypto";   -- gen_random_uuid()
+create extension if not exists "pg_trgm";    -- trigram index for RD search (Phase 5 T5.10)
 
 -- 1. Tables -----------------------------------------------------------
 
@@ -105,6 +106,11 @@ create index if not exists rd_numbers_owner_idx
     on public.rd_numbers (owner_id);
 create index if not exists rd_numbers_owner_number_idx
     on public.rd_numbers (owner_id, number);
+-- Trigram GIN index for sub-100ms partial-match search at scale.
+-- Phase 5 T5.10. Powers the portal's searchRdNumbers() ILIKE query.
+-- gin_trgm_ops requires pg_trgm extension (created above).
+create index if not exists rd_numbers_number_trgm_idx
+    on public.rd_numbers using gin (number gin_trgm_ops);
 
 -- 2. updated_at trigger -----------------------------------------------
 -- Stamps updated_at on every UPDATE so the client can't accidentally
