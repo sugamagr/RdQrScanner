@@ -504,7 +504,7 @@ function EmptyState({
   return (
     <div className="mt-6 rounded-2xl border border-dashed border-surface-border bg-surface p-12 text-center">
       <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-surface-alt text-ink-muted">
-        <Users className="h-7 w-7" aria-hidden="true" />
+        <Users className="h-8 w-8" aria-hidden="true" />
       </div>
       <p className="mt-4 text-sm font-medium text-ink-primary">
         {isFiltered ? 'No accounts match.' : 'No accounts yet.'}

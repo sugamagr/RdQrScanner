@@ -389,7 +389,7 @@ private fun FilterBar(
         OutlinedTextField(
             value = query,
             onValueChange = onQueryChange,
-            placeholder = { Text("Search name or RD number", color = TextTertiary) },
+            placeholder = { Text("Search by name or RD number", color = TextTertiary) },
             singleLine = true,
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier.fillMaxWidth(),

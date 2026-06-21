@@ -52,7 +52,7 @@ const config: Config = {
         'csv-progress': {
           '0%': { transform: 'translateX(-100%)' },
           '50%': { transform: 'translateX(150%)' },
-          '100%': { transform: 'translateX(350%)' },
+          '100%': { transform: 'translateX(300%)' },
         },
       },
       animation: {
