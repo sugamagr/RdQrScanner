@@ -80,6 +80,8 @@ import com.qrscanner.app.ui.theme.TextSecondary
 import com.qrscanner.app.ui.theme.WarningAmber
 import com.qrscanner.app.util.QrPdfExporter
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
 /**
@@ -228,9 +230,11 @@ fun AddAccountsScreen(
                 scope.launch {
                     try {
                         val saved = persistAll(app, drafts)
-                        val uri = runCatching { QrPdfExporter.generate(context, saved) }
-                            .onFailure { android.util.Log.e("AddAccountsScreen", "QR PDF gen failed", it) }
-                            .getOrNull()
+                        val uri = withContext(Dispatchers.IO) {
+                            runCatching { QrPdfExporter.generate(context, saved) }
+                                .onFailure { android.util.Log.e("AddAccountsScreen", "QR PDF gen failed", it) }
+                                .getOrNull()
+                        }
                         if (uri != null) {
                             val share = Intent(Intent.ACTION_SEND).apply {
                                 type = "application/pdf"
@@ -305,7 +309,11 @@ private suspend fun persistAll(
             updatedAt = now
         )
         runCatching { dao.insert(account) }
-            .onFailure { android.util.Log.w("AddAccountsScreen", "duplicate ${account.rdNumber}", it) }
+            .onFailure {
+                if (com.qrscanner.app.BuildConfig.DEBUG) {
+                    android.util.Log.w("AddAccountsScreen", "duplicate ${account.rdNumber}", it)
+                }
+            }
         out += account
     }
     runCatching { app.syncScheduler.enqueuePush() }

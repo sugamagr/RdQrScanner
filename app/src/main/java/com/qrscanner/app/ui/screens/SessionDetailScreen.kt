@@ -41,7 +41,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -65,9 +65,12 @@ import com.qrscanner.app.ui.theme.AccentMint
 import com.qrscanner.app.ui.theme.PrimaryOrange
 import com.qrscanner.app.ui.theme.TextSecondary
 import com.qrscanner.app.ui.theme.WarningAmber
+import com.qrscanner.app.ui.theme.GradientPeach
 import com.qrscanner.app.util.LotImageGenerator
 import com.qrscanner.app.util.MonthYear
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -80,10 +83,10 @@ fun SessionDetailScreen(
     val context = LocalContext.current
     val app = context.applicationContext as QRScannerApp
 
-    val lots by app.database.scanLotDao().getLotsForSession(sessionId).collectAsState(initial = emptyList())
+    val lots by app.database.scanLotDao().getLotsForSession(sessionId).collectAsStateWithLifecycle(initialValue = emptyList())
     val totalDefaults by app.database.rdNumberDao()
         .observeDefaultCountForSession(sessionId)
-        .collectAsState(initial = 0)
+        .collectAsStateWithLifecycle(initialValue = 0)
     // Phase 5 T5.5 (F7): observe the session as a Flow so a tombstone
     // arriving from another device (or the portal) while the user is
     // viewing this screen pops them back to History instead of stranding
@@ -91,7 +94,7 @@ fun SessionDetailScreen(
     // subsequent null emissions trigger the back navigation.
     val sessionFlow by app.database.scanSessionDao()
         .observeSessionById(sessionId)
-        .collectAsState(initial = null)
+        .collectAsStateWithLifecycle(initialValue = null)
     var session by remember { mutableStateOf<ScanSession?>(null) }
     var sessionEverLoaded by rememberSaveable { mutableStateOf(false) }
     var expandedLotIds by rememberSaveable(stateSaver = LongSetSaver) {
@@ -124,14 +127,14 @@ fun SessionDetailScreen(
     }
     val totalDefaulterMonths by app.database.rdNumberDao()
         .observeTotalDefaulterMonthsForSession(sessionId)
-        .collectAsState(initial = 0)
+        .collectAsStateWithLifecycle(initialValue = 0)
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    colors = listOf(Color(0xFFFFF8F0), Color.White)
+                    colors = listOf(GradientPeach, Color.White)
                 )
             )
     ) {
@@ -238,7 +241,7 @@ private fun LotCard(
 
     val rdNumberEntities by app.database.rdNumberDao()
         .getNumbersForLot(lot.id)
-        .collectAsState(initial = emptyList())
+        .collectAsStateWithLifecycle(initialValue = emptyList())
     val rdNumberStrings = rdNumberEntities.map { it.number }
     val rdNumberCount = rdNumberStrings.size
     val defaulters = rdNumberEntities.filter { it.monthsPaid > 1 }
@@ -271,34 +274,42 @@ private fun LotCard(
     }
 
     fun shareViaWithImage() {
-        try {
-            val imageFile = LotImageGenerator.generateLotImage(
-                context,
-                lot.lotNumber,
-                rdNumberCount,
-                defaultCount,
-                totalMonthsInLot
-            )
-            val shareText = buildShareText()
+        // P5γ HIGH: bitmap render + PNG compress + FileOutputStream
+        // were running on the Main thread, causing a visible freeze
+        // when sharing high-count LOTs. Offload to IO; startActivity
+        // resumes on Main via scope's default dispatcher.
+        scope.launch {
+            try {
+                val imageFile = withContext(Dispatchers.IO) {
+                    LotImageGenerator.generateLotImage(
+                        context,
+                        lot.lotNumber,
+                        rdNumberCount,
+                        defaultCount,
+                        totalMonthsInLot
+                    )
+                }
+                val shareText = buildShareText()
 
-            if (imageFile != null) {
-                val imageUri = LotImageGenerator.getShareableUri(context, imageFile)
-                val intent = Intent(Intent.ACTION_SEND).apply {
-                    type = "image/*"
-                    putExtra(Intent.EXTRA_STREAM, imageUri)
-                    putExtra(Intent.EXTRA_TEXT, shareText)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                if (imageFile != null) {
+                    val imageUri = LotImageGenerator.getShareableUri(context, imageFile)
+                    val intent = Intent(Intent.ACTION_SEND).apply {
+                        type = "image/*"
+                        putExtra(Intent.EXTRA_STREAM, imageUri)
+                        putExtra(Intent.EXTRA_TEXT, shareText)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    context.startActivity(Intent.createChooser(intent, "Share LOT"))
+                } else {
+                    val intent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_TEXT, shareText)
+                    }
+                    context.startActivity(Intent.createChooser(intent, "Share LOT"))
                 }
-                context.startActivity(Intent.createChooser(intent, "Share LOT"))
-            } else {
-                val intent = Intent(Intent.ACTION_SEND).apply {
-                    type = "text/plain"
-                    putExtra(Intent.EXTRA_TEXT, shareText)
-                }
-                context.startActivity(Intent.createChooser(intent, "Share LOT"))
+            } catch (e: Exception) {
+                Toast.makeText(context, "Failed to share", Toast.LENGTH_SHORT).show()
             }
-        } catch (e: Exception) {
-            Toast.makeText(context, "Failed to share", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -409,7 +420,7 @@ private fun LotCard(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color(0xFFFFF8F0), RoundedCornerShape(12.dp))
+                        .background(GradientPeach, RoundedCornerShape(12.dp))
                         .padding(12.dp)
                 ) {
                     rdNumberEntities.forEachIndexed { index, rd ->

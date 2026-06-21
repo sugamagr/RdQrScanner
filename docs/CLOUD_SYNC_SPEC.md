@@ -1362,7 +1362,7 @@ Per-row upsert (not array form) so each failure is reportable in the result toas
 LWW by `updated_at`, same as §11. Three project-specific clarifications:
 
 1. **Portal CSV always wins.** The user's locked decision: a CSV upload's `updated_at` (server-stamped at upsert) is by definition newer than any prior phone edit on the same `rd_number`. The phone pulls the new name/amount on next sync.
-2. **`last_paid_through` is monotonic-only on push.** When the phone finalizes a session and `markSessionForSync` recomputes the holder's latest paid month, the upsert clause is `SET last_paid_through = GREATEST(EXCLUDED.last_paid_through, rd_accounts.last_paid_through)`. The phone *cannot* push a value older than what's already there — defends against an out-of-order replay overwriting a more recent payment.
+2. **`last_paid_through` is monotonic-only on push.** Enforced client-side at the phone DAO: `RdAccountDao.updateLastPaidThroughMonotonic` has a `WHERE lastPaidThrough IS NULL OR lastPaidThrough < :newMonth` guard, so an out-of-order replay can't push a regression. (Cloud-side `GREATEST(...)` enforcement was considered but rejected per decision D21 — client-side prevents the write entirely rather than silently discarding it, which is the safer pattern for a single-owner deployment.) When the phone finalizes a session and `markSessionForSync` recomputes the holder's latest paid month, only the strictly-greater value reaches the cloud upsert.
 3. **The portal NEVER edits `last_paid_through`.** It's not in the edit dialog form, not in `updateAccount()` query, never sent. The field is a phone-derived signal only.
 
 ### Push order

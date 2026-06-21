@@ -16,7 +16,23 @@ import java.util.zip.ZipOutputStream
 
 object XlsxExporter {
 
-    private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+    // P5γ MEDIUM: SimpleDateFormat is NOT thread-safe. The previous
+    // shared static field could corrupt timestamp formatting if two
+    // exports ran concurrently (rapid double-tap, parallel test, etc).
+    // Wrap in ThreadLocal so each calling thread gets its own instance
+    // — cheap, no allocation per call after first use, and the format
+    // string is locked so a maintainer can't introduce a thread-leaky
+    // alternative by accident.
+    private val dateFormatThreadLocal = ThreadLocal.withInitial {
+        SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+    }
+    private val dateFormat: SimpleDateFormat
+        get() = dateFormatThreadLocal.get()!!
+
+    private val filenameDateFormat = ThreadLocal.withInitial {
+        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+    }
+    private fun todayStamp(): String = filenameDateFormat.get()!!.format(Date())
 
     // ── XLSX Export ──────────────────────────────────────────────────────────
 
@@ -28,7 +44,7 @@ object XlsxExporter {
     ): File? {
         if (lots.isEmpty()) return null
         return try {
-            val fileName = "RD_Session_${sessionDisplayNumber}_${System.currentTimeMillis()}.xlsx"
+            val fileName = "RD_Session_${sessionDisplayNumber}_${todayStamp()}.xlsx"
             val downloadsDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
                 ?: context.filesDir
             val file = File(downloadsDir, fileName)
@@ -180,7 +196,7 @@ object XlsxExporter {
         if (lots.isEmpty()) return null
 
         return try {
-            val fileName = "RD_Session_${sessionDisplayNumber}_${System.currentTimeMillis()}.txt"
+            val fileName = "RD_Session_${sessionDisplayNumber}_${todayStamp()}.txt"
             val downloadsDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
                 ?: context.filesDir
             val file = File(downloadsDir, fileName)

@@ -60,6 +60,7 @@ import com.qrscanner.app.ui.theme.PrimaryOrange
 import com.qrscanner.app.ui.theme.PrimaryOrangeLight
 import com.qrscanner.app.ui.theme.TextSecondary
 import com.qrscanner.app.ui.theme.WarningAmber
+import com.qrscanner.app.ui.theme.GradientPeach
 import kotlinx.coroutines.launch
 
 @Composable
@@ -75,7 +76,7 @@ fun HowItWorksScreen(
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    colors = listOf(Color(0xFFFFF8F0), Color.White, Color(0xFFFFF8F0))
+                    colors = listOf(GradientPeach, Color.White, GradientPeach)
                 )
             )
     ) {

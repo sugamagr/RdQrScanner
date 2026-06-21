@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.UUID
@@ -244,11 +245,18 @@ class SyncRepository(
     }
 
     /**
-     * Push phase per spec §8. Walks DIRTY/SYNC_ERROR sessions in
-     * updated_at ASC order. For each: pushes the session first, then
-     * its DIRTY/SYNC_ERROR LOTs, then each LOT's DIRTY/SYNC_ERROR RD
-     * numbers. Children inherit the cloudId/owner of their parent at
-     * push time, so the cloud foreign keys always resolve.
+     * Push phase per spec §8 + §17.
+     *
+     * Push order (master-data first, child rows last):
+     *   1. **rd_accounts** — independent master data with no FK to other
+     *      tables. Pushed first so a portal user opening the Accounts
+     *      page during sync sees consistent state.
+     *   2. **scan_sessions** — DIRTY/SYNC_ERROR rows in updated_at ASC.
+     *   3. **scan_lots** per session — children of (2).
+     *   4. **rd_numbers** per lot — leaves of the tree.
+     *
+     * Within (2)-(4), children inherit the cloudId/owner of their
+     * parent at push time, so cloud foreign keys always resolve.
      *
      * Returns Result.failure with [CloudException.AuthExpired] if auth
      * is missing — the worker translates this to Result.failure() with
@@ -281,7 +289,7 @@ class SyncRepository(
             rdNumberDao.recoverStuckSyncing()
             rdAccountDao.recoverStuckSyncing()
             promoteOrphanFinalizedSessions()
-            sessionDao.promoteSessionsWithDirtyChildren()
+            sessionDao.promoteSessionsWithDirtyChildren(System.currentTimeMillis())
         }
 
         val dirtySessions = sessionDao.getDirtyForPush()
@@ -751,7 +759,9 @@ class SyncRepository(
      * Per-row outcomes:
      *  - **Local missing**: insert via the mapper. Stamps syncStatus=SYNCED.
      *  - **Local present + remote newer**: mergeFromCloud UPDATE filtered
-     *    by `WHERE id = :id AND updatedAt <= :updatedAt`. Idempotent.
+     *    by `WHERE id = :id AND updatedAt < :updatedAt` (strict less-
+     *    than per spec §11 / T5.7 tie-breaker — local wins on equal
+     *    timestamps so a DIRTY edit racing its own cloud echo survives).
      *  - **Local present + local newer**: merge UPDATE is a no-op (the
      *    WHERE filter excludes it). The local change pushes on the
      *    next runPush cycle. Spec §11's silent-loser pattern.
@@ -1162,15 +1172,17 @@ class SyncRepository(
      * Phase 3 T3.4. Spec §14.
      */
     suspend fun handleRealtimeChange(payload: com.qrscanner.app.cloud.CloudRealtimePayload) {
-        android.util.Log.d(
-            "SyncRepository",
-            "realtime ${payload.event} on ${payload.table} cloudId=${payload.cloudId}"
-        )
+        if (com.qrscanner.app.BuildConfig.DEBUG) {
+            android.util.Log.d(
+                "SyncRepository",
+                "realtime ${payload.event} on ${payload.table} cloudId=${payload.cloudId}"
+            )
+        }
         runPull()
     }
 
     private fun updateSummary(transform: (SyncSummary) -> SyncSummary) {
-        mutableSummary.value = transform(mutableSummary.value)
+        mutableSummary.update(transform)
     }
 
     companion object {
@@ -1191,6 +1203,7 @@ class SyncRepository(
          * pendingCount is overridden from the live DB count so the pill
          * always shows the truth, never the snapshot (oracle R4).
          */
+        @androidx.annotation.VisibleForTesting
         fun derivePillSummary(summary: SyncSummary, liveCount: Int): SyncSummary {
             val derived = when (summary.state) {
                 SyncPillState.NOT_SIGNED_IN,
@@ -1204,7 +1217,21 @@ class SyncRepository(
             return summary.copy(state = derived, pendingCount = liveCount)
         }
 
+        /**
+         * Fire the "sync paused" notification on the Nth consecutive
+         * push/pull failure. 3 = roughly 90s of compounded backoff
+         * (WorkManager 30s × 3 attempts) before bothering the operator.
+         * Lower than the per-row PUSH_ABANDON_THRESHOLD (8) so the
+         * banner lights up well before any row gets circuit-broken.
+         */
         private const val ERROR_NOTIFY_THRESHOLD = 3
+
+        /**
+         * After the threshold fires, re-fire the notification every
+         * Nth subsequent failure to keep the badge sticky without
+         * notification-fatiguing the operator. 6 ≈ 30 min between
+         * re-fires at WorkManager's 5h backoff plateau.
+         */
         private const val ERROR_NOTIFY_REFIRE_EVERY = 6
         // Phase 5 T5.4: hard upper bound on drain-loop iterations. With
         // PULL_PAGE_SIZE = 500 this covers up to 10k rows per cycle which
@@ -1215,10 +1242,17 @@ class SyncRepository(
         /**
          * Oracle bg_0ea195ce R3 / I6 — after this many consecutive push
          * failures on the same row, flip to [SyncStatus.SYNC_ABANDONED]
-         * to break the infinite promote → fail → re-promote loop. 8
-         * matches the WorkManager exponential backoff plateau (≈ 4h),
-         * so a row that's failed 8 times in real-world cadence is
-         * structurally broken, not just flaky-network.
+         * to break the infinite promote → fail → re-promote loop.
+         *
+         * 8 attempts × WorkManager's 30s initial + EXPONENTIAL backoff
+         * lands at roughly:
+         *   1: 30s    2: 60s    3: 2m     4: 4m     5: 8m
+         *   6: 16m    7: 32m    8: 64m  (≈ 1h elapsed real-time)
+         * A row that's failed 8 times across an hour of retries is
+         * structurally broken (schema drift, FK we can't satisfy,
+         * CHECK violation), not just flaky network — abandoning it
+         * stops the loop without losing the row (state preserved for
+         * manual diagnostics).
          */
         const val PUSH_ABANDON_THRESHOLD = 8
     }

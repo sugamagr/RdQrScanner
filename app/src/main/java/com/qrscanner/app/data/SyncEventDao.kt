@@ -33,8 +33,12 @@ interface SyncEventDao {
 
     /**
      * Bounded retention. Called by a periodic worker; keeps at most
-     * [keepCount] most-recent rows and drops anything older than
-     * [olderThan] millis regardless of count.
+     * [keepCount] most-recent rows AND drops anything older than
+     * [olderThan] millis. Both conditions must apply for deletion —
+     * the AND (not OR) preserves recent rows even when the keepCount
+     * window has shifted past them within the age window, and also
+     * preserves age-young rows that fell outside the keepCount window
+     * during a burst. Either interpretation alone would over-delete.
      */
     @Query(
         """
@@ -42,7 +46,7 @@ interface SyncEventDao {
         WHERE id NOT IN (
             SELECT id FROM sync_events ORDER BY occurredAt DESC LIMIT :keepCount
         )
-        OR occurredAt < :olderThan
+        AND occurredAt < :olderThan
         """
     )
     suspend fun pruneOldEvents(keepCount: Int, olderThan: Long)

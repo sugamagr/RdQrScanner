@@ -108,7 +108,7 @@ import com.qrscanner.app.QRScannerApp
 import com.qrscanner.app.data.RdNumber
 import com.qrscanner.app.data.ScanLot
 import com.qrscanner.app.data.ScanSession
-import com.qrscanner.app.data.isValidRdNumber
+import com.qrscanner.app.util.isValidRdNumber
 import com.qrscanner.app.ui.components.DefaulterAskDialog
 import com.qrscanner.app.ui.components.DefaulterEditDialog
 import com.qrscanner.app.ui.components.ResumeSessionDialog
@@ -119,6 +119,7 @@ import com.qrscanner.app.ui.theme.PrimaryOrange
 import com.qrscanner.app.ui.theme.SuccessGreen
 import com.qrscanner.app.ui.theme.TextSecondary
 import com.qrscanner.app.ui.theme.WarningAmber
+import com.qrscanner.app.ui.theme.CardBackground
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
@@ -1063,7 +1064,7 @@ private fun RDCameraScreen(
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(Color(0xFFF5F5F5), RoundedCornerShape(12.dp))
+                                .background(CardBackground, RoundedCornerShape(12.dp))
                                 .padding(16.dp)
                         ) {
                             if (hasSavedData || hasUnsavedData) {

@@ -26,7 +26,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Help
+import androidx.compose.material.icons.automirrored.filled.Help
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.People
@@ -38,7 +38,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -82,18 +82,18 @@ fun HomeScreen(
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as QRScannerApp
-    val completedSessions by app.database.scanSessionDao().getCompletedSessions().collectAsState(initial = emptyList())
+    val completedSessions by app.database.scanSessionDao().getCompletedSessions().collectAsStateWithLifecycle(initialValue = emptyList())
 
     // Pill state: SyncRepository.summaryFlow is now the single source of truth
     // for (state, pendingCount). It combines live Room count + lifecycle state
     // server-side (see SyncRepository.summaryFlow KDoc). HomeScreen only adds
     // the auth-overlay (NOT_SIGNED_IN/INITIALIZING) which depends on
     // CloudClient.sessionStatus the repository can't see.
-    val sessionStatus by app.cloudClient.sessionStatus.collectAsState(
-        initial = CloudSessionStatus.Initializing
+    val sessionStatus by app.cloudClient.sessionStatus.collectAsStateWithLifecycle(
+        initialValue = CloudSessionStatus.Initializing
     )
-    val repoSummary by app.syncRepository.summaryFlow.collectAsState(
-        initial = SyncSummary(
+    val repoSummary by app.syncRepository.summaryFlow.collectAsStateWithLifecycle(
+        initialValue = SyncSummary(
             state = SyncPillState.INITIALIZING,
             pendingCount = 0,
             lastSuccessfulPushAt = null,
@@ -183,11 +183,11 @@ fun HomeScreen(
             // a config change. Suppressed entirely while not signed in.
             val scope = rememberCoroutineScope()
             val deviceSettings by app.database.deviceSettingsDao().observe()
-                .collectAsState(initial = null)
+                .collectAsStateWithLifecycle(initialValue = null)
             val bannerSeenAt = deviceSettings?.lastBannerSeenAt ?: 0L
             val recentEvents by app.database.syncEventDao()
                 .observeEventsSince(since = bannerSeenAt, limit = 20)
-                .collectAsState(initial = emptyList())
+                .collectAsStateWithLifecycle(initialValue = emptyList())
             val showBanner = displayedSummary.state != SyncPillState.NOT_SIGNED_IN &&
                 recentEvents.isNotEmpty()
             if (showBanner) {
@@ -357,7 +357,7 @@ fun HomeScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 TextLinkButton(
-                    icon = Icons.Default.Help,
+                    icon = Icons.AutoMirrored.Filled.Help,
                     text = "How It Works",
                     color = WarningAmber,
                     onClick = onNavigateToHowItWorks

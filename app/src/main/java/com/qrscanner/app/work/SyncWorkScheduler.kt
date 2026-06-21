@@ -10,11 +10,8 @@ import kotlinx.coroutines.flow.map
 /**
  * Thin facade over [WorkManager] for the cloud-sync workers. Callers
  * (scanner finalize, defaulter edit, history delete, settings 'force
- * push') invoke [enqueuePush] and forget — they never touch [WorkManager]
- * directly.
- *
- * Phase 2 ships only [enqueuePush]. [enqueuePull] lands in Phase 3 T3.3
- * and follows the same shape.
+ * push') invoke [enqueuePush] / [enqueuePull] and forget — they never
+ * touch [WorkManager] directly.
  */
 class SyncWorkScheduler(context: Context) {
 

@@ -21,6 +21,10 @@ val AccentGold = Color(0xFFFFD93D)
 val BackgroundWhite = Color(0xFFFAFAFA)
 val SurfaceWhite = Color(0xFFFFFFFF)
 val CardBackground = Color(0xFFF5F7FA)
+val RowBackground = Color(0xFFF7F8FA)
+val DisabledBackground = Color(0xFFF1F3F5)
+val DisabledContent = Color(0xFFCBD0D6)
+val GradientPeach = Color(0xFFFFF8F0)
 
 // Text Colors
 val TextPrimary = Color(0xFF1A1A2E)

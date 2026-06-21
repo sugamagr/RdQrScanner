@@ -31,12 +31,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.qrscanner.app.R
 import com.qrscanner.app.data.sync.SyncPillState
 import com.qrscanner.app.data.sync.SyncSummary
 import com.qrscanner.app.ui.theme.AccentMint
@@ -80,9 +82,17 @@ fun SyncStatusPill(
         label = "pillDot"
     )
 
-    val label = labelFor(summary)
+    val label = when (summary.state) {
+        SyncPillState.NOT_SIGNED_IN -> stringResource(R.string.pill_not_signed_in)
+        SyncPillState.INITIALIZING -> stringResource(R.string.pill_initializing)
+        SyncPillState.SYNCED -> stringResource(R.string.pill_synced)
+        SyncPillState.PENDING -> stringResource(R.string.pill_pending, summary.pendingCount)
+        SyncPillState.SYNCING -> stringResource(R.string.pill_syncing)
+        SyncPillState.ERROR -> stringResource(R.string.pill_error)
+        SyncPillState.SCHEMA_MISSING -> stringResource(R.string.pill_schema_missing)
+    }
 
-    val a11yDescription = "Sync status: $label"
+    val a11yDescription = stringResource(R.string.pill_a11y_description, label)
 
     Box(
         modifier = modifier
@@ -137,12 +147,4 @@ private fun dotColorFor(state: SyncPillState): Color = when (state) {
     SyncPillState.SCHEMA_MISSING -> PrimaryOrange
 }
 
-private fun labelFor(summary: SyncSummary): String = when (summary.state) {
-    SyncPillState.NOT_SIGNED_IN -> "Tap to sign in"
-    SyncPillState.INITIALIZING -> "Connecting…"
-    SyncPillState.SYNCED -> "All synced"
-    SyncPillState.PENDING -> "${summary.pendingCount} pending"
-    SyncPillState.SYNCING -> "Syncing…"
-    SyncPillState.ERROR -> "Sync error · tap"
-    SyncPillState.SCHEMA_MISSING -> "Cloud setup needed"
-}
+

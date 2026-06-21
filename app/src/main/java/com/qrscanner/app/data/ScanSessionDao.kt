@@ -1,7 +1,6 @@
 package com.qrscanner.app.data
 
 import androidx.room.Dao
-import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.Query
 import androidx.room.Update
@@ -10,22 +9,19 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface ScanSessionDao {
     
-    @Query("SELECT * FROM scan_sessions ORDER BY startTime DESC")
-    fun getAllSessions(): Flow<List<ScanSession>>
-    
     // Only get completed sessions with actual data, ordered by displayNumber.
     // deletedAt IS NULL excludes soft-deleted sessions so they disappear from
     // history the instant the user taps delete (Phase 2 T2.6).
     @Query("SELECT * FROM scan_sessions WHERE isActive = 0 AND totalLots > 0 AND deletedAt IS NULL ORDER BY displayNumber DESC")
     fun getCompletedSessions(): Flow<List<ScanSession>>
-    
-    @Query("SELECT * FROM scan_sessions WHERE isActive = 1 ORDER BY startTime DESC LIMIT 1")
+
+    @Query("SELECT * FROM scan_sessions WHERE isActive = 1 AND deletedAt IS NULL ORDER BY startTime DESC LIMIT 1")
     suspend fun getActiveSession(): ScanSession?
 
-    @Query("SELECT id FROM scan_sessions WHERE isActive = 1 ORDER BY startTime DESC")
+    @Query("SELECT id FROM scan_sessions WHERE isActive = 1 AND deletedAt IS NULL ORDER BY startTime DESC")
     suspend fun getAllActiveSessionIds(): List<Long>
-    
-    @Query("SELECT * FROM scan_sessions WHERE id = :id")
+
+    @Query("SELECT * FROM scan_sessions WHERE id = :id AND deletedAt IS NULL")
     suspend fun getSessionById(id: Long): ScanSession?
 
     /**
@@ -44,13 +40,10 @@ interface ScanSessionDao {
     
     @Insert
     suspend fun insert(session: ScanSession): Long
-    
+
     @Update
     suspend fun update(session: ScanSession)
-    
-    @Delete
-    suspend fun delete(session: ScanSession)
-    
+
     @Query("DELETE FROM scan_sessions WHERE id = :id")
     suspend fun deleteById(id: Long)
     
@@ -65,7 +58,7 @@ interface ScanSessionDao {
         SELECT sl.sessionId AS sessionId, COUNT(rn.id) AS count
         FROM rd_numbers rn
         INNER JOIN scan_lots sl ON rn.lotId = sl.id
-        WHERE rn.monthsPaid > 1
+        WHERE rn.monthsPaid > 1 AND rn.deletedAt IS NULL
         GROUP BY sl.sessionId
     """)
     fun getDefaultCountsBySession(): Flow<List<SessionDefaultCount>>
@@ -138,7 +131,7 @@ interface ScanSessionDao {
     @Query(
         """
         UPDATE scan_sessions
-        SET syncStatus = 'DIRTY', updatedAt = strftime('%s','now') * 1000
+        SET syncStatus = 'DIRTY', updatedAt = :now
         WHERE syncStatus = 'SYNCED'
           AND deletedAt IS NULL
           AND id IN (
@@ -151,7 +144,7 @@ interface ScanSessionDao {
           )
         """
     )
-    suspend fun promoteSessionsWithDirtyChildren()
+    suspend fun promoteSessionsWithDirtyChildren(now: Long)
 
     @Query("UPDATE scan_sessions SET displayNumber = :displayNumber WHERE id = :id")
     suspend fun updateDisplayNumber(id: Long, displayNumber: Int)
@@ -235,6 +228,14 @@ interface ScanSessionDao {
     )
     suspend fun softDelete(id: Long, now: Long)
 
+    /**
+     * Live count of finalized sessions still owed a push. Excludes
+     * SYNC_ABANDONED per oracle bg_0ea195ce R3/I6 (a row that's failed
+     * PUSH_ABANDON_THRESHOLD times is structurally unpushable and
+     * shouldn't keep inflating the pill's "pending" count forever).
+     * Active sessions are also excluded because they're device-private
+     * until the operator taps End Session.
+     */
     @Query("SELECT COUNT(*) FROM scan_sessions WHERE syncStatus IN ('DIRTY','SYNC_ERROR') AND isActive = 0")
     fun observePendingCount(): Flow<Int>
 
@@ -281,22 +282,16 @@ data class SessionDefaultCount(
 
 @Dao
 interface ScanLotDao {
-    
-    @Query("SELECT * FROM scan_lots WHERE sessionId = :sessionId ORDER BY lotNumber ASC")
+
+    @Query("SELECT * FROM scan_lots WHERE sessionId = :sessionId AND deletedAt IS NULL ORDER BY lotNumber ASC")
     fun getLotsForSession(sessionId: Long): Flow<List<ScanLot>>
-    
-    @Query("SELECT * FROM scan_lots WHERE sessionId = :sessionId ORDER BY lotNumber ASC")
+
+    @Query("SELECT * FROM scan_lots WHERE sessionId = :sessionId AND deletedAt IS NULL ORDER BY lotNumber ASC")
     suspend fun getLotsForSessionSync(sessionId: Long): List<ScanLot>
 
     @Insert
     suspend fun insert(lot: ScanLot): Long
-    
-    @Update
-    suspend fun update(lot: ScanLot)
-    
-    @Delete
-    suspend fun delete(lot: ScanLot)
-    
+
     @Query("DELETE FROM scan_lots WHERE sessionId = :sessionId")
     suspend fun deleteLotsForSession(sessionId: Long)
 
@@ -312,7 +307,7 @@ interface ScanLotDao {
     @Query("SELECT * FROM scan_lots WHERE syncStatus IN ('DIRTY','SYNC_ERROR') AND sessionId = :sessionId ORDER BY lotNumber ASC")
     suspend fun getDirtyForSession(sessionId: Long): List<ScanLot>
 
-    @Query("SELECT * FROM scan_lots WHERE id = :id LIMIT 1")
+    @Query("SELECT * FROM scan_lots WHERE id = :id AND deletedAt IS NULL LIMIT 1")
     suspend fun findById(id: Long): ScanLot?
 
     @Query("UPDATE scan_lots SET syncStatus = 'SYNCING' WHERE id = :id AND syncStatus IN ('DIRTY','SYNC_ERROR')")

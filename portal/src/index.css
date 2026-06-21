@@ -3,6 +3,18 @@
 @tailwind utilities;
 
 @layer base {
+  /* P6δ NITPICK: ensure raw <a> elements get the same focus-visible
+     ring as <button>/<input>/<textarea>/<select>. Without this, the
+     ErrorBoundary's "Reload page" link and any future raw anchor
+     would be focusable but invisible to keyboard users. */
+  a:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px rgb(var(--ring-color, 255 159 67) / 0.6);
+    border-radius: 6px;
+  }
+}
+
+@layer base {
   html {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;

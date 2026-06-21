@@ -10,6 +10,9 @@ import android.os.Environment
 import androidx.core.content.FileProvider
 import java.io.File
 import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 object LotImageGenerator {
 
@@ -37,12 +40,12 @@ object LotImageGenerator {
         defaultCount: Int = 0,
         totalMonths: Int = 0
     ): File? {
-        return try {
-            val hasDefaulters = defaultCount > 0
-            val height = if (hasDefaulters) BANNER_HEIGHT_DEFAULTERS else BANNER_HEIGHT_PLAIN
-            val width = BANNER_WIDTH
+        val hasDefaulters = defaultCount > 0
+        val height = if (hasDefaulters) BANNER_HEIGHT_DEFAULTERS else BANNER_HEIGHT_PLAIN
+        val width = BANNER_WIDTH
 
-            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        return try {
             val canvas = Canvas(bitmap)
 
             val baseColor = if (hasDefaulters) "#F39C12" else "#FF9F43"
@@ -96,7 +99,8 @@ object LotImageGenerator {
                 canvas.drawText(line, width / 2f, lotY + 78f, defaulterPaint)
             }
 
-            val fileName = "LOT_${lotNumber}_${System.currentTimeMillis()}.png"
+            val stamp = SimpleDateFormat("yyyy-MM-dd_HHmm", Locale.getDefault()).format(Date())
+            val fileName = "LOT_${lotNumber}_$stamp.png"
             val downloadsDir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
                 ?: context.filesDir
             val file = File(downloadsDir, fileName)
@@ -104,12 +108,16 @@ object LotImageGenerator {
             FileOutputStream(file).use { out ->
                 bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
             }
-
-            bitmap.recycle()
             file
         } catch (e: Exception) {
             e.printStackTrace()
             null
+        } finally {
+            // P5γ LOW: recycle in finally so an exception during compress()
+            // doesn't leak the bitmap. The Bitmap.createBitmap allocation
+            // happens BEFORE try-block so the finally only runs when the
+            // bitmap is guaranteed to exist.
+            bitmap.recycle()
         }
     }
 

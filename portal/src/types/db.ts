@@ -57,10 +57,6 @@ export interface RdNumberRow {
   deleted_at: string | null;
 }
 
-export interface SessionWithDevice extends ScanSessionRow {
-  device: Pick<DeviceRow, 'id' | 'device_name'> | null;
-}
-
 /**
  * Customer-account profile (rd_accounts table). Composite PK is
  * (owner_id, rd_number) cloud-side; the portal never sees other

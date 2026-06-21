@@ -75,7 +75,7 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -103,8 +103,11 @@ import com.qrscanner.app.ui.theme.PrimaryOrange
 import com.qrscanner.app.ui.theme.PrimaryOrangeLight
 import com.qrscanner.app.ui.theme.TextSecondary
 import com.qrscanner.app.ui.theme.WarningAmber
+import com.qrscanner.app.ui.theme.GradientPeach
 import com.qrscanner.app.util.XlsxExporter
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -124,8 +127,8 @@ fun SessionHistoryScreen(
     val app = context.applicationContext as QRScannerApp
     val scope = rememberCoroutineScope()
 
-    val completedSessions by app.database.scanSessionDao().getCompletedSessions().collectAsState(initial = emptyList())
-    val defaultCountsList by app.database.scanSessionDao().getDefaultCountsBySession().collectAsState(initial = emptyList())
+    val completedSessions by app.database.scanSessionDao().getCompletedSessions().collectAsStateWithLifecycle(initialValue = emptyList())
+    val defaultCountsList by app.database.scanSessionDao().getDefaultCountsBySession().collectAsStateWithLifecycle(initialValue = emptyList())
     val defaultCountMap = remember(defaultCountsList) {
         defaultCountsList.associate { it.sessionId to it.count }
     }
@@ -189,7 +192,7 @@ fun SessionHistoryScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(
-                Brush.verticalGradient(listOf(Color(0xFFFFF8F0), Color.White, Color(0xFFFFF8F0)))
+                Brush.verticalGradient(listOf(GradientPeach, Color.White, GradientPeach))
             )
     ) {
         Column(
@@ -548,11 +551,16 @@ fun SessionHistoryScreen(
                                 onClick = {
                                     scope.launch {
                                         try {
-                                            val lots = app.database.scanLotDao().getLotsForSessionSync(session.id)
-                                            val rdNumbersPerLot = lots.map { lot ->
-                                                app.database.rdNumberDao().getNumbersForLotSync(lot.id)
+                                            // P5γ HIGH: XLSX export touches Room
+                                            // DAOs + ZIP/OOXML stream writes —
+                                            // all blocking. Offload to IO.
+                                            val file = withContext(Dispatchers.IO) {
+                                                val lots = app.database.scanLotDao().getLotsForSessionSync(session.id)
+                                                val rdNumbersPerLot = lots.map { lot ->
+                                                    app.database.rdNumberDao().getNumbersForLotSync(lot.id)
+                                                }
+                                                XlsxExporter.exportSessionToXlsx(context, lots, rdNumbersPerLot, session.displayNumber)
                                             }
-                                            val file = XlsxExporter.exportSessionToXlsx(context, lots, rdNumbersPerLot, session.displayNumber)
                                             if (file != null) {
                                                 val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", file)
                                                 val intent = Intent(Intent.ACTION_SEND).apply {
@@ -583,11 +591,13 @@ fun SessionHistoryScreen(
                                 onClick = {
                                     scope.launch {
                                         try {
-                                            val lots = app.database.scanLotDao().getLotsForSessionSync(session.id)
-                                            val rdNumbersPerLot = lots.map { lot ->
-                                                app.database.rdNumberDao().getNumbersForLotSync(lot.id)
+                                            val file = withContext(Dispatchers.IO) {
+                                                val lots = app.database.scanLotDao().getLotsForSessionSync(session.id)
+                                                val rdNumbersPerLot = lots.map { lot ->
+                                                    app.database.rdNumberDao().getNumbersForLotSync(lot.id)
+                                                }
+                                                XlsxExporter.exportSessionToTxt(context, lots, rdNumbersPerLot, session.displayNumber)
                                             }
-                                            val file = XlsxExporter.exportSessionToTxt(context, lots, rdNumbersPerLot, session.displayNumber)
                                             if (file != null) {
                                                 val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", file)
                                                 val intent = Intent(Intent.ACTION_SEND).apply {
@@ -841,7 +851,7 @@ private fun SessionCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
-                    .background(Color(0xFFFFF8F0))
+                    .background(GradientPeach)
                     .padding(14.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly
             ) {

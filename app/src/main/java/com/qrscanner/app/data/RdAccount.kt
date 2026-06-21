@@ -99,6 +99,6 @@ data class RdAccount(
     val deletedAt: Long? = null,
     /** See [ScanSession.retryCount]. */
     val retryCount: Int = 0,
-    /** See [RdNumber] last_editor_device_id (Phase 5 T5.6 attribution). */
+    /** See [RdNumber.lastEditorDeviceId] — Phase 5 T5.6 attribution. */
     val lastEditorDeviceId: String? = null
 )

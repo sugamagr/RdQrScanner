@@ -77,6 +77,7 @@
     <string name="pill_pending">%d pending</string>
     <string name="pill_syncing">Syncing…</string>
     <string name="pill_error">Sync error · tap</string>
+    <string name="pill_schema_missing">Cloud setup needed</string>
 
     <!-- Recent changes banner (spec §15.5.1) -->
     <string name="banner_title_one">1 recent update</string>
@@ -85,4 +86,5 @@
 
     <!-- Generic content descriptions -->
     <string name="content_desc_back">Back</string>
+    <string name="pill_a11y_description">Sync status: %1$s</string>
 </resources>

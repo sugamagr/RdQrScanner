@@ -137,7 +137,7 @@ class SyncStateMachineTest {
 
     @Test
     fun `derived pendingCount always equals liveCount regardless of state`() {
-        for (state in SyncPillState.values()) {
+        for (state in SyncPillState.entries) {
             for (live in listOf(0, 1, 5, 999)) {
                 val out = derivePillSummary(summary(state, pending = 0), live)
                 assertEquals(

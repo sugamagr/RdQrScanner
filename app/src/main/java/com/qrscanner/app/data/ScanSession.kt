@@ -5,7 +5,10 @@ import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "scan_sessions")
+@Entity(
+    tableName = "scan_sessions",
+    indices = [Index(value = ["cloudId"])]
+)
 data class ScanSession(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
@@ -69,7 +72,10 @@ data class ScanSession(
             onDelete = ForeignKey.CASCADE
         )
     ],
-    indices = [Index(value = ["sessionId"])]
+    indices = [
+        Index(value = ["sessionId"]),
+        Index(value = ["cloudId"])
+    ]
 )
 data class ScanLot(
     @PrimaryKey(autoGenerate = true)
@@ -88,9 +94,3 @@ data class ScanLot(
     /** See [ScanSession.retryCount]. */
     val retryCount: Int = 0
 )
-
-// Validation helper
-fun isValidRdNumber(number: String): Boolean {
-    val cleanNumber = number.trim()
-    return cleanNumber.matches(Regex("^\\d{9,15}$"))
-}

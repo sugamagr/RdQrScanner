@@ -50,6 +50,7 @@ import com.qrscanner.app.ui.theme.PrimaryOrange
 import com.qrscanner.app.ui.theme.PrimaryOrangeLight
 import com.qrscanner.app.ui.theme.TextSecondary
 import com.qrscanner.app.ui.theme.WarningAmber
+import com.qrscanner.app.ui.theme.GradientPeach
 
 @Composable
 fun AppInfoScreen(
@@ -60,7 +61,7 @@ fun AppInfoScreen(
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    colors = listOf(Color(0xFFFFF8F0), Color.White, Color(0xFFFFF8F0))
+                    colors = listOf(GradientPeach, Color.White, GradientPeach)
                 )
             )
     ) {
@@ -146,7 +147,7 @@ fun AppInfoScreen(
                                     )
                                 )
                                 Text(
-                                    text = "Version 1.0.0",
+                                    text = "Version ${com.qrscanner.app.BuildConfig.VERSION_NAME}",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = Color.White.copy(alpha = 0.9f)
                                 )

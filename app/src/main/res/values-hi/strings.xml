@@ -77,6 +77,8 @@
     <string name="pill_pending">%d बाकी</string>
     <string name="pill_syncing">सिंक हो रहा है…</string>
     <string name="pill_error">सिंक एरर · टैप करें</string>
+    <string name="pill_schema_missing">क्लाउड सेटअप चाहिए</string>
+    <string name="pill_a11y_description">सिंक स्थिति: %1$s</string>
 
     <!-- Banner -->
     <string name="banner_title_one">1 नया अपडेट</string>

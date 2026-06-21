@@ -36,11 +36,11 @@ A specialized Android application designed for scanning and managing RD (Recurri
 - **Copy to Clipboard**: Quick comma-separated list per LOT
 - **Share via Apps**: Direct sharing to WhatsApp, etc. with LOT image attachment
 
-### 🖨️ QR Code Generator
-- Generate QR codes for multiple RD account numbers
-- A4 PDF output with 24 QR codes per page (6 columns × 4 rows)
-- Account number printed below each QR code
-- Open generated PDF directly from app
+### QR Code Generator (now AddAccounts spreadsheet, v8)
+- Add accounts in a spreadsheet entry screen (name + RD number + monthly amount)
+- A4 PDF output with 2 QR codes per page (1 column × 2 rows at 360pt each)
+- Each cell carries the account name (bold) + RD number (mono) + monthly amount (₹)
+- Open generated PDF directly from app via the share sheet
 
 ### 🎨 Modern UI/UX
 - Light orange theme with Material 3 components

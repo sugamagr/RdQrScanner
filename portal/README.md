@@ -61,7 +61,9 @@ src/
 │   ├── AppShell.tsx           sticky header + nav + signout
 │   ├── PageHeader.tsx         page title + subtitle + action slot
 │   ├── EditDefaulterDialog.tsx  bottom-sheet defaulter editor
-│   └── RecentChangesBanner    (phone only)
+│   ├── ImportCsvDialog.tsx    CSV bulk-upload modal for accounts
+│   ├── AccountEditDialog.tsx  name + amount + active toggle
+│   └── DeleteOrInactivateDialog.tsx  two-path delete with verbatim spec copy
 ├── pages/
 │   ├── SignIn.tsx             email + password + expiry hint
 │   ├── Sessions.tsx           table + search by #, infinite scroll

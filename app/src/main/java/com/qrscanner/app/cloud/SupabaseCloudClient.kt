@@ -38,6 +38,7 @@ import io.github.jan.supabase.realtime.realtime
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.onFailure
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -111,7 +112,19 @@ class SupabaseCloudClient(
                 is SessionStatus.Initializing -> CloudSessionStatus.Initializing
                 is SessionStatus.Authenticated -> CloudSessionStatus.Authenticated(status.session.toCloud())
                 is SessionStatus.NotAuthenticated -> CloudSessionStatus.NotAuthenticated
-                is SessionStatus.RefreshFailure -> CloudSessionStatus.RefreshFailure(status.cause.toString())
+                is SessionStatus.RefreshFailure -> CloudSessionStatus.RefreshFailure(
+                    // P2β NITPICK: full RefreshFailureCause.toString() includes
+                    // the nested Throwable/RestException stack + body, which
+                    // can carry token fragments and KeyStore internals into
+                    // the visible auth banner. Sanitize to the underlying
+                    // exception's message only, truncated to a safe length.
+                    when (val cause = status.cause) {
+                        is io.github.jan.supabase.auth.status.RefreshFailureCause.NetworkError ->
+                            cause.exception.message?.take(120) ?: "refresh failed"
+                        is io.github.jan.supabase.auth.status.RefreshFailureCause.InternalServerError ->
+                            cause.exception.message?.take(120) ?: "refresh failed"
+                    }
+                )
             }
         }
 
@@ -320,7 +333,13 @@ class SupabaseCloudClient(
 
     override fun observeRealtimeChanges(ownerId: String): Flow<CloudRealtimePayload> = callbackFlow {
         supabase.realtime.connect()
-        val channel = supabase.realtime.channel("rt:owner:$ownerId")
+        // P2β NITPICK: channel id was "rt:owner:$ownerId" — embedding the
+        // auth uuid in the channel name leaks a stable identifier into
+        // any server-side logs that capture channel names. The JWT already
+        // scopes the subscription to this owner, so a per-owner namespace
+        // adds nothing the realtime server can't already see. Hash the
+        // id so the channel name carries no correlatable PII.
+        val channel = supabase.realtime.channel("rt:owner:${ownerId.hashedNamespace()}")
 
         // supabase-kt 3.1.4: PostgresChangeFilter.filter is a private var
         // exposed via filter(column, operator, value). Direct assignment
@@ -358,7 +377,15 @@ class SupabaseCloudClient(
             launch {
                 flow.collect { action ->
                     val payload = action.toPayload(table) ?: return@collect
-                    trySend(payload)
+                    // P2γ NITPICK: callbackFlow's default buffer is 64. On a
+                    // burst the producer can outrun the slow consumer
+                    // (handleRealtimeChange -> runPull, which is mutex-
+                    // serialized). trySend silently drops on full — the
+                    // 5-min poll backstop recovers, but the dropped events
+                    // are invisible. Log so the diagnostic trail exists.
+                    trySend(payload).onFailure {
+                        Log.w(TAG, "realtime buffer full, dropping ${payload.event} on ${payload.table}; poll backstop will catch up")
+                    }
                 }
             }
         }
@@ -375,6 +402,12 @@ class SupabaseCloudClient(
     private suspend inline fun <T> runCloud(block: () -> T): T {
         try {
             return block()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // P2γ NITPICK: structured concurrency requires cancellation
+            // to propagate unwrapped. The Throwable catch below would
+            // wrap it in CloudException.Unknown, breaking the cancel
+            // contract for any caller that's racing this suspend fn.
+            throw e
         } catch (e: RestException) {
             // Supabase Auth returns 400 + body containing "invalid_grant" /
             // "Invalid login credentials" for wrong email or password. Map
@@ -404,9 +437,16 @@ class SupabaseCloudClient(
 
     private fun looksLikeBadAuth(e: RestException): Boolean {
         val body = (e.error.orEmpty() + " " + (e.message.orEmpty())).lowercase()
+        // Newer Supabase Auth (post PR #1721) returns the underscore form
+        // "invalid_credentials" in the JSON error code field; the space
+        // form "invalid credentials" remains for backward compat. Match
+        // both so a Supabase server upgrade doesn't silently flip the
+        // user-facing copy from "Email or password incorrect" back to
+        // the generic "server error".
         return "invalid_grant" in body ||
             "invalid login credentials" in body ||
-            "invalid credentials" in body
+            "invalid credentials" in body ||
+            "invalid_credentials" in body
     }
 
     /**
@@ -475,7 +515,20 @@ class SupabaseCloudClient(
         private const val TABLE_RD_NUMBERS = "rd_numbers"
         private const val TABLE_RD_ACCOUNTS = "rd_accounts"
         private const val PULL_PAGE_SIZE = 500
+
+        // Balances quick recovery vs avoiding a thundering-herd reconnect
+        // storm when many devices come back online together (e.g. after a
+        // regional Supabase incident). 5s is the supabase-kt default and
+        // the floor below which Realtime starts rate-limiting the
+        // websocket handshake server-side.
         private val REALTIME_RECONNECT_DELAY = 5.seconds
+
+        // Channel-name namespacing helper — hashes the ownerId so the
+        // realtime channel name carries no correlatable PII while still
+        // partitioning subscriptions per owner deterministically. The
+        // toUInt cast drops the sign so the namespace doesn't look like
+        // a "negative id" in any log surface.
+        private fun String.hashedNamespace(): String = hashCode().toUInt().toString(16)
     }
 }
 
@@ -503,7 +556,12 @@ private class EncryptedSessionManager(context: Context) : SessionManager {
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
             )
         } catch (e: Exception) {
-            Log.w(TAG, "EncryptedSharedPreferences unavailable, falling back to plain prefs", e)
+            // P2β NITPICK: passing the raw Throwable to Log.w prints the
+            // full stack trace, which on some OEM builds includes
+            // KeyStore alias names + internal state. Truncate to just
+            // the message so the diagnostic is still useful but the
+            // logcat surface stays clean.
+            Log.w(TAG, "EncryptedSharedPreferences unavailable, falling back to plain prefs: ${e.message?.take(120)}")
             context.getSharedPreferences(FALLBACK_PREFS_NAME, Context.MODE_PRIVATE)
         }
         SharedPreferencesSettings(prefs)

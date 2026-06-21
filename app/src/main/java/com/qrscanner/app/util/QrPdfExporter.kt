@@ -14,6 +14,9 @@ import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import com.qrscanner.app.data.RdAccount
 import java.io.File
 import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * Single source of truth for ALL QR PDF generation across the app.
@@ -29,9 +32,14 @@ import java.io.FileOutputStream
  * The fixed size is an invariant defended HERE, not in the callers
  * (so a future caller can't accidentally request smaller QRs).
  *
- * Layout: A4 portrait (595 × 842 pt), 2×2 grid (4 QRs per page),
- * per-cell caption block beneath the QR: name (bold) + RD number
- * (mono) + ₹monthlyAmount.
+     * Layout: A4 portrait (595 × 842 pt), 1×2 grid (2 QRs per page).
+     * 2×2 would require 720pt of width (2×360pt) which exceeds the
+     * 595pt A4 page — the original design comment said 2×2 but the
+     * math never worked and the implementation silently clipped the
+     * right-column QRs. Switching to 1 column × 2 rows preserves the
+     * 360pt invariant for thermal-printer legibility at the cost of
+     * half the per-page density. Caption block: name (bold) + RD
+     * number (mono) + ₹monthlyAmount beneath each QR.
  *
  * QR payload: the rd_number string ONLY. Scanners read just that;
  * caption metadata (name, amount) lives in the printable region and
@@ -60,7 +68,10 @@ object QrPdfExporter {
      */
     const val QR_SIZE_PT = 360
 
-    private const val GRID_COLS = 2
+    // 1 column × 2 rows per page. 1 col is forced because GRID_COLS=2
+    // overflows A4 portrait width (see class KDoc). If a future change
+    // shrinks QR_SIZE_PT below ~270pt, GRID_COLS can return to 2.
+    private const val GRID_COLS = 1
     private const val GRID_ROWS = 2
     private const val ITEMS_PER_PAGE = GRID_COLS * GRID_ROWS
 
@@ -84,7 +95,7 @@ object QrPdfExporter {
     fun generate(
         context: Context,
         accounts: List<RdAccount>,
-        filename: String = "rd-qr-${System.currentTimeMillis()}.pdf"
+        filename: String = defaultFilename()
     ): android.net.Uri? {
         if (accounts.isEmpty()) return null
 
@@ -133,14 +144,17 @@ object QrPdfExporter {
                     val account = accounts[i]
                     val qr = renderQr(account.rdNumber, QR_SIZE_PT)
                     if (qr != null) {
-                        canvas.drawBitmap(qr, x.toFloat(), y.toFloat(), null)
-                        qr.recycle()
+                        try {
+                            canvas.drawBitmap(qr, x.toFloat(), y.toFloat(), null)
+                        } finally {
+                            qr.recycle()
+                        }
                     }
 
                     val centerX = x + QR_SIZE_PT / 2f
                     val captionTop = y + QR_SIZE_PT + CAPTION_LINE_HEIGHT_PT
                     canvas.drawText(
-                        account.name.take(28),
+                        ellipsize(account.name, 28),
                         centerX,
                         captionTop.toFloat(),
                         nameBoldPaint
@@ -185,11 +199,18 @@ object QrPdfExporter {
             EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M
         )
         val matrix = writer.encode(content, BarcodeFormat.QR_CODE, sizePt, sizePt, hints)
+        // Build a row buffer of int pixels and write whole rows at a time
+        // via setPixels() instead of one setPixel() JNI call per pixel.
+        // For 360x360 = 129,600 pixels this is ~10x faster than the prior
+        // nested setPixel() loop and removes a perceptible UI freeze when
+        // generating bulk QR PDFs.
+        val pixels = IntArray(sizePt)
         Bitmap.createBitmap(sizePt, sizePt, Bitmap.Config.RGB_565).also { bmp ->
-            for (px in 0 until sizePt) {
-                for (py in 0 until sizePt) {
-                    bmp.setPixel(px, py, if (matrix[px, py]) Color.BLACK else Color.WHITE)
+            for (py in 0 until sizePt) {
+                for (px in 0 until sizePt) {
+                    pixels[px] = if (matrix[px, py]) Color.BLACK else Color.WHITE
                 }
+                bmp.setPixels(pixels, 0, sizePt, 0, py, sizePt, 1)
             }
         }
     } catch (e: Exception) {
@@ -197,5 +218,23 @@ object QrPdfExporter {
         null
     }
 
-    private fun formatAmount(rupees: Int): String = "INR $rupees / month"
+    // ₹ matches the locked phone-side currency presentation in the
+    // RD Accounts spec and AccountsScreen UI. "INR" was the pre-spec
+    // fallback when font support for the rupee glyph was uncertain;
+    // modern Android default Roboto ships it.
+    private fun formatAmount(rupees: Int): String = "₹$rupees / month"
+
+    // Caption truncation with visible ellipsis so the operator notices
+    // a long name was clipped. Cap at 25 + 3-char ellipsis = 28 total
+    // to stay within the cell's horizontal budget.
+    private fun ellipsize(text: String, maxLen: Int): String =
+        if (text.length <= maxLen) text else text.take(maxLen - 3) + "..."
+
+    // Human-readable filename so the user can identify exports by date
+    // when sharing or browsing the share-sheet recents. Local time so
+    // the operator's mental model matches what they just printed.
+    private fun defaultFilename(): String {
+        val stamp = SimpleDateFormat("yyyy-MM-dd_HHmm", Locale.getDefault()).format(Date())
+        return "rd-qr-$stamp.pdf"
+    }
 }

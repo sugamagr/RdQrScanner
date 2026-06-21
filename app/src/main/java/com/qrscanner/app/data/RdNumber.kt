@@ -18,7 +18,8 @@ import androidx.room.PrimaryKey
     indices = [
         Index(value = ["lotId"]),
         Index(value = ["lotId", "number"]),
-        Index(value = ["number"])
+        Index(value = ["number"]),
+        Index(value = ["cloudId"])
     ]
 )
 data class RdNumber(
@@ -33,7 +34,14 @@ data class RdNumber(
      *
      * Normal RD payments are monthly, so the default is 1. Values greater
      * than 1 indicate a defaulter who is paying multiple months at once
-     * (e.g. catching up after missed payments). Bounded to [MONTHS_MIN]..[MONTHS_MAX].
+     * (e.g. catching up after missed payments). Bounded to [MONTHS_MIN]..[MONTHS_MAX]
+     * at the UI layer (DefaulterDialogs coerceIn) and at the cloud
+     * layer (scan_sessions schema CHECK constraint). The local Room
+     * column has no CHECK constraint because Room 2.8 still requires a
+     * destructive migration to add one; the pre-release destructive-
+     * migration design (Q3=B) means adding it costs nothing — but it's
+     * deferred until a CI test for invalid-DAO-call would actually
+     * catch a regression.
      */
     val monthsPaid: Int = MONTHS_DEFAULT,
     /**
@@ -116,8 +124,11 @@ data class RdNumber(
      * close the wire-vs-local-storage symmetry gap: pre-v9, the field
      * existed in RdNumberDto + cloud schema but had no Room column, so
      * pulls couldn't persist the attribution and the badge stayed
-     * blank after the next process restart. v9 MIGRATION_8_9 adds the
-     * column with default null so existing rows keep deserialising.
+     * blank after the next process restart. Pre-release destructive
+     * Room migration (fallbackToDestructiveMigration in AppDatabase)
+     * handles the v8→v9 column add by recreating the table fresh —
+     * intentional per Q3=B since there are no installed users to
+     * preserve data for yet.
      */
     val lastEditorDeviceId: String? = null
 ) {

@@ -18,7 +18,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -80,11 +80,11 @@ fun AuthAwareRoot() {
         return
     }
 
-    val sessionStatus by app.cloudClient.sessionStatus.collectAsState(
-        initial = CloudSessionStatus.Initializing
+    val sessionStatus by app.cloudClient.sessionStatus.collectAsStateWithLifecycle(
+        initialValue = CloudSessionStatus.Initializing
     )
     val deviceSettings by app.database.deviceSettingsDao().observe()
-        .collectAsState(initial = null)
+        .collectAsStateWithLifecycle(initialValue = null)
 
     // Loading flags use plain `remember` (NOT `rememberSaveable`) so a config
     // change cancels both the coroutine AND its visible spinner. Otherwise the

@@ -226,10 +226,10 @@ export function AccountsPage() {
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-3 align-middle font-mono text-ink-secondary">
+                    <td className="px-4 py-3 align-middle font-mono tabular-nums text-ink-secondary">
                       {account.rd_number}
                     </td>
-                    <td className="px-4 py-3 align-middle text-right font-mono text-ink-primary">
+                    <td className="px-4 py-3 align-middle text-right font-mono tabular-nums text-ink-primary">
                       ₹{formatNumber(account.monthly_amount)}
                     </td>
                     <td className="px-4 py-3 align-middle text-right text-ink-secondary">

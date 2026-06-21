@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 9,
-    "identityHash": "e1a8e4430744769748696476b5752a0a",
+    "identityHash": "ec7c6c635e710126f7c0151094c14126",
     "entities": [
       {
         "tableName": "scan_sessions",
@@ -108,7 +108,18 @@
           "columnNames": [
             "id"
           ]
-        }
+        },
+        "indices": [
+          {
+            "name": "index_scan_sessions_cloudId",
+            "unique": false,
+            "columnNames": [
+              "cloudId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_scan_sessions_cloudId` ON `${TABLE_NAME}` (`cloudId`)"
+          }
+        ]
       },
       {
         "tableName": "scan_lots",
@@ -192,6 +203,15 @@
             ],
             "orders": [],
             "createSql": "CREATE INDEX IF NOT EXISTS `index_scan_lots_sessionId` ON `${TABLE_NAME}` (`sessionId`)"
+          },
+          {
+            "name": "index_scan_lots_cloudId",
+            "unique": false,
+            "columnNames": [
+              "cloudId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_scan_lots_cloudId` ON `${TABLE_NAME}` (`cloudId`)"
           }
         ],
         "foreignKeys": [
@@ -331,6 +351,15 @@
             ],
             "orders": [],
             "createSql": "CREATE INDEX IF NOT EXISTS `index_rd_numbers_number` ON `${TABLE_NAME}` (`number`)"
+          },
+          {
+            "name": "index_rd_numbers_cloudId",
+            "unique": false,
+            "columnNames": [
+              "cloudId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_rd_numbers_cloudId` ON `${TABLE_NAME}` (`cloudId`)"
           }
         ],
         "foreignKeys": [
@@ -616,7 +645,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'e1a8e4430744769748696476b5752a0a')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'ec7c6c635e710126f7c0151094c14126')"
     ]
   }
 }

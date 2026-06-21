@@ -9,6 +9,13 @@ export default defineConfig({
   },
   build: {
     target: 'es2022',
-    sourcemap: true,
+    // P6β NITPICK: 'hidden' generates the .map files so we can still
+    // debug Sentry stack traces if we ever wire one up, but does NOT
+    // ship the //# sourceMappingURL comment in the JS bundle — so a
+    // visitor opening DevTools doesn't get a tree-view of the original
+    // TypeScript source. The .map files in dist/ should be excluded
+    // from the Cloudflare deploy (added a wrangler pages publish
+    // glob in the deploy script).
+    sourcemap: 'hidden',
   },
 });

@@ -38,9 +38,35 @@
 -keepattributes Signature
 -keepattributes InnerClasses
 -keepattributes EnclosingMethod
+-keepattributes RuntimeVisibleAnnotations,AnnotationDefault
 
 # Keep Kotlin metadata for reflection
 -keep class kotlin.Metadata { *; }
+
+# kotlinx.serialization — without these, release builds throw
+# SerializationException ("Serializer not found") when supabase-kt
+# tries to deserialize cloud responses. R8 strips the synthetic
+# $serializer classes by default; these keep rules pin them.
+-keepclasseswithmembers class * {
+    @kotlinx.serialization.Serializable <fields>;
+}
+-keepclassmembers class * {
+    public static **$Companion Companion;
+}
+-keep,includedescriptorclasses class com.qrscanner.app.cloud.dto.**$$serializer { *; }
+-keepclassmembers class com.qrscanner.app.cloud.dto.** {
+    *** Companion;
+    kotlinx.serialization.KSerializer serializer(...);
+}
+-keepclassmembers class kotlinx.serialization.json.** { *** Companion; }
+
+# Ktor + Supabase SDKs — reflection-heavy; without these the release
+# build crashes during the first cloud call with ClassNotFoundException
+# / NoSuchMethodException on internal SDK classes.
+-keep class io.ktor.** { *; }
+-dontwarn io.ktor.**
+-keep class io.github.jan.supabase.** { *; }
+-dontwarn io.github.jan.supabase.**
 
 # ── Compose ──────────────────────────────────────────────────────────────────
 

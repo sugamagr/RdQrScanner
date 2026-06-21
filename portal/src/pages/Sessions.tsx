@@ -85,13 +85,14 @@ export function SessionsPage() {
       {!isInitialLoad && rows.length > 0 && (
         <div className="mt-6 overflow-x-auto rounded-2xl border border-surface-border bg-surface shadow-card">
           <table className="w-full min-w-[640px] text-left text-sm">
+            <caption className="sr-only">Scanning sessions list</caption>
             <thead className="border-b border-surface-border bg-surface-alt text-xs uppercase tracking-wide text-ink-secondary">
               <tr>
                 <th className="px-4 py-3 font-medium">#</th>
                 <th className="px-4 py-3 font-medium">Operator</th>
-                <th className="px-4 py-3 font-medium">LOTs</th>
-                <th className="px-4 py-3 font-medium">RD numbers</th>
-                <th className="px-4 py-3 font-medium">Defaulters</th>
+                <th className="px-4 py-3 font-medium text-right">LOTs</th>
+                <th className="px-4 py-3 font-medium text-right">RD numbers</th>
+                <th className="px-4 py-3 font-medium text-right">Defaulters</th>
                 <th className="px-4 py-3 font-medium">Ended</th>
               </tr>
             </thead>
@@ -114,19 +115,19 @@ export function SessionsPage() {
                       <span className="text-ink-muted">—</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 align-middle font-mono text-ink-primary">
+                  <td className="px-4 py-3 align-middle text-right font-mono tabular-nums text-ink-primary">
                     {formatNumber(session.total_lots)}
                   </td>
-                  <td className="px-4 py-3 align-middle font-mono text-ink-primary">
+                  <td className="px-4 py-3 align-middle text-right font-mono tabular-nums text-ink-primary">
                     {formatNumber(session.total_rd_numbers)}
                   </td>
-                  <td className="px-4 py-3 align-middle">
+                  <td className="px-4 py-3 align-middle text-right">
                     {session.default_count > 0 ? (
-                      <span className="inline-flex items-center rounded-pill bg-warn/15 px-2.5 py-0.5 text-xs font-semibold text-warn">
+                      <span className="inline-flex items-center rounded-pill bg-warn/15 px-2.5 py-0.5 text-xs font-semibold tabular-nums text-warn">
                         {formatNumber(session.default_count)}
                       </span>
                     ) : (
-                      <span className="text-ink-muted">0</span>
+                      <span className="tabular-nums text-ink-muted">0</span>
                     )}
                   </td>
                   <td className="px-4 py-3 align-middle">

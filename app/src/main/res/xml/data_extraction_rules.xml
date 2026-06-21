@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    P5β HIGH: explicitly opt out of both cloud backup and device transfer
+    so the local Room DB (customer PII: names, RD numbers, monthly
+    amounts) and EncryptedSharedPreferences (auth tokens) never leave
+    the device via Google's automatic-backup pipeline. The Supabase
+    cloud is the only intended replication path; auto-backup would
+    bypass RLS scoping entirely.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </device-transfer>
+</data-extraction-rules>

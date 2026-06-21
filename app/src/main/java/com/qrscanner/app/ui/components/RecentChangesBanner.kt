@@ -39,6 +39,7 @@ import com.qrscanner.app.data.SyncEventType
 import com.qrscanner.app.ui.theme.AccentMint
 import com.qrscanner.app.ui.theme.PrimaryOrange
 import com.qrscanner.app.ui.theme.TextSecondary
+import com.qrscanner.app.ui.theme.TextPrimary
 
 /**
  * Compact "what changed while you were away" banner anchored under the
@@ -111,7 +112,7 @@ fun RecentChangesBanner(
                             text = line,
                             style = MaterialTheme.typography.bodySmall.copy(
                                 fontWeight = FontWeight.Medium,
-                                color = Color(0xFF1F2937)
+                                color = TextPrimary
                             )
                         )
                     }

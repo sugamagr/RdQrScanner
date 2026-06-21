@@ -72,6 +72,9 @@ import com.qrscanner.app.data.RdNumber
 import com.qrscanner.app.ui.theme.PrimaryOrange
 import com.qrscanner.app.ui.theme.TextSecondary
 import com.qrscanner.app.ui.theme.WarningAmber
+import com.qrscanner.app.ui.theme.DisabledBackground
+import com.qrscanner.app.ui.theme.DisabledContent
+import com.qrscanner.app.ui.theme.RowBackground
 import com.qrscanner.app.util.MonthYear
 import kotlinx.coroutines.delay
 
@@ -264,7 +267,7 @@ fun DefaulterAskDialog(
                     onClick = onNo,
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFFF1F3F5),
+                        containerColor = DisabledBackground,
                         contentColor = Color(0xFF1A1A2E)
                     ),
                     shape = RoundedCornerShape(12.dp)
@@ -631,7 +634,7 @@ private fun DefaulterRow(
 ) {
     val isDefaulter = draftState.count > 1
     val rowBg by animateColorAsState(
-        targetValue = if (isDefaulter) PrimaryOrange.copy(alpha = 0.08f) else Color(0xFFF7F8FA),
+        targetValue = if (isDefaulter) PrimaryOrange.copy(alpha = 0.08f) else RowBackground,
         animationSpec = tween(220),
         label = "rowBg"
     )
@@ -768,7 +771,7 @@ private fun ChipShiftButton(
         modifier = Modifier
             .size(28.dp)
             .background(
-                color = if (enabled) Color.White else Color(0xFFF1F3F5),
+                color = if (enabled) Color.White else DisabledBackground,
                 shape = CircleShape
             )
             .clickable(enabled = enabled, onClick = onClick),
@@ -777,7 +780,7 @@ private fun ChipShiftButton(
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = if (enabled) PrimaryOrange else Color(0xFFCBD0D6),
+            tint = if (enabled) PrimaryOrange else DisabledContent,
             modifier = Modifier.size(16.dp)
         )
     }
@@ -879,7 +882,7 @@ private fun StepperButton(
             .size(36.dp)
             .scale(scale)
             .background(
-                color = if (enabled) Color.White else Color(0xFFF1F3F5),
+                color = if (enabled) Color.White else DisabledBackground,
                 shape = CircleShape
             )
             .clickable(
@@ -893,7 +896,7 @@ private fun StepperButton(
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = if (enabled) PrimaryOrange else Color(0xFFCBD0D6),
+            tint = if (enabled) PrimaryOrange else DisabledContent,
             modifier = Modifier.size(18.dp)
         )
     }

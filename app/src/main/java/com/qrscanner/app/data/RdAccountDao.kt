@@ -2,9 +2,7 @@ package com.qrscanner.app.data
 
 import androidx.room.Dao
 import androidx.room.Insert
-import androidx.room.OnConflictStrategy
 import androidx.room.Query
-import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -29,14 +27,6 @@ interface RdAccountDao {
      */
     @Query("SELECT * FROM rd_accounts WHERE deletedAt IS NULL ORDER BY LOWER(name) ASC")
     fun observeAll(): Flow<List<RdAccount>>
-
-    /** Active accounts only (default list). */
-    @Query("SELECT * FROM rd_accounts WHERE deletedAt IS NULL AND isActive = 1 ORDER BY LOWER(name) ASC")
-    fun observeActive(): Flow<List<RdAccount>>
-
-    /** Inactive accounts (revealed by the "Show inactive" toggle). */
-    @Query("SELECT * FROM rd_accounts WHERE deletedAt IS NULL AND isActive = 0 ORDER BY LOWER(name) ASC")
-    fun observeInactive(): Flow<List<RdAccount>>
 
     @Query("SELECT COUNT(*) FROM rd_accounts WHERE deletedAt IS NULL AND isActive = 1")
     fun observeActiveCount(): Flow<Int>
@@ -65,20 +55,10 @@ interface RdAccountDao {
     @Query("SELECT * FROM rd_accounts WHERE rdNumber = :rdNumber LIMIT 1")
     suspend fun findByRdNumberIncludingDeleted(rdNumber: String): RdAccount?
 
-    /** Resolve a cloud UUID to its local rdNumber for pull-merge. */
-    @Query("SELECT * FROM rd_accounts WHERE cloudId = :cloudId LIMIT 1")
-    suspend fun findByCloudId(cloudId: String): RdAccount?
-
     // ── Local writes (NOT auto-DIRTY — callers must flip syncStatus) ─
 
-    @Insert(onConflict = OnConflictStrategy.ABORT)
+    @Insert
     suspend fun insert(account: RdAccount)
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertReplace(account: RdAccount)
-
-    @Update
-    suspend fun update(account: RdAccount)
 
     /**
      * Manual-row edit from the Accounts screen edit dialog. Touches
@@ -238,9 +218,6 @@ interface RdAccountDao {
         """
     )
     suspend fun getDirtyForPush(limit: Int = 500): List<RdAccount>
-
-    @Query("SELECT COUNT(*) FROM rd_accounts WHERE syncStatus IN ('DIRTY','SYNC_ERROR')")
-    fun observePendingCount(): Flow<Int>
 
     @Query("UPDATE rd_accounts SET syncStatus = 'SYNCING' WHERE rdNumber = :rdNumber AND syncStatus IN ('DIRTY','SYNC_ERROR')")
     suspend fun markSyncing(rdNumber: String)

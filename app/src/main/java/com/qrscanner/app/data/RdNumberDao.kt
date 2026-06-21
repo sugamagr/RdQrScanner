@@ -11,37 +11,34 @@ interface RdNumberDao {
     @Insert
     suspend fun insert(rdNumber: RdNumber): Long
 
-    @Insert
-    suspend fun insertAll(rdNumbers: List<RdNumber>)
-
-    @Query("SELECT * FROM rd_numbers WHERE lotId = :lotId ORDER BY position ASC")
+    @Query("SELECT * FROM rd_numbers WHERE lotId = :lotId AND deletedAt IS NULL ORDER BY position ASC")
     fun getNumbersForLot(lotId: Long): Flow<List<RdNumber>>
 
-    @Query("SELECT * FROM rd_numbers WHERE lotId = :lotId ORDER BY position ASC")
+    @Query("SELECT * FROM rd_numbers WHERE lotId = :lotId AND deletedAt IS NULL ORDER BY position ASC")
     suspend fun getNumbersForLotSync(lotId: Long): List<RdNumber>
 
     @Query("""
         SELECT rn.number FROM rd_numbers rn
         INNER JOIN scan_lots sl ON rn.lotId = sl.id
-        WHERE sl.sessionId = :sessionId
+        WHERE sl.sessionId = :sessionId AND rn.deletedAt IS NULL
     """)
     suspend fun getAllNumbersInSession(sessionId: Long): List<String>
 
     /**
      * Full rd_number rows for a session, used by
      * [com.qrscanner.app.data.sync.SyncRepository.markSessionForSync]
-     * to compute per-account `lastPaidThrough` updates. Returns rows
-     * regardless of soft-delete state — caller filters as needed.
+     * to compute per-account `lastPaidThrough` updates and by
+     * [com.qrscanner.app.data.sync.SyncRepository.pushSession] to
+     * compute `defaultCount` from monthsPaid > 1 rows. Tombstones
+     * are excluded server-side so neither computation inflates from
+     * soft-deleted defaulters.
      */
     @Query("""
         SELECT rn.* FROM rd_numbers rn
         INNER JOIN scan_lots sl ON rn.lotId = sl.id
-        WHERE sl.sessionId = :sessionId
+        WHERE sl.sessionId = :sessionId AND rn.deletedAt IS NULL
     """)
     suspend fun getAllRowsInSession(sessionId: Long): List<RdNumber>
-
-    @Query("SELECT COUNT(*) FROM rd_numbers WHERE lotId = :lotId")
-    suspend fun getCountForLot(lotId: Long): Int
 
     @Query("DELETE FROM rd_numbers WHERE lotId = :lotId")
     suspend fun deleteForLot(lotId: Long)
@@ -49,7 +46,7 @@ interface RdNumberDao {
     @Query("DELETE FROM rd_numbers WHERE id = :id")
     suspend fun deleteById(id: Long)
 
-    @Query("SELECT * FROM rd_numbers WHERE lotId = :lotId ORDER BY position DESC LIMIT 1")
+    @Query("SELECT * FROM rd_numbers WHERE lotId = :lotId AND deletedAt IS NULL ORDER BY position DESC LIMIT 1")
     suspend fun getMostRecentForLot(lotId: Long): RdNumber?
 
     @Query("SELECT COALESCE(MAX(position), -1) + 1 FROM rd_numbers WHERE lotId = :lotId")
@@ -64,20 +61,17 @@ interface RdNumberDao {
     @Query("UPDATE rd_numbers SET monthsPaid = :months, monthsList = :monthsList WHERE id = :id")
     suspend fun updateMonths(id: Long, months: Int, monthsList: String?)
 
-    @Query("SELECT COUNT(*) FROM rd_numbers WHERE lotId = :lotId AND monthsPaid > 1")
-    fun observeDefaultCountForLot(lotId: Long): Flow<Int>
-
     @Query("""
         SELECT COUNT(*) FROM rd_numbers rn
         INNER JOIN scan_lots sl ON rn.lotId = sl.id
-        WHERE sl.sessionId = :sessionId AND rn.monthsPaid > 1
+        WHERE sl.sessionId = :sessionId AND rn.monthsPaid > 1 AND rn.deletedAt IS NULL
     """)
     fun observeDefaultCountForSession(sessionId: Long): Flow<Int>
 
     @Query("""
         SELECT COALESCE(SUM(rn.monthsPaid), 0) FROM rd_numbers rn
         INNER JOIN scan_lots sl ON rn.lotId = sl.id
-        WHERE sl.sessionId = :sessionId AND rn.monthsPaid > 1
+        WHERE sl.sessionId = :sessionId AND rn.monthsPaid > 1 AND rn.deletedAt IS NULL
     """)
     fun observeTotalDefaulterMonthsForSession(sessionId: Long): Flow<Int>
 

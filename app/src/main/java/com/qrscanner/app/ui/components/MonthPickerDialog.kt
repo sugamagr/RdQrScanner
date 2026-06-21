@@ -39,6 +39,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.qrscanner.app.ui.theme.PrimaryOrange
 import com.qrscanner.app.ui.theme.TextSecondary
+import com.qrscanner.app.ui.theme.DisabledBackground
+import com.qrscanner.app.ui.theme.DisabledContent
 import com.qrscanner.app.util.MonthYear
 
 private const val PICKER_YEARS_BACK = 10
@@ -168,7 +170,7 @@ private fun YearRow(
             Box(
                 modifier = Modifier
                     .background(
-                        if (isSelected) PrimaryOrange else Color(0xFFF1F3F5),
+                        if (isSelected) PrimaryOrange else DisabledBackground,
                         RoundedCornerShape(12.dp)
                     )
                     .clickable { onYearSelected(year) }
@@ -231,12 +233,12 @@ private fun MonthCell(
 ) {
     val bg = when {
         isSelected -> PrimaryOrange
-        !enabled -> Color(0xFFF1F3F5)
+        !enabled -> DisabledBackground
         else -> Color.White
     }
     val textColor = when {
         isSelected -> Color.White
-        !enabled -> Color(0xFFCBD0D6)
+        !enabled -> DisabledContent
         else -> Color(0xFF1A1A2E)
     }
     Box(

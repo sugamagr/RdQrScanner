@@ -45,7 +45,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -79,6 +79,8 @@ import com.qrscanner.app.ui.theme.WarningAmber
 import com.qrscanner.app.util.MonthYear
 import com.qrscanner.app.util.QrPdfExporter
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Accounts browse screen. Three modes:
@@ -108,9 +110,9 @@ fun AccountsScreen(onNavigateBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    val allAccounts by app.database.rdAccountDao().observeAll().collectAsState(initial = emptyList())
-    val activeCount by app.database.rdAccountDao().observeActiveCount().collectAsState(initial = 0)
-    val inactiveCount by app.database.rdAccountDao().observeInactiveCount().collectAsState(initial = 0)
+    val allAccounts by app.database.rdAccountDao().observeAll().collectAsStateWithLifecycle(initialValue = emptyList())
+    val activeCount by app.database.rdAccountDao().observeActiveCount().collectAsStateWithLifecycle(initialValue = 0)
+    val inactiveCount by app.database.rdAccountDao().observeInactiveCount().collectAsStateWithLifecycle(initialValue = 0)
 
     var searchQuery by remember { mutableStateOf("") }
     var showInactive by remember { mutableStateOf(false) }
@@ -170,19 +172,28 @@ fun AccountsScreen(onNavigateBack: () -> Unit) {
                     val targets = allAccounts.filter {
                         it.rdNumber in selectedIds && it.deletedAt == null
                     }
-                    if (targets.isNotEmpty()) {
-                        val uri = QrPdfExporter.generate(context, targets)
-                        if (uri != null) {
-                            val share = Intent(Intent.ACTION_SEND).apply {
-                                type = "application/pdf"
-                                putExtra(Intent.EXTRA_STREAM, uri)
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            }
-                            context.startActivity(Intent.createChooser(share, "Share QR PDF"))
-                        }
-                    }
                     selectionMode = false
                     selectedIds.clear()
+                    if (targets.isNotEmpty()) {
+                        scope.launch {
+                            // P5γ HIGH: PDF generation (ZXing matrix +
+                            // setPixels + PdfDocument.writeTo file IO)
+                            // blocks ~hundreds of ms for bulk QR. Offload
+                            // to IO so the Compose recomposition doesn't
+                            // freeze. startActivity must run on Main.
+                            val uri = withContext(Dispatchers.IO) {
+                                QrPdfExporter.generate(context, targets)
+                            }
+                            if (uri != null) {
+                                val share = Intent(Intent.ACTION_SEND).apply {
+                                    type = "application/pdf"
+                                    putExtra(Intent.EXTRA_STREAM, uri)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(Intent.createChooser(share, "Share QR PDF"))
+                            }
+                        }
+                    }
                 }
             )
 
@@ -215,14 +226,18 @@ fun AccountsScreen(onNavigateBack: () -> Unit) {
                                 else selectedIds.add(account.rdNumber)
                             },
                             onGenerateSingleQr = {
-                                val uri = QrPdfExporter.generate(context, listOf(account))
-                                if (uri != null) {
-                                    val share = Intent(Intent.ACTION_SEND).apply {
-                                        type = "application/pdf"
-                                        putExtra(Intent.EXTRA_STREAM, uri)
-                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                scope.launch {
+                                    val uri = withContext(Dispatchers.IO) {
+                                        QrPdfExporter.generate(context, listOf(account))
                                     }
-                                    context.startActivity(Intent.createChooser(share, "Share QR PDF"))
+                                    if (uri != null) {
+                                        val share = Intent(Intent.ACTION_SEND).apply {
+                                            type = "application/pdf"
+                                            putExtra(Intent.EXTRA_STREAM, uri)
+                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        }
+                                        context.startActivity(Intent.createChooser(share, "Share QR PDF"))
+                                    }
                                 }
                             },
                             onEditAttempt = {
