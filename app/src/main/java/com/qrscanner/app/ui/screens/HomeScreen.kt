@@ -29,7 +29,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Help
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.PersonAddAlt1
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -74,7 +75,8 @@ import java.util.Locale
 fun HomeScreen(
     onNavigateToScanner: () -> Unit,
     onNavigateToHistory: () -> Unit,
-    onNavigateToGenerator: () -> Unit,
+    onNavigateToAddAccounts: () -> Unit,
+    onNavigateToAccounts: () -> Unit,
     onNavigateToHowItWorks: () -> Unit,
     onNavigateToAppInfo: () -> Unit
 ) {
@@ -304,20 +306,36 @@ fun HomeScreen(
             
             Spacer(modifier = Modifier.height(14.dp))
             
-            // Secondary Actions Row
+            // Secondary Actions — two rows of account + history surfaces.
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 SecondaryActionCard(
                     modifier = Modifier.weight(1f),
-                    icon = Icons.Default.PictureAsPdf,
-                    title = "Generate PDF",
-                    subtitle = "Create QR codes",
-                    accentColor = AccentMint,
-                    onClick = onNavigateToGenerator
+                    icon = Icons.Default.PersonAddAlt1,
+                    title = "Add Account",
+                    subtitle = "New RD profiles",
+                    accentColor = PrimaryOrange,
+                    onClick = onNavigateToAddAccounts
                 )
-                
+
+                SecondaryActionCard(
+                    modifier = Modifier.weight(1f),
+                    icon = Icons.Default.People,
+                    title = "Accounts",
+                    subtitle = "Browse & QR",
+                    accentColor = AccentMint,
+                    onClick = onNavigateToAccounts
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 SecondaryActionCard(
                     modifier = Modifier.weight(1f),
                     icon = Icons.Default.History,
@@ -326,6 +344,10 @@ fun HomeScreen(
                     accentColor = AccentCoral,
                     onClick = onNavigateToHistory
                 )
+
+                // Right-side spacer for symmetry; second-row companion
+                // surface (e.g. Diagnostics) lands in Phase 5 backlog.
+                Box(modifier = Modifier.weight(1f))
             }
             
             Spacer(modifier = Modifier.height(24.dp))

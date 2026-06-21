@@ -13,10 +13,11 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.qrscanner.app.ui.screens.AccountsScreen
+import com.qrscanner.app.ui.screens.AddAccountsScreen
 import com.qrscanner.app.ui.screens.AppInfoScreen
 import com.qrscanner.app.ui.screens.HomeScreen
 import com.qrscanner.app.ui.screens.HowItWorksScreen
-import com.qrscanner.app.ui.screens.RDGeneratorScreen
 import com.qrscanner.app.ui.screens.RDScannerScreen
 import com.qrscanner.app.ui.screens.SessionDetailScreen
 import com.qrscanner.app.ui.screens.SessionHistoryScreen
@@ -28,7 +29,8 @@ sealed class Screen(val route: String) {
     data object SessionDetail : Screen("session_detail/{sessionId}") {
         fun createRoute(sessionId: Long) = "session_detail/$sessionId"
     }
-    data object RDGenerator : Screen("rd_generator")
+    data object AddAccounts : Screen("add_accounts")
+    data object Accounts : Screen("accounts")
     data object HowItWorks : Screen("how_it_works")
     data object AppInfo : Screen("app_info")
 }
@@ -83,7 +85,8 @@ fun QRScannerNavigation(
             HomeScreen(
                 onNavigateToScanner = { navController.navigate(Screen.RDScanner.route) },
                 onNavigateToHistory = { navController.navigate(Screen.SessionHistory.route) },
-                onNavigateToGenerator = { navController.navigate(Screen.RDGenerator.route) },
+                onNavigateToAddAccounts = { navController.navigate(Screen.AddAccounts.route) },
+                onNavigateToAccounts = { navController.navigate(Screen.Accounts.route) },
                 onNavigateToHowItWorks = { navController.navigate(Screen.HowItWorks.route) },
                 onNavigateToAppInfo = { navController.navigate(Screen.AppInfo.route) }
             )
@@ -122,8 +125,18 @@ fun QRScannerNavigation(
             )
         }
         
-        composable(Screen.RDGenerator.route) {
-            RDGeneratorScreen(
+        composable(Screen.AddAccounts.route) {
+            AddAccountsScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToAccounts = {
+                    navController.popBackStack()
+                    navController.navigate(Screen.Accounts.route)
+                }
+            )
+        }
+
+        composable(Screen.Accounts.route) {
+            AccountsScreen(
                 onNavigateBack = { navController.popBackStack() }
             )
         }
