@@ -13,9 +13,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ScanLot::class,
         RdNumber::class,
         DeviceSettings::class,
-        SyncEvent::class
+        SyncEvent::class,
+        RdAccount::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -25,6 +26,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun rdNumberDao(): RdNumberDao
     abstract fun deviceSettingsDao(): DeviceSettingsDao
     abstract fun syncEventDao(): SyncEventDao
+    abstract fun rdAccountDao(): RdAccountDao
 
     companion object {
         @Volatile
@@ -313,6 +315,55 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v7 → v8: creates the `rd_accounts` table for customer-account
+         * profile metadata (name + monthly amount + last-paid-through +
+         * source + lifecycle dates). Phase RD-Accounts.
+         *
+         * Schema mirrors the [RdAccount] entity. New install — no
+         * backfill needed; the table starts empty and gets populated
+         * via the AddAccountsScreen spreadsheet or the portal CSV bulk
+         * upload + cloud pull. accountOpenedDate / accountClosingDate
+         * columns added schema-only this round (no UI yet).
+         */
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(database: SupportSQLiteDatabase) {
+                database.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `rd_accounts` (
+                        `rdNumber` TEXT NOT NULL,
+                        `name` TEXT NOT NULL,
+                        `monthlyAmount` INTEGER NOT NULL,
+                        `lastPaidThrough` TEXT,
+                        `source` TEXT NOT NULL,
+                        `isActive` INTEGER NOT NULL DEFAULT 1,
+                        `accountOpenedDate` TEXT,
+                        `accountClosingDate` TEXT,
+                        `ownerId` TEXT,
+                        `cloudId` TEXT,
+                        `syncStatus` TEXT NOT NULL DEFAULT 'LOCAL_ONLY',
+                        `updatedAt` INTEGER NOT NULL DEFAULT 0,
+                        `syncedAt` INTEGER,
+                        `lastSyncError` TEXT,
+                        `deletedAt` INTEGER,
+                        `retryCount` INTEGER NOT NULL DEFAULT 0,
+                        `lastEditorDeviceId` TEXT,
+                        PRIMARY KEY(`rdNumber`)
+                    )
+                    """.trimIndent()
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_rd_accounts_name` ON `rd_accounts` (`name`)"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_rd_accounts_source` ON `rd_accounts` (`source`)"
+                )
+                database.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_rd_accounts_isActive` ON `rd_accounts` (`isActive`)"
+                )
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -326,7 +377,8 @@ abstract class AppDatabase : RoomDatabase() {
                     MIGRATION_3_4,
                     MIGRATION_4_5,
                     MIGRATION_5_6,
-                    MIGRATION_6_7
+                    MIGRATION_6_7,
+                    MIGRATION_7_8
                 )
                 .fallbackToDestructiveMigrationOnDowngrade()
                 .build()
