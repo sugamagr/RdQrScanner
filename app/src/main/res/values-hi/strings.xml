@@ -37,8 +37,6 @@
     <string name="signin_email_label">ईमेल</string>
     <string name="signin_password_label">पासवर्ड</string>
     <string name="signin_button">साइन इन</string>
-    <string name="signin_loading">साइन इन हो रहा है…</string>
-    <string name="signin_error_generic">साइन इन नहीं हो पाया। ईमेल और पासवर्ड चेक करें।</string>
     <string name="signin_error_no_network">नेटवर्क नहीं है — ऑनलाइन होने पर फिर से कोशिश करें।</string>
     <!-- CloudException error catalog -->
     <string name="auth_error_invalid_credentials">ईमेल या पासवर्ड गलत है।</string>
@@ -89,6 +87,16 @@
     <string name="banner_title_one">1 नया अपडेट</string>
     <string name="banner_title_many">%d नए अपडेट</string>
     <string name="banner_dismiss">हटाएँ</string>
+    <!-- Banner origin labels -->
+    <string name="banner_origin_portal">पोर्टल</string>
+    <string name="banner_origin_another_phone">दूसरा फ़ोन</string>
+    <!-- Banner line copy -->
+    <string name="banner_line_session_finalized_one">%1$s ने %2$s सिंक किया</string>
+    <string name="banner_line_session_finalized_many">%1$s ने %2$d सेशन सिंक किए</string>
+    <string name="banner_line_defaulter_edit_one">%1$s ने %2$s</string>
+    <string name="banner_line_defaulter_edit_many">%1$s ने %2$d डिफ़ॉल्टर अपडेट किए</string>
+    <string name="banner_line_session_deleted_one">%1$s ने %2$s</string>
+    <string name="banner_line_session_deleted_many">%1$s ने %2$d सेशन हटाए</string>
 
     <!-- Generic content descriptions -->
     <string name="content_desc_back">वापस</string>

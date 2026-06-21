@@ -26,10 +26,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import android.content.Context
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -61,7 +63,8 @@ fun RecentChangesBanner(
     onOpenHistory: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val lines = remember(events) { aggregate(events) }
+    val context = LocalContext.current
+    val lines = remember(events, context) { aggregate(events, context) }
     AnimatedVisibility(
         visible = lines.isNotEmpty(),
         enter = fadeIn() + expandVertically(),
@@ -150,7 +153,14 @@ fun RecentChangesBanner(
  * into one line. Caps output at 3 lines so the banner stays small even
  * after a long catch-up pull.
  */
-private fun aggregate(events: List<SyncEvent>): List<String> {
+// All user-facing strings resolved via context.getString so the Hindi
+// locale renders correctly. payloadSummary itself remains as written
+// at SyncRepository merge time (currently English) — that pre-rendered
+// fragment carries displayNumber + count and is out of scope for
+// render-time i18n. TODO(post-v1): replace payloadSummary with a
+// structured payload + render-time format string for full locale-switch
+// safety (requires a Room migration on sync_events).
+private fun aggregate(events: List<SyncEvent>, context: Context): List<String> {
     if (events.isEmpty()) return emptyList()
     val ordered = events.sortedByDescending { it.occurredAt }
     val groups = mutableListOf<MutableList<SyncEvent>>()
@@ -166,32 +176,32 @@ private fun aggregate(events: List<SyncEvent>): List<String> {
             groups += mutableListOf(event)
         }
     }
-    return groups.take(MAX_LINES).map { describe(it) }
+    return groups.take(MAX_LINES).map { describe(it, context) }
 }
 
-private fun describe(group: List<SyncEvent>): String {
+private fun describe(group: List<SyncEvent>, context: Context): String {
     val first = group.first()
-    val origin = first.originLabel()
+    val origin = first.originLabel(context)
     val n = group.size
     return when (first.type) {
         SyncEventType.REMOTE_SESSION_FINALIZED ->
-            if (n == 1) "$origin synced ${first.payloadSummary}"
-            else "$origin synced $n sessions"
+            if (n == 1) context.getString(R.string.banner_line_session_finalized_one, origin, first.payloadSummary)
+            else context.getString(R.string.banner_line_session_finalized_many, origin, n)
         SyncEventType.REMOTE_DEFAULTER_EDIT,
         SyncEventType.PORTAL_DEFAULTER_EDIT ->
-            if (n == 1) "$origin ${first.payloadSummary}"
-            else "$origin updated $n defaulters"
+            if (n == 1) context.getString(R.string.banner_line_defaulter_edit_one, origin, first.payloadSummary)
+            else context.getString(R.string.banner_line_defaulter_edit_many, origin, n)
         SyncEventType.REMOTE_SESSION_DELETED ->
-            if (n == 1) "$origin ${first.payloadSummary}"
-            else "$origin deleted $n sessions"
+            if (n == 1) context.getString(R.string.banner_line_session_deleted_one, origin, first.payloadSummary)
+            else context.getString(R.string.banner_line_session_deleted_many, origin, n)
     }
 }
 
-private fun SyncEvent.originLabel(): String = when {
-    originDeviceCloudId == null -> "Portal"
+private fun SyncEvent.originLabel(context: Context): String = when {
+    originDeviceCloudId == null -> context.getString(R.string.banner_origin_portal)
     !originOperatorName.isNullOrBlank() -> originOperatorName
     !originDeviceName.isNullOrBlank() -> originDeviceName
-    else -> "Another phone"
+    else -> context.getString(R.string.banner_origin_another_phone)
 }
 
 private const val AGGREGATION_WINDOW_MS: Long = 60_000L

@@ -37,8 +37,6 @@
     <string name="signin_email_label">Email</string>
     <string name="signin_password_label">Password</string>
     <string name="signin_button">Sign in</string>
-    <string name="signin_loading">Signing in…</string>
-    <string name="signin_error_generic">Couldn\'t sign in. Check your email + password and try again.</string>
     <string name="signin_error_no_network">No network — try again when you\'re online.</string>
     <!-- CloudException.toUserMessage() catalog (AuthAwareRoot) -->
     <string name="auth_error_invalid_credentials">Email or password incorrect.</string>
@@ -88,6 +86,16 @@
     <string name="banner_title_one">1 recent update</string>
     <string name="banner_title_many">%d recent updates</string>
     <string name="banner_dismiss">Dismiss</string>
+    <!-- Banner origin labels (RecentChangesBanner.originLabel) -->
+    <string name="banner_origin_portal">Portal</string>
+    <string name="banner_origin_another_phone">Another phone</string>
+    <!-- Banner line copy (RecentChangesBanner.describe). %1$s is origin label, %2$d is count, %3$s is payloadSummary -->
+    <string name="banner_line_session_finalized_one">%1$s synced %2$s</string>
+    <string name="banner_line_session_finalized_many">%1$s synced %2$d sessions</string>
+    <string name="banner_line_defaulter_edit_one">%1$s %2$s</string>
+    <string name="banner_line_defaulter_edit_many">%1$s updated %2$d defaulters</string>
+    <string name="banner_line_session_deleted_one">%1$s %2$s</string>
+    <string name="banner_line_session_deleted_many">%1$s deleted %2$d sessions</string>
 
     <!-- Generic content descriptions -->
     <string name="content_desc_back">Back</string>
