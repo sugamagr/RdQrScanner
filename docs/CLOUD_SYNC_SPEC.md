@@ -139,6 +139,10 @@ Every architectural choice that an outsider would reasonably question. If you fi
 | D16 | **No CI/CD in v1.** Manual deploy of phone APK; manual deploy of portal via `npm run build && wrangler pages deploy` | We're shipping fast. CI/CD can come once the system is stable. | GitHub Actions (deferred). |
 | D17 | **All times stored as UTC `timestamptz` in cloud, `Long epoch millis` locally** | UTC eliminates timezone bugs in conflict resolution. Phones display in local zone. | Storing local timezone offsets (rejected — invites bugs). |
 | D18 | **`updatedAt` resolution is millisecond, sourced from the writer's clock** | Phones may have skewed clocks. We accept this; the worst case is a wrong-order resolution of an extremely rare conflict. | Server-side `updatedAt` (requires roundtrip; breaks offline edits). NTP enforcement (overkill). |
+| D19 | **Composite PK `(owner_id, rd_number)` for `rd_accounts`, no separate UUID** (v8) | The RD number string is already globally unique within an owner's book (regex-enforced). A synthetic UUID adds indirection without identity gain and complicates the "cloudId = rdNumber" mental model. See §17. | Synthetic UUID PK matching D11 pattern (rejected — extra indirection for no benefit; the entity isn't created by multiple writers before sync the way sessions/lots are). |
+| D20 | **Portal CSV bulk upload always wins on conflict** (v8) | CSV upload is an authoritative bulk import from the owner's master list. Server-stamps `updated_at` at upsert time, which is by definition newer than any prior phone edit on the same `rd_number`. Phone pulls the new name/amount on next sync. See §17. | Phone edits win (rejected — CSV is the owner's source of truth). Manual merge dialog per row (rejected — overkill for the 2-phone use case). |
+| D21 | **`last_paid_through` is monotonic-only on push** (v8) | Defends against out-of-order replay overwriting a more recent payment with a stale one. The upsert clause is `SET last_paid_through = GREATEST(EXCLUDED.last_paid_through, rd_accounts.last_paid_through)`. The phone *cannot* push a value older than what's already there. See §17. | Allow regression (rejected — violates payment history integrity for an event with no legitimate cause). Server-side validation via Edge Function (deferred per Q9). |
+| D22 | **Portal NEVER edits `last_paid_through`** (v8) | The field is a phone-derived signal only — it's the receipt of payment, which only happens at scan time. Letting the portal edit it would create a "who's authoritative?" ambiguity with no clear winner and zero operator benefit. The edit dialog form has no field for it; the `updateAccount` query payload never includes it. See §17. | Portal can edit (rejected — creates conflict surface with no clear winner). |
 
 ---
 
@@ -1299,7 +1303,7 @@ A single row per `(owner_id, rd_number)`. The natural composite PK is intentiona
 | `name` | text, NOT NULL | The account holder's name as the operator entered it (or as CSV upload provided). |
 | `monthly_amount` | int, NOT NULL, CHECK > 0 | Rupees per month. Drives caption on bulk-QR PDFs. |
 | `last_paid_through` | text, nullable, format `YYYY-MM` | Most recent month for which payment was recorded. **Phone-derived only** — never editable in the portal. NULL = never paid. |
-| `source` | text, NOT NULL, CHECK IN (`MANUAL`, `CSV`) | Where the account profile originated. CSV rows lock the edit affordance on the phone (Snackbar: "This account can only be edited by Sugam"). |
+| `source` | text, NOT NULL, CHECK IN (`MANUAL`, `CSV`) | Where the account profile originated. CSV rows lock the edit affordance on the phone (Snackbar: "This account can only be edited from the portal"). |
 | `is_active` | boolean, NOT NULL, default true | Soft state. Inactive accounts hide from the default Accounts list, do not block new-account creation by themselves, and **auto-reactivate on scan**. |
 | `account_opened_date` | date, nullable | Schema-only in v8 — no UI surface yet. Reserved for the future "account aging" report. |
 | `account_closing_date` | date, nullable | Schema-only in v8 — independent of `is_active`. "I marked it inactive" ≠ "the bank closed the account." |
@@ -1891,6 +1895,8 @@ Items we've consciously left for later. If any of these become "I need this now"
 | Q8 | Conflict resolution UI ("merge or pick winner"). | Only if real-world conflicts become non-zero. |
 | Q9 | Server-side validation logic (Edge Functions). | If we ever find clients pushing bad data. |
 | Q10 | Schedule push notifications to operators on portal-side edits. | If owner-edits-defaulter-then-operator-misses-it becomes a real issue. |
+| Q11 | **OCR thermal-print mode** — read the dot-matrix RD book directly into a new account profile via the phone camera. Researched in v8, not built. See §17. | When the manual AddAccounts spreadsheet flow + CSV bulk upload become the operator pain point at >200 accounts. |
+| Q12 | **Account-aging report** using `account_opened_date`. The field is schema-only in v8 (no UI). | When the owner needs a "show me everyone whose account is >5 years old" report — typically triggered by tax/regulatory closeout cycles. |
 
 ---
 
