@@ -391,6 +391,14 @@ private fun RDCameraScreen(
                         app.database.rdNumberDao().insert(
                             RdNumber(lotId = lotId, number = cleanValue, position = position)
                         )
+                        // Auto-reactivate inactive account profile on scan
+                        // (user contract: scanning a marked-inactive RD
+                        // silently flips it back to active + DIRTY for
+                        // sync — the paper book is truth).
+                        runCatching {
+                            val now = System.currentTimeMillis()
+                            app.database.rdAccountDao().reactivate(cleanValue, now)
+                        }
                         currentLotNumbers.add(0, cleanValue)
                         allSessionNumbers.add(cleanValue)
                         lastScanFeedback = ScanFeedback.Success(cleanValue)
