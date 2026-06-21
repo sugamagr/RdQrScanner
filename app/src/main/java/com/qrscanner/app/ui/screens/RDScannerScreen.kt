@@ -393,11 +393,25 @@ private fun RDCameraScreen(
                         )
                         // Auto-reactivate inactive account profile on scan
                         // (user contract: scanning a marked-inactive RD
-                        // silently flips it back to active + DIRTY for
-                        // sync — the paper book is truth).
+                        // flips it back to active + DIRTY for sync — the
+                        // paper book is truth — and surfaces a Toast so
+                        // the operator knows the system noticed and
+                        // healed the state).
                         runCatching {
                             val now = System.currentTimeMillis()
-                            app.database.rdAccountDao().reactivate(cleanValue, now)
+                            val reactivatedRows = app.database.rdAccountDao()
+                                .reactivate(cleanValue, now)
+                            if (reactivatedRows > 0) {
+                                val profile = app.database.rdAccountDao()
+                                    .findByRdNumber(cleanValue)
+                                val label = profile?.name?.takeIf { it.isNotBlank() }
+                                    ?: cleanValue
+                                Toast.makeText(
+                                    context,
+                                    "Account reactivated: $label",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
                         }.onFailure {
                             android.util.Log.w(
                                 "RDScannerScreen",
