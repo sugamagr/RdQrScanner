@@ -90,14 +90,18 @@ app/src/main/java/com/qrscanner/app/
 │   ├── ScanSession.kt       # ScanSession + ScanLot entities
 │   ├── ScanSessionDao.kt    # DAOs for ScanSession and ScanLot
 │   ├── RdNumber.kt          # RdNumber entity (relational, indexed)
-│   └── RdNumberDao.kt       # DAO for RdNumber
+│   ├── RdNumberDao.kt       # DAO for RdNumber
+│   ├── RdAccount.kt         # v8: first-class account profile (name + monthly_amount + last_paid_through)
+│   ├── RdAccountDao.kt      # DAO for RdAccount (upsert + tombstone resurrect + monotonic last_paid_through)
+│   └── AccountSource.kt     # MANUAL (phone) | CSV (portal bulk upload)
 ├── navigation/              # Navigation setup
 │   └── Navigation.kt
 ├── ui/
 │   ├── screens/             # Compose screens
 │   │   ├── HomeScreen.kt
 │   │   ├── RDScannerScreen.kt
-│   │   ├── RDGeneratorScreen.kt
+│   │   ├── AddAccountsScreen.kt  # v8: spreadsheet entry (replaced RDGeneratorScreen)
+│   │   ├── AccountsScreen.kt     # v8: browse + edit + bulk QR + Mark Inactive / Delete
 │   │   ├── SessionHistoryScreen.kt
 │   │   ├── SessionDetailScreen.kt
 │   │   ├── HowItWorksScreen.kt
@@ -108,7 +112,7 @@ app/src/main/java/com/qrscanner/app/
 │       └── Type.kt
 └── util/                    # Utility classes
     ├── XlsxExporter.kt
-    ├── PdfGenerator.kt
+    ├── QrPdfExporter.kt     # v8: shared 360pt QR + A4 2x2 grid (replaced PdfGenerator)
     └── LotImageGenerator.kt
 ```
 
