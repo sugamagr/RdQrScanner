@@ -338,9 +338,22 @@ class SyncRepository(
             // sync-error tray spam. Diagnostics screen shows the one-shot
             // "paste cloud/schema.sql" hint.
             val isSchemaMissing = firstError is CloudException.SchemaMissing
+            // Mixed-outcome cycle: if at least one session pushed cleanly
+            // (notification already fired), the pill must not scream
+            // ERROR while a Channel A "synced" notification sits in the
+            // tray — that contradiction was confusing users into thinking
+            // sync was broken when data actually landed. Treat partial
+            // success as PENDING (work to retry) instead of ERROR; the
+            // failed session stays DIRTY/SYNC_ERROR for the next cycle.
+            // SchemaMissing always wins because it's blocking, not retry-able.
+            val pillState = when {
+                isSchemaMissing -> SyncPillState.SCHEMA_MISSING
+                pushedSessionCount > 0 -> SyncPillState.PENDING
+                else -> SyncPillState.ERROR
+            }
             updateSummary {
                 it.copy(
-                    state = if (isSchemaMissing) SyncPillState.SCHEMA_MISSING else SyncPillState.ERROR,
+                    state = pillState,
                     pendingCount = remaining,
                     lastErrorMessage = firstError.message ?: firstError.toString()
                 )
@@ -349,13 +362,17 @@ class SyncRepository(
             // Spec §15.5.2: surface the error notification on the 3rd
             // consecutive failure and re-fire every additional 6 so the
             // user isn't spammed on every retry tick but the badge stays
-            // sticky. Suppress entirely for SCHEMA_MISSING — the pill copy
-            // already tells the user what to do.
-            val shouldNotify = !isSchemaMissing && (
-                consecutiveFailures == ERROR_NOTIFY_THRESHOLD ||
-                (consecutiveFailures > ERROR_NOTIFY_THRESHOLD &&
-                    (consecutiveFailures - ERROR_NOTIFY_THRESHOLD) % ERROR_NOTIFY_REFIRE_EVERY == 0)
-            )
+            // sticky. Suppress for SCHEMA_MISSING (pill already explains)
+            // AND for partial success (PENDING is not user-actionable
+            // worth a tray slot; the per-session success notifications
+            // already told the user what landed).
+            val shouldNotify = !isSchemaMissing &&
+                pushedSessionCount == 0 &&
+                (
+                    consecutiveFailures == ERROR_NOTIFY_THRESHOLD ||
+                    (consecutiveFailures > ERROR_NOTIFY_THRESHOLD &&
+                        (consecutiveFailures - ERROR_NOTIFY_THRESHOLD) % ERROR_NOTIFY_REFIRE_EVERY == 0)
+                )
             if (shouldNotify) {
                 runCatching { notifier.notifySyncError(remaining) }
             }
