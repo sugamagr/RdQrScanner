@@ -38,6 +38,12 @@ export function minusOneMonth(my: MonthYear): MonthYear {
     : { year: my.year, month: my.month - 1 };
 }
 
+export function plusOneMonth(my: MonthYear): MonthYear {
+  return my.month === 12
+    ? { year: my.year + 1, month: 1 }
+    : { year: my.year, month: my.month + 1 };
+}
+
 export function parseToken(token: string): MonthYear | null {
   const trimmed = token.trim();
   if (trimmed.length !== 7 || trimmed[4] !== '-') return null;

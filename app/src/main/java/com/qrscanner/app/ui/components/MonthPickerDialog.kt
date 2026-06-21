@@ -42,6 +42,7 @@ import com.qrscanner.app.ui.theme.TextSecondary
 import com.qrscanner.app.util.MonthYear
 
 private const val PICKER_YEARS_BACK = 10
+private const val PICKER_YEARS_FORWARD = 2
 
 /**
  * Pop-up dialog used to swap a single month chip in the defaulter editor.
@@ -67,7 +68,15 @@ fun MonthPickerDialog(
     val minYear = remember(initialSelection, today) {
         minOf(today.year - PICKER_YEARS_BACK, initialSelection.year)
     }
-    val maxYear = today.year
+    val maxYear = remember(initialSelection, today) {
+        // Future months allowed (prepayment scenario). Extend the year
+        // selector ceiling to today + 2 years, with a floor of the
+        // currently-selected month's year so a stored future selection
+        // remains addressable. Capped at MonthYear.MAX_YEAR (2099) to
+        // stay inside the YYYY-MM token format range used by both apps.
+        maxOf(today.year + PICKER_YEARS_FORWARD, initialSelection.year)
+            .coerceAtMost(MonthYear.MAX_YEAR)
+    }
     val years = remember(minYear, maxYear) { (minYear..maxYear).toList() }
     var selectedYear by remember { mutableIntStateOf(initialSelection.year) }
 
@@ -195,10 +204,10 @@ private fun MonthGrid(
             ) {
                 row.forEach { month ->
                     val candidate = MonthYear(year, month)
-                    val inFuture = candidate > today
                     val isDuplicate = candidate in disabledMonths
                     val isSelected = candidate == initialSelection
-                    val enabled = !inFuture && !isDuplicate
+                    // Future months allowed (prepayment scenario).
+                    val enabled = !isDuplicate
                     MonthCell(
                         label = candidate.formatShort().substringBefore(' '),
                         enabled = enabled,

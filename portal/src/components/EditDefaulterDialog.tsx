@@ -4,8 +4,10 @@ import {
   autoWindow,
   formatExport,
   fromIso,
+  minusOneMonth,
   monthYearToToken,
   parseList,
+  plusOneMonth,
   type MonthYear,
 } from '../lib/monthYear';
 import { updateRdNumberMonths } from '../lib/queries';
@@ -162,14 +164,24 @@ export function EditDefaulterDialog({ rd, lotTimestamp, onClose }: Props) {
             <div>
               <p className="text-xs font-medium text-ink-secondary">Which months?</p>
               <p className="mt-0.5 text-[11px] text-ink-muted">
-                Tap to select {monthsPaid} month{monthsPaid === 1 ? '' : 's'}. Current
-                pick: {selected.length}/{monthsPaid}.
+                Past and future months around the LOT date. Pick {monthsPaid} —
+                currently {selected.length}/{monthsPaid}. The LOT month is
+                outlined.
               </p>
               <div className="mt-3 grid max-h-56 grid-cols-3 gap-1.5 overflow-y-auto sm:grid-cols-4">
                 {candidateMonths.map((cand) => {
                   const picked = selected.some(
                     (m) => m.year === cand.year && m.month === cand.month
                   );
+                  const isAnchor =
+                    cand.year === anchor.year && cand.month === anchor.month;
+                  const base =
+                    'rounded-pill border px-2 py-1 text-[11px] font-medium transition-colors';
+                  const styles = picked
+                    ? 'border-primary bg-primary/10 text-primary-dark'
+                    : isAnchor
+                      ? 'border-primary/40 bg-surface text-ink-primary hover:border-primary/70'
+                      : 'border-surface-border bg-surface text-ink-secondary hover:border-ink-secondary';
                   return (
                     <button
                       key={`${cand.year}-${cand.month}`}
@@ -177,12 +189,8 @@ export function EditDefaulterDialog({ rd, lotTimestamp, onClose }: Props) {
                       onClick={() =>
                         toggleMonth(selected, cand, monthsPaid, setSelected)
                       }
-                      className={
-                        'rounded-pill border px-2 py-1 text-[11px] font-medium transition-colors ' +
-                        (picked
-                          ? 'border-primary bg-primary/10 text-primary-dark'
-                          : 'border-surface-border bg-surface text-ink-secondary hover:border-ink-secondary')
-                      }
+                      className={`${base} ${styles}`}
+                      title={isAnchor ? 'LOT month' : undefined}
                     >
                       {formatExport(cand)}
                     </button>
@@ -267,16 +275,21 @@ function toggleMonth(
 }
 
 function buildCandidateGrid(anchor: MonthYear): MonthYear[] {
-  // 36-month candidate strip ending at the anchor month so the user can
-  // pick any month within a 3-year window around the LOT date.
+  // [anchor - 18, anchor + 18] inclusive = 37 candidates. Supports
+  // prepayment (future months) per user request. Chronological with
+  // newest first so the visible top-left is the latest future month;
+  // scrolling down walks backward in time toward the past tail.
   const grid: MonthYear[] = [];
   let cursor = { ...anchor };
-  for (let i = 0; i < 36; i++) {
+  for (let i = 0; i < MONTHS_FORWARD; i++) {
+    cursor = plusOneMonth(cursor);
+  }
+  for (let i = 0; i < MONTHS_BACK + 1 + MONTHS_FORWARD; i++) {
     grid.push(cursor);
-    cursor =
-      cursor.month === 1
-        ? { year: cursor.year - 1, month: 12 }
-        : { year: cursor.year, month: cursor.month - 1 };
+    cursor = minusOneMonth(cursor);
   }
   return grid;
 }
+
+const MONTHS_BACK = 18;
+const MONTHS_FORWARD = 18;

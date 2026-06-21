@@ -107,8 +107,10 @@ data class DefaulterRowDraft(
 
     fun shiftWindow(forward: Boolean, today: MonthYear = MonthYear.current()): DefaulterRowDraft {
         if (months.isEmpty()) return this
-        val newest = months.first()
-        if (forward && newest >= today) return this
+        // Future months allowed (prepayment scenario). Forward shift can
+        // walk past today; the grid + chip strip don't gate on it anymore.
+        // 'today' kept on the signature for back-compat with call sites
+        // and the corresponding canShiftLater UI hint downstream.
         val shifted = months.map { if (forward) it.plusOneMonth() else it.minusOneMonth() }
         return copy(months = shifted)
     }
@@ -441,7 +443,7 @@ private fun MonthChipStrip(
     onShiftLater: () -> Unit,
     onLongPressChip: (Int) -> Unit
 ) {
-    val canShiftLater = months.firstOrNull()?.let { it < today } ?: false
+    val canShiftLater = months.isNotEmpty()
     val scrollState = rememberScrollState()
 
     Row(verticalAlignment = Alignment.CenterVertically) {
