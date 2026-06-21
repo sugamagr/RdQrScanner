@@ -1,6 +1,7 @@
 package com.qrscanner.app.cloud
 
 import com.qrscanner.app.cloud.dto.DeviceDto
+import com.qrscanner.app.cloud.dto.RdAccountDto
 import com.qrscanner.app.cloud.dto.RdNumberDto
 import com.qrscanner.app.cloud.dto.ScanLotDto
 import com.qrscanner.app.cloud.dto.ScanSessionDto
@@ -59,6 +60,13 @@ interface CloudClient {
     suspend fun upsertRdNumber(rdNumber: RdNumberDto): RdNumberDto
 
     /**
+     * Upserts an RD account profile. Conflict resolution is on the
+     * composite (owner_id, rd_number) primary key — sending the same
+     * rd_number twice merges into the existing row.
+     */
+    suspend fun upsertRdAccount(account: RdAccountDto): RdAccountDto
+
+    /**
      * Soft-deletes a session by stamping `deleted_at`. Returns the
      * updated row including the server-side updated_at trigger value
      * for conflict-resolution bookkeeping.
@@ -104,6 +112,7 @@ data class CloudDelta(
     val sessions: List<ScanSessionDto>,
     val lots: List<ScanLotDto>,
     val rdNumbers: List<RdNumberDto>,
+    val rdAccounts: List<RdAccountDto>,
     val highWaterMark: Long,
     /**
      * True iff ANY table page came back at the implementation's
@@ -123,7 +132,7 @@ data class CloudRealtimePayload(
     val event: CloudRealtimeEvent
 )
 
-enum class CloudTable { DEVICES, SCAN_SESSIONS, SCAN_LOTS, RD_NUMBERS }
+enum class CloudTable { DEVICES, SCAN_SESSIONS, SCAN_LOTS, RD_NUMBERS, RD_ACCOUNTS }
 enum class CloudRealtimeEvent { INSERT, UPDATE, DELETE }
 
 /** All cloud errors funnel through this. The repository decides retry semantics. */

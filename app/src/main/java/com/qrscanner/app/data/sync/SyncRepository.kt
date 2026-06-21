@@ -41,6 +41,7 @@ class SyncRepository(
     private val rdNumberDao = database.rdNumberDao()
     private val deviceSettingsDao = database.deviceSettingsDao()
     private val syncEventDao = database.syncEventDao()
+    private val rdAccountDao = database.rdAccountDao()
 
     // Track consecutive runPush failure cycles. Spec §15.5.2 fires the
     // sync_error notification on the 3rd consecutive failure and re-fires
@@ -129,6 +130,32 @@ class SyncRepository(
             .onFailure { android.util.Log.w("SyncRepository", "nextDisplayNumber RPC failed; using local tentative number", it) }
             .getOrNull()
 
+        // Compute lastPaidThrough updates OUTSIDE the main transaction:
+        // resolveOrAuto + parseList are CPU work, and the monotonic
+        // upsert runs inside the same transaction below so the entire
+        // finalize is still atomic.
+        val rdRows = rdNumberDao.getAllRowsInSession(sessionId)
+        val lots = lotDao.getLotsForSessionSync(sessionId).associateBy { it.id }
+        // (rdNumber, max-month-token) pairs — one entry per distinct
+        // rd_number scanned in this session, using the latest month
+        // across all scans of that number (covers the case where the
+        // same RD was scanned in multiple LOTs of the same session).
+        val accountUpdates: Map<String, String> = rdRows
+            .filter { it.deletedAt == null && it.monthsPaid >= 1 }
+            .groupBy { it.number }
+            .mapValues { (_, scans) ->
+                scans.maxOf { scan ->
+                    val anchor = lots[scan.lotId]
+                        ?.let { com.qrscanner.app.util.MonthYear.fromEpochMillis(it.timestamp) }
+                        ?: com.qrscanner.app.util.MonthYear.current()
+                    val months = com.qrscanner.app.util.MonthYear
+                        .resolveOrAuto(scan.monthsList, scan.monthsPaid, anchor)
+                    // newest month per the contiguous-block invariant —
+                    // index 0 since resolveOrAuto returns newest-first
+                    months.first().toToken()
+                }
+            }
+
         database.withTransaction {
             sessionDao.stampFinalizeMetadata(
                 sessionId = sessionId,
@@ -143,6 +170,13 @@ class SyncRepository(
             sessionDao.markSessionDirty(sessionId, now)
             lotDao.markLotsDirtyForSession(sessionId, now)
             rdNumberDao.markRdNumbersDirtyForSession(sessionId, now)
+
+            // updateLastPaidThroughMonotonic is a no-op when the rd_number
+            // has no matching rd_accounts row, and its WHERE clause enforces
+            // the strictly-greater rule (Phase 5 T5.7 LWW tie-breaker).
+            for ((rdNumber, newMonth) in accountUpdates) {
+                rdAccountDao.updateLastPaidThroughMonotonic(rdNumber, newMonth, now)
+            }
         }
     }
 
@@ -245,20 +279,52 @@ class SyncRepository(
             sessionDao.recoverStuckSyncing()
             lotDao.recoverStuckSyncing()
             rdNumberDao.recoverStuckSyncing()
+            rdAccountDao.recoverStuckSyncing()
             promoteOrphanFinalizedSessions()
             sessionDao.promoteSessionsWithDirtyChildren()
         }
 
         val dirtySessions = sessionDao.getDirtyForPush()
-        if (dirtySessions.isEmpty()) {
+        val dirtyAccounts = rdAccountDao.getDirtyForPush()
+        if (dirtySessions.isEmpty() && dirtyAccounts.isEmpty()) {
             updateSummary { it.copy(state = SyncPillState.SYNCED, pendingCount = 0) }
             return Result.success(Unit)
         }
 
-        updateSummary { it.copy(state = SyncPillState.SYNCING, pendingCount = dirtySessions.size) }
+        updateSummary {
+            it.copy(
+                state = SyncPillState.SYNCING,
+                pendingCount = dirtySessions.size + dirtyAccounts.size
+            )
+        }
 
         var firstError: Throwable? = null
         var pushedSessionCount = 0
+
+        // Push rd_accounts FIRST (master-data, independent of session
+        // hierarchy). Future versions may add FK from rd_numbers to
+        // rd_accounts; pushing accounts first means the FK target
+        // exists by the time rd_numbers push starts.
+        val ownDeviceCloudId = deviceSettingsDao.get()?.deviceCloudId
+        for (acct in dirtyAccounts) {
+            try {
+                pushRdAccount(acct, ownerId, ownDeviceCloudId)
+            } catch (e: CloudException.AuthExpired) {
+                updateSummary { it.copy(state = SyncPillState.ERROR, lastErrorMessage = "auth expired") }
+                return Result.failure(e)
+            } catch (e: Throwable) {
+                if (firstError == null) firstError = e
+                rdAccountDao.markSyncError(acct.rdNumber, e.message ?: e.toString())
+                val current = rdAccountDao.findByRdNumberIncludingDeleted(acct.rdNumber)
+                if (current != null && current.retryCount >= PUSH_ABANDON_THRESHOLD) {
+                    rdAccountDao.markSyncAbandoned(acct.rdNumber)
+                    android.util.Log.w(
+                        "SyncRepository",
+                        "rd_account ${acct.rdNumber} abandoned after ${current.retryCount} push failures"
+                    )
+                }
+            }
+        }
         // Buffer success notifications; small batches fire per-session
         // (responsive), batches > BULK_SUMMARY_THRESHOLD collapse into one
         // tray slot (avoids spam on v5→v6 first push / offline backlog).
@@ -561,6 +627,29 @@ class SyncRepository(
         return allOk
     }
 
+    /**
+     * Pushes a single rd_account row. Stamps cloudId BEFORE the cloud
+     * call so a mid-upsert network failure doesn't lose the id and
+     * cause a duplicate row on the next push (Phase 5 R2 invariant).
+     * Caller wraps in try/catch and handles markSyncError +
+     * markSyncAbandoned around it (matches the dirtyAccounts loop in
+     * runPushLocked).
+     */
+    private suspend fun pushRdAccount(
+        account: com.qrscanner.app.data.RdAccount,
+        ownerId: String,
+        editorDeviceCloudId: String?
+    ) {
+        val cloudId = account.cloudId ?: UUID.randomUUID().toString()
+        if (account.cloudId == null) rdAccountDao.stampCloudId(account.rdNumber, cloudId)
+        rdAccountDao.markSyncing(account.rdNumber)
+        val dto = com.qrscanner.app.cloud.mappers.RdAccountMapper
+            .toDto(account.copy(cloudId = cloudId), editorDeviceCloudId)
+            .copy(ownerId = ownerId)
+        cloudClient.upsertRdAccount(dto)
+        rdAccountDao.markSynced(account.rdNumber, System.currentTimeMillis(), cloudId)
+    }
+
     /** Returns true on success, false on non-auth failure (parent re-marks SYNC_ERROR). AuthExpired re-throws. */
     private suspend fun pushRdNumber(
         rd: RdNumber,
@@ -686,6 +775,7 @@ class SyncRepository(
                 emitted += mergeSessions(delta.sessions, ownDeviceCloudId)
                 mergeLots(delta.lots)
                 emitted += mergeRdNumbers(delta.rdNumbers, delta.sessions, ownDeviceCloudId)
+                mergeRdAccounts(delta.rdAccounts)
                 if (delta.highWaterMark > priorCursor) {
                     deviceSettingsDao.updateLastPulledAt(delta.highWaterMark)
                 }
@@ -853,6 +943,46 @@ class SyncRepository(
                     sessionId = parent.id,
                     lotNumber = dto.lotNumber,
                     timestamp = IsoTime.toEpochMillis(dto.timestamp),
+                    updatedAt = updatedAt,
+                    deletedAt = deletedAt
+                )
+            }
+        }
+    }
+
+    /**
+     * Merge inbound rd_accounts into local Room. LWW by `rdNumber` PK
+     * (strict-< Phase 5 T5.7 invariant). Insert-or-merge — no parent
+     * dependency (rd_accounts are master data, not session-scoped).
+     *
+     * No RemoteEditNotice emission for now — the user's spec keeps
+     * account profile edits as "silent background sync, see Accounts
+     * screen for current state" rather than firing a Channel C
+     * notification per portal-CSV-bulk-import or per-row edit. Can
+     * revisit if user requests notifications for account changes.
+     */
+    private suspend fun mergeRdAccounts(dtos: List<com.qrscanner.app.cloud.dto.RdAccountDto>) {
+        for (dto in dtos) {
+            val existing = rdAccountDao.findByRdNumberIncludingDeleted(dto.rdNumber)
+            val updatedAt = IsoTime.toEpochMillis(dto.updatedAt)
+            val deletedAt = IsoTime.toEpochMillisOrNull(dto.deletedAt)
+            if (existing == null) {
+                rdAccountDao.insert(
+                    com.qrscanner.app.cloud.mappers.RdAccountMapper.toEntity(dto)
+                )
+            } else {
+                rdAccountDao.mergeFromCloud(
+                    rdNumber = dto.rdNumber,
+                    cloudId = dto.id,
+                    name = dto.name,
+                    monthlyAmount = dto.monthlyAmount,
+                    lastPaidThrough = dto.lastPaidThrough,
+                    source = dto.source,
+                    isActive = dto.isActive,
+                    accountOpenedDate = dto.accountOpenedDate,
+                    accountClosingDate = dto.accountClosingDate,
+                    ownerId = dto.ownerId,
+                    lastEditorDeviceId = dto.lastEditorDeviceId,
                     updatedAt = updatedAt,
                     deletedAt = deletedAt
                 )

@@ -27,6 +27,19 @@ interface RdNumberDao {
     """)
     suspend fun getAllNumbersInSession(sessionId: Long): List<String>
 
+    /**
+     * Full rd_number rows for a session, used by
+     * [com.qrscanner.app.data.sync.SyncRepository.markSessionForSync]
+     * to compute per-account `lastPaidThrough` updates. Returns rows
+     * regardless of soft-delete state — caller filters as needed.
+     */
+    @Query("""
+        SELECT rn.* FROM rd_numbers rn
+        INNER JOIN scan_lots sl ON rn.lotId = sl.id
+        WHERE sl.sessionId = :sessionId
+    """)
+    suspend fun getAllRowsInSession(sessionId: Long): List<RdNumber>
+
     @Query("SELECT COUNT(*) FROM rd_numbers WHERE lotId = :lotId")
     suspend fun getCountForLot(lotId: Long): Int
 

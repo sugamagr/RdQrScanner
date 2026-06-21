@@ -6,6 +6,7 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.qrscanner.app.BuildConfig
 import com.qrscanner.app.cloud.dto.DeviceDto
+import com.qrscanner.app.cloud.dto.RdAccountDto
 import com.qrscanner.app.cloud.dto.RdNumberDto
 import com.qrscanner.app.cloud.dto.ScanLotDto
 import com.qrscanner.app.cloud.dto.ScanSessionDto
@@ -177,6 +178,18 @@ class SupabaseCloudClient(
             .decodeSingle()
     }
 
+    override suspend fun upsertRdAccount(account: RdAccountDto): RdAccountDto = runCloud {
+        // Composite PK is (owner_id, rd_number). Specifying both on
+        // onConflict so PostgREST routes the duplicate-key into the
+        // correct DO UPDATE branch matching the table's PRIMARY KEY.
+        supabase.postgrest.from(TABLE_RD_ACCOUNTS)
+            .upsert(account) {
+                onConflict = "owner_id,rd_number"
+                select()
+            }
+            .decodeSingle()
+    }
+
     override suspend fun tombstoneSession(sessionCloudId: String, deletedAt: Long): ScanSessionDto = runCloud {
         val iso = com.qrscanner.app.cloud.mappers.IsoTime.fromEpochMillis(deletedAt)
         supabase.postgrest.from(TABLE_SCAN_SESSIONS)
@@ -259,24 +272,42 @@ class SupabaseCloudClient(
             }
             .decodeList<RdNumberDto>()
 
+        val rdAccounts = supabase.postgrest.from(TABLE_RD_ACCOUNTS)
+            .select(columns = Columns.ALL) {
+                filter {
+                    eq("owner_id", ownerId)
+                    or {
+                        gte("updated_at", sinceIso)
+                        gt("deleted_at", sinceIso)
+                    }
+                }
+                order("updated_at", Order.ASCENDING)
+                order("id", Order.ASCENDING)
+                limit(PULL_PAGE_SIZE.toLong())
+            }
+            .decodeList<RdAccountDto>()
+
         val highWater = maxOf(
             since,
             devices.maxOfOrNull { com.qrscanner.app.cloud.mappers.IsoTime.toEpochMillis(it.updatedAt) } ?: since,
             sessions.maxOfOrNull { com.qrscanner.app.cloud.mappers.IsoTime.toEpochMillis(it.updatedAt) } ?: since,
             lots.maxOfOrNull { com.qrscanner.app.cloud.mappers.IsoTime.toEpochMillis(it.updatedAt) } ?: since,
-            rdNumbers.maxOfOrNull { com.qrscanner.app.cloud.mappers.IsoTime.toEpochMillis(it.updatedAt) } ?: since
+            rdNumbers.maxOfOrNull { com.qrscanner.app.cloud.mappers.IsoTime.toEpochMillis(it.updatedAt) } ?: since,
+            rdAccounts.maxOfOrNull { com.qrscanner.app.cloud.mappers.IsoTime.toEpochMillis(it.updatedAt) } ?: since
         )
 
         val anyPageFull = devices.size >= PULL_PAGE_SIZE ||
             sessions.size >= PULL_PAGE_SIZE ||
             lots.size >= PULL_PAGE_SIZE ||
-            rdNumbers.size >= PULL_PAGE_SIZE
+            rdNumbers.size >= PULL_PAGE_SIZE ||
+            rdAccounts.size >= PULL_PAGE_SIZE
 
         CloudDelta(
             devices = devices,
             sessions = sessions,
             lots = lots,
             rdNumbers = rdNumbers,
+            rdAccounts = rdAccounts,
             highWaterMark = highWater,
             pageWasFull = anyPageFull
         )
@@ -307,12 +338,17 @@ class SupabaseCloudClient(
             table = TABLE_DEVICES
             filter("owner_id", FilterOperator.EQ, ownerId)
         }
+        val accountFlow = channel.postgresChangeFlow<PostgresAction>(schema = "public") {
+            table = TABLE_RD_ACCOUNTS
+            filter("owner_id", FilterOperator.EQ, ownerId)
+        }
 
         listOf(
             sessionFlow to CloudTable.SCAN_SESSIONS,
             lotFlow to CloudTable.SCAN_LOTS,
             rdFlow to CloudTable.RD_NUMBERS,
-            deviceFlow to CloudTable.DEVICES
+            deviceFlow to CloudTable.DEVICES,
+            accountFlow to CloudTable.RD_ACCOUNTS
         ).forEach { (flow, table) ->
             launch {
                 flow.collect { action ->
@@ -424,6 +460,7 @@ class SupabaseCloudClient(
         private const val TABLE_SCAN_SESSIONS = "scan_sessions"
         private const val TABLE_SCAN_LOTS = "scan_lots"
         private const val TABLE_RD_NUMBERS = "rd_numbers"
+        private const val TABLE_RD_ACCOUNTS = "rd_accounts"
         private const val PULL_PAGE_SIZE = 500
         private val REALTIME_RECONNECT_DELAY = 5.seconds
     }
