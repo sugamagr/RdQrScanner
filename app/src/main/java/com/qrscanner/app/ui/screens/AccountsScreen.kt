@@ -26,6 +26,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material3.Checkbox
@@ -63,6 +65,7 @@ import com.qrscanner.app.data.RdAccount
 import com.qrscanner.app.ui.components.DeleteOrInactivateDialog
 import com.qrscanner.app.ui.components.EditAccountDialog
 import com.qrscanner.app.ui.components.IconSnackbarHost
+import com.qrscanner.app.ui.components.IconSnackbarKind
 import com.qrscanner.app.ui.components.showIconSnackbar
 import com.qrscanner.app.ui.theme.AccentMint
 import com.qrscanner.app.ui.theme.BackgroundWhite
@@ -228,8 +231,7 @@ fun AccountsScreen(onNavigateBack: () -> Unit) {
                                         snackbarHostState.showIconSnackbar(
                                             message = "This account can only be edited by Sugam — please contact him",
                                             icon = Icons.Default.Lock,
-                                            actionLabel = null,
-                                            isError = false
+                                            kind = IconSnackbarKind.Info
                                         )
                                     }
                                 } else {
@@ -299,7 +301,7 @@ fun AccountsScreen(onNavigateBack: () -> Unit) {
                     snackbarHostState.showIconSnackbar(
                         message = "${target.name} deleted",
                         icon = Icons.Default.Close,
-                        isError = true
+                        kind = IconSnackbarKind.Error
                     )
                 }
             }
@@ -410,7 +412,7 @@ private fun FilterBar(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        imageVector = if (showInactive) Icons.Default.Check else Icons.Default.MoreVert,
+                        imageVector = if (showInactive) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                         contentDescription = null,
                         tint = if (showInactive) AccentMint else TextSecondary,
                         modifier = Modifier.size(16.dp)
@@ -529,8 +531,11 @@ private fun AccountRow(
                 if (!selectionMode) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Row {
+                        // 40dp matches the leading QR button + meets WCAG
+                        // 44dp recommendation when combined with the 4dp
+                        // surrounding padding of an IconButton ripple.
                         if (account.source == AccountSource.CSV) {
-                            IconButton(onClick = onEditAttempt, modifier = Modifier.size(32.dp)) {
+                            IconButton(onClick = onEditAttempt, modifier = Modifier.size(40.dp)) {
                                 Icon(
                                     Icons.Default.Lock,
                                     contentDescription = "Locked — contact Sugam",
@@ -539,7 +544,7 @@ private fun AccountRow(
                                 )
                             }
                         } else {
-                            IconButton(onClick = onEditAttempt, modifier = Modifier.size(32.dp)) {
+                            IconButton(onClick = onEditAttempt, modifier = Modifier.size(40.dp)) {
                                 Icon(
                                     Icons.Default.Edit,
                                     contentDescription = "Edit",
@@ -548,7 +553,7 @@ private fun AccountRow(
                                 )
                             }
                             Box {
-                                IconButton(onClick = onOverflowOpen, modifier = Modifier.size(32.dp)) {
+                                IconButton(onClick = onOverflowOpen, modifier = Modifier.size(40.dp)) {
                                     Icon(
                                         Icons.Default.MoreVert,
                                         contentDescription = "More",

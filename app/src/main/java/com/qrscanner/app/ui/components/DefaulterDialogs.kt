@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -500,7 +501,8 @@ fun DefaulterEditDialog(
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 28.dp),
+                    .padding(horizontal = 28.dp)
+                    .heightIn(max = 560.dp),
                 shape = RoundedCornerShape(20.dp),
                 color = Color.White,
                 tonalElevation = 6.dp
@@ -511,11 +513,17 @@ fun DefaulterEditDialog(
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = message,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary
-                    )
+                    Column(
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        Text(
+                            text = message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary
+                        )
+                    }
                     Spacer(modifier = Modifier.height(16.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -650,17 +658,20 @@ private fun DefaulterRow(
             )
         }
 
-        draftState.accountLastPaidThrough?.let { lastPaid ->
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "Last paid: through ${lastPaid.formatShort()}",
-                style = MaterialTheme.typography.labelSmall,
-                color = TextSecondary,
-                modifier = Modifier.padding(start = 2.dp)
-            )
-        }
-
+        // "Last paid: through {month}" banner is gated on isDefaulter
+        // because the auto-suggest + skip-gap warning it documents are
+        // only actionable when the operator is making a multi-month
+        // decision. For count=1 rows the banner is just noise.
         if (isDefaulter) {
+            draftState.accountLastPaidThrough?.let { lastPaid ->
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Last paid: through ${lastPaid.formatShort()}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary,
+                    modifier = Modifier.padding(start = 2.dp)
+                )
+            }
             Spacer(modifier = Modifier.height(8.dp))
             MonthChipStrip(
                 months = draftState.months,

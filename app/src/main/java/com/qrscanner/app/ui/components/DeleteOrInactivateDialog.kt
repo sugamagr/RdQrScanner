@@ -82,25 +82,35 @@ fun DeleteOrInactivateDialog(
                 )
             }
         },
+        // 3 actions don't fit AlertDialog's confirm+dismiss row on
+        // 320dp screens. Stacking the primary Mark Inactive at full
+        // width with a secondary Cancel/Delete row below works on
+        // every phone width and reinforces the recommended action.
         confirmButton = {
-            Button(
-                onClick = onMarkInactive,
-                colors = ButtonDefaults.buttonColors(containerColor = PrimaryOrange),
-                shape = RoundedCornerShape(10.dp)
-            ) {
-                Text("Mark Inactive", fontWeight = FontWeight.SemiBold)
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = onMarkInactive,
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryOrange),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Mark Inactive", fontWeight = FontWeight.SemiBold)
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onCancel) {
+                        Text("Cancel", color = TextSecondary)
+                    }
+                    TextButton(onClick = onDelete) {
+                        Text("Delete", color = ErrorRed, fontWeight = FontWeight.SemiBold)
+                    }
+                }
             }
         },
-        dismissButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = onCancel) {
-                    Text("Cancel", color = TextSecondary)
-                }
-                TextButton(onClick = onDelete) {
-                    Text("Delete", color = ErrorRed, fontWeight = FontWeight.SemiBold)
-                }
-            }
-        },
+        dismissButton = null,
         shape = RoundedCornerShape(20.dp),
         containerColor = SurfaceWhite
     )

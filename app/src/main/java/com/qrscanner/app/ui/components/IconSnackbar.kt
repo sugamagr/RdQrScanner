@@ -22,14 +22,22 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.qrscanner.app.ui.theme.ErrorRed
 import com.qrscanner.app.ui.theme.PrimaryOrange
+import com.qrscanner.app.ui.theme.TextPrimary
+
+/**
+ * Three semantic snackbar kinds — Success (PrimaryOrange, used for
+ * confirm-of-positive-action), Info (TextPrimary surface, used for
+ * neutral notices like 'locked, contact owner'), Error (ErrorRed,
+ * used for destructive-action-completed feedback). Per oracle
+ * bg_437db025 finding: locked-row notice using PrimaryOrange collided
+ * semantically with success snackbars (both warm/saturated).
+ */
+enum class IconSnackbarKind { Success, Info, Error }
 
 /**
  * Shared Snackbar host that supports a leading Material Icon + brand
  * tint, used in place of plain Toast where a visual cue carries
  * meaning (CSV-locked rows, auto-reactivate notice, etc.).
- *
- * Toast doesn't support icons; this is the replacement contract
- * we agreed to under the no-emoji constraint.
  */
 data class IconSnackbarVisuals(
     override val message: String,
@@ -37,7 +45,7 @@ data class IconSnackbarVisuals(
     override val withDismissAction: Boolean = false,
     override val duration: SnackbarDuration = SnackbarDuration.Long,
     val icon: ImageVector,
-    val isError: Boolean = false
+    val kind: IconSnackbarKind = IconSnackbarKind.Success
 ) : SnackbarVisuals
 
 @Composable
@@ -51,9 +59,14 @@ fun IconSnackbarHost(
         modifier = modifier
     ) { data ->
         val visuals = data.visuals as? IconSnackbarVisuals
+        val container = when (visuals?.kind) {
+            IconSnackbarKind.Error -> ErrorRed
+            IconSnackbarKind.Info -> TextPrimary
+            else -> PrimaryOrange
+        }
         Snackbar(
             modifier = Modifier.padding(12.dp),
-            containerColor = if (visuals?.isError == true) ErrorRed else PrimaryOrange,
+            containerColor = container,
             contentColor = Color.White,
             actionContentColor = Color.White,
             action = visuals?.actionLabel?.let {
@@ -86,15 +99,15 @@ fun IconSnackbarHost(
 suspend fun SnackbarHostState.showIconSnackbar(
     message: String,
     icon: ImageVector,
+    kind: IconSnackbarKind = IconSnackbarKind.Success,
     actionLabel: String? = null,
-    isError: Boolean = false,
     duration: SnackbarDuration = SnackbarDuration.Long
 ): SnackbarResult = showSnackbar(
     IconSnackbarVisuals(
         message = message,
         icon = icon,
         actionLabel = actionLabel,
-        isError = isError,
+        kind = kind,
         duration = duration
     )
 )

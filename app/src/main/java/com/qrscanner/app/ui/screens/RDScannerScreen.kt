@@ -398,6 +398,12 @@ private fun RDCameraScreen(
                         runCatching {
                             val now = System.currentTimeMillis()
                             app.database.rdAccountDao().reactivate(cleanValue, now)
+                        }.onFailure {
+                            android.util.Log.w(
+                                "RDScannerScreen",
+                                "auto-reactivate failed for $cleanValue — local flag may drift",
+                                it
+                            )
                         }
                         currentLotNumbers.add(0, cleanValue)
                         allSessionNumbers.add(cleanValue)
