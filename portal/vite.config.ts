@@ -9,13 +9,13 @@ export default defineConfig({
   },
   build: {
     target: 'es2022',
-    // P6β NITPICK: 'hidden' generates the .map files so we can still
-    // debug Sentry stack traces if we ever wire one up, but does NOT
-    // ship the //# sourceMappingURL comment in the JS bundle — so a
-    // visitor opening DevTools doesn't get a tree-view of the original
-    // TypeScript source. The .map files in dist/ should be excluded
-    // from the Cloudflare deploy (added a wrangler pages publish
-    // glob in the deploy script).
-    sourcemap: 'hidden',
+    // C2-P6 HIGH: sourcemap was previously set to 'hidden' which still
+    // emitted dist/assets/*.map files, and wrangler pages deploy ships
+    // every file in dist/ — meaning the public Cloudflare URL would
+    // serve the original TypeScript source to anyone who guessed the
+    // hash-stamped filename. Setting to false omits the .map files
+    // entirely. No Sentry today; revisit when we wire crash reporting
+    // (uploadable maps via Sentry CLI is the standard pattern then).
+    sourcemap: false,
   },
 });

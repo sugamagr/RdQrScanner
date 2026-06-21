@@ -81,6 +81,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -150,9 +151,14 @@ fun SessionHistoryScreen(
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var activeFilter by rememberSaveable { mutableStateOf(HistoryFilter.ALL) }
 
-    // Multi-select
+    // Multi-select. isSelectionMode stays as plain remember because it's
+    // transient gesture state; selectedIds uses a custom Saver so a
+    // rotation mid-selection preserves the operator's pick set instead
+    // of dropping it. C2-P4 NITPICK from the cycle-1-deferred list.
     var isSelectionMode by remember { mutableStateOf(false) }
-    var selectedIds by remember { mutableStateOf(setOf<Long>()) }
+    var selectedIds by rememberSaveable(stateSaver = LongSetSaver) {
+        mutableStateOf(setOf<Long>())
+    }
 
     // Date range millis for filter chips
     val (todayStart, weekStart, monthStart) = remember {
@@ -909,3 +915,8 @@ private fun SessionCard(
         }
     }
 }
+
+private val LongSetSaver: Saver<Set<Long>, List<Long>> = Saver(
+    save = { it.toList() },
+    restore = { it.toSet() }
+)

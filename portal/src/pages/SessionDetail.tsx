@@ -223,7 +223,7 @@ function LotCard({
         </div>
         <div className="text-right text-xs text-ink-secondary">
           <p>
-            <span className="font-mono text-ink-primary">{rdNumbers.length}</span>{' '}
+            <span className="font-mono tabular-nums text-ink-primary">{rdNumbers.length}</span>{' '}
             RD number{rdNumbers.length === 1 ? '' : 's'}
           </p>
           {defaulters.length > 0 && (
@@ -262,7 +262,7 @@ function LotCard({
                       ? `Edit defaulter ${rd.number}, ${rd.months_paid} months`
                       : `Mark ${rd.number} as defaulter`
                   }
-                  className={`inline-flex items-center rounded-pill px-2.5 py-0.5 font-mono text-xs transition-all active:scale-[0.98] [@media(hover:hover)]:hover:scale-[1.03] [@media(hover:hover)]:hover:shadow-card ${
+                  className={`inline-flex items-center rounded-pill px-2.5 py-0.5 font-mono tabular-nums text-xs transition-all active:scale-[0.98] [@media(hover:hover)]:hover:scale-[1.03] [@media(hover:hover)]:hover:shadow-card ${
                     isDefaulter
                       ? 'bg-warn/15 text-warn ring-1 ring-warn/20'
                       : 'bg-surface-alt text-ink-primary [@media(hover:hover)]:hover:bg-primary/10 [@media(hover:hover)]:hover:text-primary-dark'

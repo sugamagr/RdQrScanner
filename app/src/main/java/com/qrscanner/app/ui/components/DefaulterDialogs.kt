@@ -75,6 +75,7 @@ import com.qrscanner.app.ui.theme.WarningAmber
 import com.qrscanner.app.ui.theme.DisabledBackground
 import com.qrscanner.app.ui.theme.DisabledContent
 import com.qrscanner.app.ui.theme.RowBackground
+import com.qrscanner.app.ui.theme.TextPrimary
 import com.qrscanner.app.util.MonthYear
 import kotlinx.coroutines.delay
 
@@ -268,7 +269,7 @@ fun DefaulterAskDialog(
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = DisabledBackground,
-                        contentColor = Color(0xFF1A1A2E)
+                        contentColor = TextPrimary
                     ),
                     shape = RoundedCornerShape(12.dp)
                 ) {
@@ -767,22 +768,31 @@ private fun ChipShiftButton(
     enabled: Boolean,
     onClick: () -> Unit
 ) {
+    // C2-P4 LOW: expand touch area to 44dp (WCAG floor) while keeping
+    // the visible chip at 28dp. The Box has a padding-around-CircleShape
+    // pattern so the press target is generous but the design unchanged.
     Box(
         modifier = Modifier
-            .size(28.dp)
-            .background(
-                color = if (enabled) Color.White else DisabledBackground,
-                shape = CircleShape
-            )
+            .size(44.dp)
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = if (enabled) PrimaryOrange else DisabledContent,
-            modifier = Modifier.size(16.dp)
-        )
+        Box(
+            modifier = Modifier
+                .size(28.dp)
+                .background(
+                    color = if (enabled) Color.White else DisabledBackground,
+                    shape = CircleShape
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (enabled) PrimaryOrange else DisabledContent,
+                modifier = Modifier.size(16.dp)
+            )
+        }
     }
 }
 

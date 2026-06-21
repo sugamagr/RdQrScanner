@@ -103,7 +103,7 @@ function SearchResultRow({
         className="flex items-center gap-3 rounded-xl border border-surface-border bg-surface px-4 py-3 shadow-card transition-all hover:border-primary/40 hover:bg-surface-alt"
       >
         <div className="flex-1">
-          <div className="flex items-center gap-2 font-mono text-base font-semibold text-ink-primary">
+          <div className="flex items-center gap-2 font-mono tabular-nums text-base font-semibold text-ink-primary">
             <Highlighted text={hit.rd.number} match={highlight} />
             {isDefaulter && (
               <span className="rounded-pill bg-warn/10 px-2 py-0.5 font-sans text-[10px] font-semibold uppercase tracking-wide text-warn">

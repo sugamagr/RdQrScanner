@@ -42,14 +42,32 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
+  // P6γ LOW + MEDIUM cancellation: mountedRef short-circuits stale
+  // setState after unmount (CSV parse is async via PapaParse); the
+  // AbortController fires on unmount to cancel the bulkUpsert loop
+  // (already-uploaded rows stay committed — CSV is idempotent).
+  // C2-P6 MEDIUM in-flight guard: synchronous ref short-circuits
+  // rapid double-clicks on the Import button before isPending
+  // propagates from useMutation (React batches setState).
+  const mountedRef = useRef(true);
+  const abortRef = useRef<AbortController | null>(null);
+  const uploadInFlightRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      abortRef.current?.abort();
+    };
+  }, []);
 
   const handleFile = async (picked: File | null) => {
+    if (!mountedRef.current) return;
     setFile(picked);
     setParseResult(null);
     setShowAllErrors(false);
     if (picked) {
       const result = await parseAccountsCsv(picked);
-      setParseResult(result);
+      if (mountedRef.current) setParseResult(result);
     }
   };
 
@@ -114,9 +132,16 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
   const upload = useMutation<BulkUpsertResult>({
     mutationFn: async () => {
       if (!parseResult) throw new Error('Parse the file first');
-      return bulkUpsertAccounts(parseResult.valid, ownerId);
+      const ac = new AbortController();
+      abortRef.current = ac;
+      try {
+        return await bulkUpsertAccounts(parseResult.valid, ownerId, ac.signal);
+      } finally {
+        if (abortRef.current === ac) abortRef.current = null;
+      }
     },
     onSuccess: (result) => {
+      if (!mountedRef.current) return;
       qc.invalidateQueries({ queryKey: ['accounts'] });
       const parts = [`Imported ${result.inserted}`];
       const skipped = parseResult ? parseResult.errors.length : 0;
@@ -328,7 +353,15 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
           </button>
           <button
             type="button"
-            onClick={() => upload.mutate()}
+            onClick={() => {
+              if (!canUpload || uploadInFlightRef.current) return;
+              uploadInFlightRef.current = true;
+              upload.mutate(undefined, {
+                onSettled: () => {
+                  uploadInFlightRef.current = false;
+                },
+              });
+            }}
             disabled={!canUpload}
             className="inline-flex items-center gap-1.5 rounded-pill bg-primary px-4 py-1.5 text-xs font-semibold text-white shadow-card transition-colors hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
           >

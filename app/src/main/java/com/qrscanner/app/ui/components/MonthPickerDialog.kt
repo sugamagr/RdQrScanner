@@ -41,6 +41,7 @@ import com.qrscanner.app.ui.theme.PrimaryOrange
 import com.qrscanner.app.ui.theme.TextSecondary
 import com.qrscanner.app.ui.theme.DisabledBackground
 import com.qrscanner.app.ui.theme.DisabledContent
+import com.qrscanner.app.ui.theme.TextPrimary
 import com.qrscanner.app.util.MonthYear
 
 private const val PICKER_YEARS_BACK = 10
@@ -239,7 +240,7 @@ private fun MonthCell(
     val textColor = when {
         isSelected -> Color.White
         !enabled -> DisabledContent
-        else -> Color(0xFF1A1A2E)
+        else -> TextPrimary
     }
     Box(
         modifier = modifier

@@ -313,7 +313,8 @@ export interface BulkUpsertResult {
  */
 export async function bulkUpsertAccounts(
   rows: BulkAccountInput[],
-  ownerId: string
+  ownerId: string,
+  signal?: AbortSignal
 ): Promise<BulkUpsertResult> {
   // Defence-in-depth: even though the caller passes ownerId, validate
   // against the live session before writing. Defends against a stale
@@ -327,6 +328,14 @@ export async function bulkUpsertAccounts(
   }
   const result: BulkUpsertResult = { inserted: 0, updated: 0, failed: 0, errors: [] };
   for (const row of rows) {
+    // P6γ MEDIUM cancellation: check the signal before each per-row
+    // upsert so closing the import dialog mid-upload aborts the
+    // remaining rows. The already-uploaded rows stay committed (CSV
+    // re-import is idempotent via the owner_id+rd_number PK + the
+    // deleted_at:null resurrect stamp, so the user can retry safely).
+    if (signal?.aborted) {
+      throw new DOMException('bulkUpsertAccounts cancelled', 'AbortError');
+    }
     const payload = {
       rd_number: row.rdNumber,
       owner_id: ownerId,

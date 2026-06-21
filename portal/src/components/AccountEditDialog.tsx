@@ -85,9 +85,21 @@ export function AccountEditDialog({ account, onClose }: Props) {
     isActive !== account.is_active;
   const canSave = nameValid && amountValid && hasChanges && !mutation.isPending;
 
+  const inFlightRef = useRef(false);
+
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (canSave) mutation.mutate();
+    // P6γ NITPICK in-flight guard: mutation.isPending state may not
+    // have re-rendered between rapid clicks; the synchronous ref
+    // beats React's batched setState. mutation.isPending is also
+    // still checked via canSave for UX (button disabled state).
+    if (!canSave || inFlightRef.current) return;
+    inFlightRef.current = true;
+    mutation.mutate(undefined, {
+      onSettled: () => {
+        inFlightRef.current = false;
+      },
+    });
   };
 
   return (

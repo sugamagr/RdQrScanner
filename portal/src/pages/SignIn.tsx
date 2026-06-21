@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 
@@ -9,6 +9,12 @@ export function SignInPage() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // P6γ NITPICK in-flight guard: setLoading(true) reaches the DOM
+  // asynchronously (React batches setState), so a fast double-click
+  // between submit and re-render can queue two signIn requests. Read
+  // and write via a synchronous ref to short-circuit before any
+  // network call.
+  const inFlightRef = useRef(false);
 
   if (session) {
     return <Navigate to={location.state?.from ?? '/sessions'} replace />;
@@ -16,12 +22,18 @@ export function SignInPage() {
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
     setLoading(true);
     setError(null);
-    const result = await signIn(email.trim(), password);
-    if (result.error) {
-      setError(result.error);
-      setLoading(false);
+    try {
+      const result = await signIn(email.trim(), password);
+      if (result.error) {
+        setError(result.error);
+        setLoading(false);
+      }
+    } finally {
+      inFlightRef.current = false;
     }
   };
 

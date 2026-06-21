@@ -120,7 +120,7 @@ fun RecentChangesBanner(
                 Spacer(modifier = Modifier.width(8.dp))
                 Box(
                     modifier = Modifier
-                        .size(28.dp)
+                        .size(44.dp)
                         .clickable(onClick = onDismiss)
                         .semantics { contentDescription = "Dismiss" },
                     contentAlignment = Alignment.Center

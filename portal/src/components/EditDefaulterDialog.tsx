@@ -85,6 +85,17 @@ export function EditDefaulterDialog({ rd, lotTimestamp, onClose }: Props) {
     },
   });
 
+  const inFlightRef = useRef(false);
+  const handleSave = () => {
+    if (mutation.isPending || inFlightRef.current) return;
+    inFlightRef.current = true;
+    mutation.mutate(undefined, {
+      onSettled: () => {
+        inFlightRef.current = false;
+      },
+    });
+  };
+
   const candidateMonths = useMemo(() => buildCandidateGrid(anchor), [anchor]);
 
   // Focus management + ESC + Tab-cycling focus trap per WAI-ARIA modal
@@ -262,7 +273,7 @@ export function EditDefaulterDialog({ rd, lotTimestamp, onClose }: Props) {
             <button
               type="button"
               disabled={saveDisabled}
-              onClick={() => mutation.mutate()}
+              onClick={handleSave}
               className="rounded-pill bg-primary px-4 py-1.5 text-xs font-semibold text-white shadow-card transition-colors hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
             >
               {mutation.isPending ? 'Saving…' : 'Save'}

@@ -112,7 +112,7 @@ app/src/main/java/com/qrscanner/app/
 │       └── Type.kt
 └── util/                    # Utility classes
     ├── XlsxExporter.kt
-    ├── QrPdfExporter.kt     # v8: shared 360pt QR + A4 2x2 grid (replaced PdfGenerator)
+    ├── QrPdfExporter.kt     # v8: shared 360pt QR + A4 1x2 grid (replaced PdfGenerator)
     └── LotImageGenerator.kt
 ```
 

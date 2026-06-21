@@ -53,6 +53,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -114,8 +115,12 @@ fun AccountsScreen(onNavigateBack: () -> Unit) {
     val activeCount by app.database.rdAccountDao().observeActiveCount().collectAsStateWithLifecycle(initialValue = 0)
     val inactiveCount by app.database.rdAccountDao().observeInactiveCount().collectAsStateWithLifecycle(initialValue = 0)
 
-    var searchQuery by remember { mutableStateOf("") }
-    var showInactive by remember { mutableStateOf(false) }
+    // C2-P4 NITPICK saveable filter state: survive rotation + low-mem
+    // process death. Selection state (selectionMode + selectedIds) stays
+    // as plain remember because it's transient gesture state that
+    // shouldn't persist past a process restart.
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var showInactive by rememberSaveable { mutableStateOf(false) }
     var selectionMode by remember { mutableStateOf(false) }
     val selectedIds = remember { mutableStateListOf<String>() }
 

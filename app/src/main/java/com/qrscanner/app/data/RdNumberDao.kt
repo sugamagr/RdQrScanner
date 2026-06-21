@@ -49,7 +49,7 @@ interface RdNumberDao {
     @Query("SELECT * FROM rd_numbers WHERE lotId = :lotId AND deletedAt IS NULL ORDER BY position DESC LIMIT 1")
     suspend fun getMostRecentForLot(lotId: Long): RdNumber?
 
-    @Query("SELECT COALESCE(MAX(position), -1) + 1 FROM rd_numbers WHERE lotId = :lotId")
+    @Query("SELECT COALESCE(MAX(position), -1) + 1 FROM rd_numbers WHERE lotId = :lotId AND deletedAt IS NULL")
     suspend fun getNextPosition(lotId: Long): Int
 
     @Query("""

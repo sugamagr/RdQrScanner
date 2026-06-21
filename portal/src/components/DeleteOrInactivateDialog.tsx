@@ -75,6 +75,33 @@ export function DeleteOrInactivateDialog({ account, onClose }: Props) {
 
   const busy = inactivate.isPending || remove.isPending;
 
+  // P6γ NITPICK mutual-exclusion: the two buttons share the `busy`
+  // flag for the disabled state, but React batches setState so a
+  // rapid Mark-Inactive → Delete click pair can fire BOTH mutations
+  // before isPending propagates to the second button. Synchronous
+  // ref guard short-circuits the second click before any network
+  // call. The mutual exclusion is semantic (you can't both inactivate
+  // AND tombstone a row in the same gesture), not just visual.
+  const inFlightRef = useRef(false);
+  const handleInactivate = () => {
+    if (busy || inFlightRef.current) return;
+    inFlightRef.current = true;
+    inactivate.mutate(undefined, {
+      onSettled: () => {
+        inFlightRef.current = false;
+      },
+    });
+  };
+  const handleDelete = () => {
+    if (busy || inFlightRef.current) return;
+    inFlightRef.current = true;
+    remove.mutate(undefined, {
+      onSettled: () => {
+        inFlightRef.current = false;
+      },
+    });
+  };
+
   return (
     <div
       role="dialog"
@@ -135,7 +162,7 @@ export function DeleteOrInactivateDialog({ account, onClose }: Props) {
         <footer className="flex flex-col gap-3 border-t border-surface-border bg-surface-alt px-5 py-3 sm:flex-row sm:items-center sm:justify-end sm:gap-2">
           <button
             type="button"
-            onClick={() => inactivate.mutate()}
+            onClick={handleInactivate}
             disabled={busy}
             className="inline-flex items-center justify-center gap-1.5 rounded-pill bg-primary px-4 py-1.5 text-xs font-semibold text-white shadow-card transition-colors hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -153,7 +180,7 @@ export function DeleteOrInactivateDialog({ account, onClose }: Props) {
             </button>
             <button
               type="button"
-              onClick={() => remove.mutate()}
+              onClick={handleDelete}
               disabled={busy}
               className="inline-flex items-center gap-1.5 rounded-pill px-3.5 py-1.5 text-xs font-semibold text-danger hover:bg-danger/5 disabled:cursor-not-allowed disabled:opacity-50"
             >
