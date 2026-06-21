@@ -120,15 +120,21 @@ fun HomeScreen(
     val todayLots = todaySessions.sumOf { it.totalLots }
     val todayRdNumbers = todaySessions.sumOf { it.totalRdNumbers }
     
+    // Soft peach-to-white-to-peach gradient under everything. Tokens
+    // derived from the brand palette so a future palette swap doesn't
+    // leave stale hex literals behind. AccentGold alpha 0.06 ~ FFF8F0;
+    // PrimaryOrangeLight alpha 0.12 ~ FFF0E5. Surface center pin
+    // ensures the cards in the middle of the scroll always have a
+    // clean white anchor regardless of scroll position.
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        Color(0xFFFFF8F0),
-                        Color(0xFFFFFFFF),
-                        Color(0xFFFFF0E5)
+                        com.qrscanner.app.ui.theme.AccentGold.copy(alpha = 0.06f),
+                        com.qrscanner.app.ui.theme.SurfaceWhite,
+                        com.qrscanner.app.ui.theme.PrimaryOrangeLight.copy(alpha = 0.12f)
                     )
                 )
             )
@@ -306,7 +312,10 @@ fun HomeScreen(
             
             Spacer(modifier = Modifier.height(14.dp))
             
-            // Secondary Actions — two rows of account + history surfaces.
+            // Each card has a distinct accent color so the three roles
+            // read at a glance — Add (orange) / Accounts (mint) /
+            // Sessions (coral). Don't add a 4th card here without
+            // dropping to a 2-row 2x2 grid; mixing 3 + 1 looks broken.
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -314,8 +323,8 @@ fun HomeScreen(
                 SecondaryActionCard(
                     modifier = Modifier.weight(1f),
                     icon = Icons.Default.PersonAddAlt1,
-                    title = "Add Account",
-                    subtitle = "New RD profiles",
+                    title = "Add",
+                    subtitle = "New account",
                     accentColor = PrimaryOrange,
                     onClick = onNavigateToAddAccounts
                 )
@@ -328,14 +337,7 @@ fun HomeScreen(
                     accentColor = AccentMint,
                     onClick = onNavigateToAccounts
                 )
-            }
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
                 SecondaryActionCard(
                     modifier = Modifier.weight(1f),
                     icon = Icons.Default.History,
@@ -344,10 +346,6 @@ fun HomeScreen(
                     accentColor = AccentCoral,
                     onClick = onNavigateToHistory
                 )
-
-                // Right-side spacer for symmetry; second-row companion
-                // surface (e.g. Diagnostics) lands in Phase 5 backlog.
-                Box(modifier = Modifier.weight(1f))
             }
             
             Spacer(modifier = Modifier.height(24.dp))
@@ -413,7 +411,7 @@ private fun StatDivider() {
         modifier = Modifier
             .width(1.dp)
             .height(40.dp)
-            .background(Color.Gray.copy(alpha = 0.15f))
+            .background(com.qrscanner.app.ui.theme.TextTertiary.copy(alpha = 0.4f))
     )
 }
 

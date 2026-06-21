@@ -156,37 +156,36 @@ fun AddAccountsScreen(
                 ColumnLegend()
             }
             items(items = drafts, key = { it.id }) { draft ->
-                AnimatedVisibility(
-                    visible = true,
-                    enter = fadeIn() + expandVertically(initialHeight = { 0 }) + slideInVertically(initialOffsetY = { -it / 4 }),
-                    exit = fadeOut() + shrinkVertically() + slideOutVertically()
-                ) {
-                    SpreadsheetRow(
-                        draft = draft,
-                        onChange = { updated ->
-                            val idx = drafts.indexOfFirst { it.id == draft.id }
-                            if (idx >= 0) {
-                                drafts[idx] = updated
-                                maintainTrailingEmpty(drafts)
-                            }
-                        },
-                        onRdLookup = { rdNumber, onResult ->
-                            scope.launch {
-                                val hit = if (rdNumber.matches(RD_NUMBER_REGEX)) {
-                                    app.database.rdAccountDao().findByRdNumberIncludingDeleted(rdNumber)
-                                } else null
-                                onResult(
-                                    when {
-                                        hit == null || hit.deletedAt != null -> DupFlag.None
-                                        hit.isActive -> DupFlag.Active(hit.name)
-                                        else -> DupFlag.Inactive(hit.name)
-                                    }
-                                )
-                            }
-                        },
-                        focusManager = focusManager
-                    )
-                }
+                // animateItem() (Compose 1.7+) replaces the broken
+                // AnimatedVisibility(visible=true) — it animates row
+                // additions/removals at the LazyColumn level instead
+                // of inside a no-op visibility wrapper.
+                SpreadsheetRow(
+                    modifier = Modifier.animateItem(),
+                    draft = draft,
+                    onChange = { updated ->
+                        val idx = drafts.indexOfFirst { it.id == draft.id }
+                        if (idx >= 0) {
+                            drafts[idx] = updated
+                            maintainTrailingEmpty(drafts)
+                        }
+                    },
+                    onRdLookup = { rdNumber, onResult ->
+                        scope.launch {
+                            val hit = if (rdNumber.matches(RD_NUMBER_REGEX)) {
+                                app.database.rdAccountDao().findByRdNumberIncludingDeleted(rdNumber)
+                            } else null
+                            onResult(
+                                when {
+                                    hit == null || hit.deletedAt != null -> DupFlag.None
+                                    hit.isActive -> DupFlag.Active(hit.name)
+                                    else -> DupFlag.Inactive(hit.name)
+                                }
+                            )
+                        }
+                    },
+                    focusManager = focusManager
+                )
             }
             item("footer-spacer") {
                 Spacer(modifier = Modifier.height(96.dp))
@@ -212,9 +211,14 @@ fun AddAccountsScreen(
                 if (saving) return@SaveConfirmDialog
                 saving = true
                 scope.launch {
-                    persistAll(app, drafts)
-                    saving = false
-                    onNavigateToAccounts()
+                    try {
+                        persistAll(app, drafts)
+                        onNavigateToAccounts()
+                    } catch (t: Throwable) {
+                        android.util.Log.e("AddAccountsScreen", "persistAll failed", t)
+                    } finally {
+                        saving = false
+                    }
                 }
             },
             onSaveAndQr = {
@@ -222,18 +226,25 @@ fun AddAccountsScreen(
                 if (saving) return@SaveConfirmDialog
                 saving = true
                 scope.launch {
-                    val saved = persistAll(app, drafts)
-                    val uri = QrPdfExporter.generate(context, saved)
-                    if (uri != null) {
-                        val share = Intent(Intent.ACTION_SEND).apply {
-                            type = "application/pdf"
-                            putExtra(Intent.EXTRA_STREAM, uri)
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    try {
+                        val saved = persistAll(app, drafts)
+                        val uri = runCatching { QrPdfExporter.generate(context, saved) }
+                            .onFailure { android.util.Log.e("AddAccountsScreen", "QR PDF gen failed", it) }
+                            .getOrNull()
+                        if (uri != null) {
+                            val share = Intent(Intent.ACTION_SEND).apply {
+                                type = "application/pdf"
+                                putExtra(Intent.EXTRA_STREAM, uri)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            context.startActivity(Intent.createChooser(share, "Share QR PDF"))
                         }
-                        context.startActivity(Intent.createChooser(share, "Share QR PDF"))
+                        onNavigateToAccounts()
+                    } catch (t: Throwable) {
+                        android.util.Log.e("AddAccountsScreen", "Save & Generate QR failed", t)
+                    } finally {
+                        saving = false
                     }
-                    saving = false
-                    onNavigateToAccounts()
                 }
             }
         )
@@ -256,19 +267,44 @@ private suspend fun persistAll(
 ): List<RdAccount> {
     val now = System.currentTimeMillis()
     val out = mutableListOf<RdAccount>()
+    val dao = app.database.rdAccountDao()
     for (d in drafts) {
         if (!d.isFullyValid()) continue
+        val rdNumber = d.rdNumber.trim()
+        val name = d.name.trim()
+        val amount = d.denomination.trim().toInt()
+
+        // Tombstone-resurrect path: if a soft-deleted row exists at
+        // this rdNumber the duplicate-flag check already let us through
+        // (DupFlag.None for deletedAt != null), but a plain insert
+        // would PK-conflict + get swallowed. Resurrect in place so the
+        // user's intent (new name + amount) persists and the cloud
+        // sees a single row transitioning deleted -> alive
+        // (oracle bg_6543c8c7 S4).
+        val tombstone = dao.findByRdNumberIncludingDeleted(rdNumber)
+        if (tombstone != null && tombstone.deletedAt != null) {
+            dao.resurrectTombstone(
+                rdNumber = rdNumber,
+                name = name,
+                monthlyAmount = amount,
+                source = AccountSource.MANUAL.name,
+                updatedAt = now
+            )
+            dao.findByRdNumber(rdNumber)?.let { out += it }
+            continue
+        }
+
         val account = RdAccount(
-            rdNumber = d.rdNumber.trim(),
-            name = d.name.trim(),
-            monthlyAmount = d.denomination.trim().toInt(),
+            rdNumber = rdNumber,
+            name = name,
+            monthlyAmount = amount,
             source = AccountSource.MANUAL,
             isActive = true,
             cloudId = UUID.randomUUID().toString(),
             syncStatus = SyncStatus.DIRTY,
             updatedAt = now
         )
-        runCatching { app.database.rdAccountDao().insert(account) }
+        runCatching { dao.insert(account) }
             .onFailure { android.util.Log.w("AddAccountsScreen", "duplicate ${account.rdNumber}", it) }
         out += account
     }
@@ -372,7 +408,8 @@ private fun SpreadsheetRow(
     draft: AccountDraft,
     onChange: (AccountDraft) -> Unit,
     onRdLookup: (String, (DupFlag) -> Unit) -> Unit,
-    focusManager: androidx.compose.ui.focus.FocusManager
+    focusManager: androidx.compose.ui.focus.FocusManager,
+    modifier: Modifier = Modifier
 ) {
     val nameFr = remember { FocusRequester() }
     val rdFr = remember { FocusRequester() }
@@ -397,7 +434,7 @@ private fun SpreadsheetRow(
     Surface(
         color = CardBackground,
         shape = RoundedCornerShape(14.dp),
-        modifier = Modifier.fillMaxWidth()
+        modifier = modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
             Row(

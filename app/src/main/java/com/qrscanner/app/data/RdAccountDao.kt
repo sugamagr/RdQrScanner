@@ -84,6 +84,12 @@ interface RdAccountDao {
      * Manual-row edit from the Accounts screen edit dialog. Touches
      * name + monthlyAmount + isActive only; the rdNumber PK is locked
      * after creation. Marks DIRTY for sync.
+     *
+     * Resets retryCount = 0 — any pending edit gets a fresh circuit-
+     * breaker window. Without this reset, an account previously
+     * abandoned (retryCount >= PUSH_ABANDON_THRESHOLD) would
+     * immediately re-abandon on its next push failure even after the
+     * user explicitly edited it (oracle bg_6543c8c7 S11).
      */
     @Query(
         """
@@ -92,7 +98,8 @@ interface RdAccountDao {
             monthlyAmount = :monthlyAmount,
             isActive = :isActive,
             updatedAt = :updatedAt,
-            syncStatus = 'DIRTY'
+            syncStatus = 'DIRTY',
+            retryCount = 0
         WHERE rdNumber = :rdNumber AND deletedAt IS NULL
         """
     )
@@ -107,13 +114,15 @@ interface RdAccountDao {
     /**
      * Mark Inactive — sets isActive = 0 + DIRTY for sync push. Does
      * NOT touch accountClosingDate (per user: "they are independent").
+     * Resets retryCount per the editManualRow rationale.
      */
     @Query(
         """
         UPDATE rd_accounts SET
             isActive = 0,
             updatedAt = :updatedAt,
-            syncStatus = 'DIRTY'
+            syncStatus = 'DIRTY',
+            retryCount = 0
         WHERE rdNumber = :rdNumber AND deletedAt IS NULL AND isActive = 1
         """
     )
@@ -124,13 +133,15 @@ interface RdAccountDao {
      *  - Accounts edit dialog when user toggles Active back on
      *  - RDScannerScreen scan-success path when an inactive RD is
      *    scanned (auto-reactivate per user request)
+     * Resets retryCount per the editManualRow rationale.
      */
     @Query(
         """
         UPDATE rd_accounts SET
             isActive = 1,
             updatedAt = :updatedAt,
-            syncStatus = 'DIRTY'
+            syncStatus = 'DIRTY',
+            retryCount = 0
         WHERE rdNumber = :rdNumber AND deletedAt IS NULL AND isActive = 0
         """
     )
@@ -142,18 +153,49 @@ interface RdAccountDao {
      * DIRTY so the push worker propagates `deleted_at` to cloud; the
      * row stays in Room until the next pull confirms the tombstone
      * landed, mirroring the existing session/lot/rd_number delete
-     * pattern.
+     * pattern. retryCount reset per the editManualRow rationale.
      */
     @Query(
         """
         UPDATE rd_accounts SET
             deletedAt = :now,
             updatedAt = :now,
-            syncStatus = 'DIRTY'
+            syncStatus = 'DIRTY',
+            retryCount = 0
         WHERE rdNumber = :rdNumber AND deletedAt IS NULL
         """
     )
     suspend fun softDelete(rdNumber: String, now: Long): Int
+
+    /**
+     * Resurrect a soft-deleted account in place. Called by
+     * AddAccountsScreen when a user adds an account whose rdNumber
+     * matches an existing tombstone — we update in place instead of
+     * INSERT (which would PK-conflict) so the user's intent persists
+     * and the cloud sees a single row transitioning from deleted ->
+     * alive (oracle bg_6543c8c7 S4).
+     */
+    @Query(
+        """
+        UPDATE rd_accounts SET
+            name = :name,
+            monthlyAmount = :monthlyAmount,
+            source = :source,
+            isActive = 1,
+            deletedAt = NULL,
+            updatedAt = :updatedAt,
+            syncStatus = 'DIRTY',
+            retryCount = 0
+        WHERE rdNumber = :rdNumber AND deletedAt IS NOT NULL
+        """
+    )
+    suspend fun resurrectTombstone(
+        rdNumber: String,
+        name: String,
+        monthlyAmount: Int,
+        source: String,
+        updatedAt: Long
+    ): Int
 
     /**
      * Monotonic upsert of [RdAccount.lastPaidThrough] for a single
