@@ -298,25 +298,50 @@ fun DefaulterEditDialog(
 ) {
     val today = remember(anchorTimestamp) { MonthYear.fromEpochMillis(anchorTimestamp) }
 
+    // Initial drafts seeded WITHOUT account memory so the dialog opens
+    // immediately on the row data; the lookup result feeds in later via
+    // a focused state update that preserves operator edits in flight.
+    val initial = remember(numbers) {
+        numbers.associate { it.id to DefaulterRowDraft.fromRow(it, today, null) }
+    }
+    val draft = remember(initial) {
+        mutableStateMapOf<Long, DefaulterRowDraft>().apply { putAll(initial) }
+    }
     val accountMonths = remember(numbers) {
         mutableStateMapOf<String, MonthYear?>().apply {
             numbers.forEach { put(it.number, null) }
         }
     }
+
+    // Look up rd_accounts.lastPaidThrough off the composition thread.
+    // When a result lands, we:
+    //   1. record it in accountMonths (drives the per-row banner)
+    //   2. patch the draft IN PLACE for rows that still match their
+    //      original (operator-untouched) state — preserves in-flight
+    //      edits + re-anchors the auto-suggest for unedited rows.
+    // Critically, we do NOT re-key remember(initial) on accountMonths;
+    // that would wipe the operator's in-progress edits every time a
+    // lookup completed (oracle finding self-sweep A).
     LaunchedEffect(numbers) {
         for (rd in numbers.distinctBy { it.number }) {
             val last = runCatching { accountLastPaidLookup(rd.number) }
                 .onFailure { android.util.Log.w("DefaulterEditDialog", "lookup failed for ${rd.number}", it) }
                 .getOrNull()
             accountMonths[rd.number] = last
+            if (last == null) continue
+            for (row in numbers.filter { it.number == rd.number }) {
+                val current = draft[row.id] ?: continue
+                val original = initial[row.id] ?: continue
+                val untouched = current.count == original.count &&
+                    current.months == original.months
+                if (!untouched) {
+                    draft[row.id] = current.copy(accountLastPaidThrough = last)
+                    continue
+                }
+                val reseeded = DefaulterRowDraft.fromRow(row, today, last)
+                draft[row.id] = reseeded
+            }
         }
-    }
-
-    val initial = remember(numbers, accountMonths.toMap()) {
-        numbers.associate { it.id to DefaulterRowDraft.fromRow(it, today, accountMonths[it.number]) }
-    }
-    val draft = remember(initial) {
-        mutableStateMapOf<Long, DefaulterRowDraft>().apply { putAll(initial) }
     }
     var pendingSkipGap by remember { mutableStateOf<Map<Long, Pair<Int, String?>>?>(null) }
     var skipGapMessage by remember { mutableStateOf<String?>(null) }
@@ -388,7 +413,7 @@ fun DefaulterEditDialog(
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
-                HorizontalDivider(color = Color.Gray.copy(alpha = 0.15f))
+                HorizontalDivider(color = com.qrscanner.app.ui.theme.TextTertiary.copy(alpha = 0.4f))
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Row(
