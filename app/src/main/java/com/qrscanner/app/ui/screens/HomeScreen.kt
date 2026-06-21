@@ -82,38 +82,29 @@ fun HomeScreen(
     val app = context.applicationContext as QRScannerApp
     val completedSessions by app.database.scanSessionDao().getCompletedSessions().collectAsState(initial = emptyList())
 
-    // Sync pill state: derive NOT_SIGNED_IN from CloudClient.sessionStatus
-    // because SyncRepository.summaryFlow only emits states reachable during a
-    // push (it never transitions to NOT_SIGNED_IN itself).
-    val pendingFromDb by app.database.scanSessionDao().observePendingCount()
-        .collectAsState(initial = 0)
+    // Pill state: SyncRepository.summaryFlow is now the single source of truth
+    // for (state, pendingCount). It combines live Room count + lifecycle state
+    // server-side (see SyncRepository.summaryFlow KDoc). HomeScreen only adds
+    // the auth-overlay (NOT_SIGNED_IN/INITIALIZING) which depends on
+    // CloudClient.sessionStatus the repository can't see.
     val sessionStatus by app.cloudClient.sessionStatus.collectAsState(
         initial = CloudSessionStatus.Initializing
     )
     val repoSummary by app.syncRepository.summaryFlow.collectAsState(
         initial = SyncSummary(
             state = SyncPillState.INITIALIZING,
-            pendingCount = pendingFromDb,
+            pendingCount = 0,
             lastSuccessfulPushAt = null,
             lastSuccessfulPullAt = null,
             lastErrorMessage = null
         )
     )
-    val displayedSummary = remember(repoSummary, pendingFromDb, sessionStatus) {
+    val displayedSummary = remember(repoSummary, sessionStatus) {
         when (sessionStatus) {
             is CloudSessionStatus.NotAuthenticated,
             is CloudSessionStatus.RefreshFailure -> repoSummary.copy(state = SyncPillState.NOT_SIGNED_IN)
             is CloudSessionStatus.Initializing -> repoSummary.copy(state = SyncPillState.INITIALIZING)
-            is CloudSessionStatus.Authenticated -> {
-                val pillState = when {
-                    repoSummary.state == SyncPillState.SCHEMA_MISSING -> SyncPillState.SCHEMA_MISSING
-                    repoSummary.state == SyncPillState.SYNCING -> SyncPillState.SYNCING
-                    repoSummary.state == SyncPillState.ERROR -> SyncPillState.ERROR
-                    pendingFromDb > 0 -> SyncPillState.PENDING
-                    else -> SyncPillState.SYNCED
-                }
-                repoSummary.copy(state = pillState, pendingCount = pendingFromDb)
-            }
+            is CloudSessionStatus.Authenticated -> repoSummary
         }
     }
     
@@ -154,13 +145,19 @@ fun HomeScreen(
             // Phase 5 T5.14 (boundary adversarial #1 fix): SCHEMA_MISSING
             // tap kicks an immediate push attempt so the user doesn't have
             // to wait up to 5 minutes after pasting cloud/schema.sql for
-            // the next foreground-poll tick. Other states fall through to
-            // the future diagnostics screen.
+            // the next foreground-poll tick. W3 (oracle bg_1eadd75b)
+            // extends the same handler to ERROR + PENDING so users have
+            // a "do something now" affordance on every actionable state.
+            // SYNCING/SYNCED/INITIALIZING/NOT_SIGNED_IN fall through to
+            // the (future) diagnostics screen.
             val syncScope = rememberCoroutineScope()
             SyncStatusPill(
                 summary = displayedSummary,
                 onTap = {
-                    if (displayedSummary.state == SyncPillState.SCHEMA_MISSING) {
+                    val s = displayedSummary.state
+                    if (s == SyncPillState.SCHEMA_MISSING ||
+                        s == SyncPillState.ERROR ||
+                        s == SyncPillState.PENDING) {
                         syncScope.launch {
                             try { app.syncScheduler.enqueuePush() } catch (_: Throwable) {}
                             try { app.syncScheduler.enqueuePull() } catch (_: Throwable) {}

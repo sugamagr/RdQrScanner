@@ -73,14 +73,25 @@ interface RdNumberDao {
     @Query("SELECT * FROM rd_numbers WHERE syncStatus IN ('DIRTY','SYNC_ERROR') AND lotId = :lotId ORDER BY position ASC")
     suspend fun getDirtyForLot(lotId: Long): List<RdNumber>
 
+    @Query("SELECT * FROM rd_numbers WHERE id = :id LIMIT 1")
+    suspend fun findById(id: Long): RdNumber?
+
     @Query("UPDATE rd_numbers SET syncStatus = 'SYNCING' WHERE id = :id AND syncStatus IN ('DIRTY','SYNC_ERROR')")
     suspend fun markSyncing(id: Long)
 
-    @Query("UPDATE rd_numbers SET syncStatus = 'SYNCED', syncedAt = :syncedAt, cloudId = COALESCE(cloudId, :cloudId), lastSyncError = NULL WHERE id = :id")
+    /** See [ScanSessionDao.stampCloudId]. */
+    @Query("UPDATE rd_numbers SET cloudId = COALESCE(cloudId, :cloudId) WHERE id = :id")
+    suspend fun stampCloudId(id: Long, cloudId: String)
+
+    @Query("UPDATE rd_numbers SET syncStatus = 'SYNCED', syncedAt = :syncedAt, cloudId = COALESCE(cloudId, :cloudId), lastSyncError = NULL, retryCount = 0 WHERE id = :id")
     suspend fun markSynced(id: Long, syncedAt: Long, cloudId: String)
 
-    @Query("UPDATE rd_numbers SET syncStatus = 'SYNC_ERROR', lastSyncError = :error WHERE id = :id")
+    @Query("UPDATE rd_numbers SET syncStatus = 'SYNC_ERROR', lastSyncError = :error, retryCount = retryCount + 1 WHERE id = :id")
     suspend fun markSyncError(id: Long, error: String)
+
+    /** See [ScanSessionDao.markSyncAbandoned]. */
+    @Query("UPDATE rd_numbers SET syncStatus = 'SYNC_ABANDONED' WHERE id = :id")
+    suspend fun markSyncAbandoned(id: Long)
 
     @Query("UPDATE rd_numbers SET syncStatus = 'DIRTY' WHERE syncStatus = 'SYNCING'")
     suspend fun recoverStuckSyncing()

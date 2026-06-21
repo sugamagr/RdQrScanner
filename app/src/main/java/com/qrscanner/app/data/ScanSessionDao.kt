@@ -78,11 +78,35 @@ interface ScanSessionDao {
     @Query("UPDATE scan_sessions SET syncStatus = 'SYNCING' WHERE id = :id AND syncStatus IN ('DIRTY','SYNC_ERROR')")
     suspend fun markSyncing(id: Long)
 
-    @Query("UPDATE scan_sessions SET syncStatus = 'SYNCED', syncedAt = :syncedAt, cloudId = COALESCE(cloudId, :cloudId), lastSyncError = NULL WHERE id = :id")
+    /**
+     * Persists the client-generated cloudId BEFORE the cloud upsert
+     * (oracle bg_0ea195ce R2 / I4). Previously cloudId was only
+     * persisted in [markSynced] after the network call returned, so a
+     * mid-call network failure lost the id; next push regenerated a
+     * fresh UUID, and if the original upsert had actually succeeded
+     * server-side the next push created a DUPLICATE cloud row.
+     *
+     * Idempotent COALESCE prevents stomping an already-persisted id.
+     */
+    @Query("UPDATE scan_sessions SET cloudId = COALESCE(cloudId, :cloudId) WHERE id = :id")
+    suspend fun stampCloudId(id: Long, cloudId: String)
+
+    @Query("UPDATE scan_sessions SET syncStatus = 'SYNCED', syncedAt = :syncedAt, cloudId = COALESCE(cloudId, :cloudId), lastSyncError = NULL, retryCount = 0 WHERE id = :id")
     suspend fun markSynced(id: Long, syncedAt: Long, cloudId: String)
 
-    @Query("UPDATE scan_sessions SET syncStatus = 'SYNC_ERROR', lastSyncError = :error WHERE id = :id")
+    @Query("UPDATE scan_sessions SET syncStatus = 'SYNC_ERROR', lastSyncError = :error, retryCount = retryCount + 1 WHERE id = :id")
     suspend fun markSyncError(id: Long, error: String)
+
+    /**
+     * Circuit breaker (oracle R3): a row whose push has failed
+     * [SyncRepository.PUSH_ABANDON_THRESHOLD] times is structurally
+     * unpushable (cloud schema drift, FK constraint we can't satisfy,
+     * etc.). Flip it to [SyncStatus.SYNC_ABANDONED] so it stops being
+     * counted as pending, stops being re-promoted, and stops being
+     * retried until a user clears it manually from the diagnostics screen.
+     */
+    @Query("UPDATE scan_sessions SET syncStatus = 'SYNC_ABANDONED' WHERE id = :id")
+    suspend fun markSyncAbandoned(id: Long)
 
     /**
      * Reverts any session left in SYNCING after a worker was killed
@@ -286,14 +310,25 @@ interface ScanLotDao {
     @Query("SELECT * FROM scan_lots WHERE syncStatus IN ('DIRTY','SYNC_ERROR') AND sessionId = :sessionId ORDER BY lotNumber ASC")
     suspend fun getDirtyForSession(sessionId: Long): List<ScanLot>
 
+    @Query("SELECT * FROM scan_lots WHERE id = :id LIMIT 1")
+    suspend fun findById(id: Long): ScanLot?
+
     @Query("UPDATE scan_lots SET syncStatus = 'SYNCING' WHERE id = :id AND syncStatus IN ('DIRTY','SYNC_ERROR')")
     suspend fun markSyncing(id: Long)
 
-    @Query("UPDATE scan_lots SET syncStatus = 'SYNCED', syncedAt = :syncedAt, cloudId = COALESCE(cloudId, :cloudId), lastSyncError = NULL WHERE id = :id")
+    /** See [ScanSessionDao.stampCloudId]. */
+    @Query("UPDATE scan_lots SET cloudId = COALESCE(cloudId, :cloudId) WHERE id = :id")
+    suspend fun stampCloudId(id: Long, cloudId: String)
+
+    @Query("UPDATE scan_lots SET syncStatus = 'SYNCED', syncedAt = :syncedAt, cloudId = COALESCE(cloudId, :cloudId), lastSyncError = NULL, retryCount = 0 WHERE id = :id")
     suspend fun markSynced(id: Long, syncedAt: Long, cloudId: String)
 
-    @Query("UPDATE scan_lots SET syncStatus = 'SYNC_ERROR', lastSyncError = :error WHERE id = :id")
+    @Query("UPDATE scan_lots SET syncStatus = 'SYNC_ERROR', lastSyncError = :error, retryCount = retryCount + 1 WHERE id = :id")
     suspend fun markSyncError(id: Long, error: String)
+
+    /** See [ScanSessionDao.markSyncAbandoned]. */
+    @Query("UPDATE scan_lots SET syncStatus = 'SYNC_ABANDONED' WHERE id = :id")
+    suspend fun markSyncAbandoned(id: Long)
 
     @Query("UPDATE scan_lots SET syncStatus = 'DIRTY' WHERE syncStatus = 'SYNCING'")
     suspend fun recoverStuckSyncing()

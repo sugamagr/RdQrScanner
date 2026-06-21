@@ -103,7 +103,10 @@ data class RdNumber(
      * row until after the tombstone is acknowledged by cloud, otherwise
      * we'd lose the cloudId and the deletion wouldn't propagate.
      */
-    val deletedAt: Long? = null
+    val deletedAt: Long? = null,
+
+    /** See [ScanSession.retryCount]. */
+    val retryCount: Int = 0
 ) {
     companion object {
         const val MONTHS_MIN = 1

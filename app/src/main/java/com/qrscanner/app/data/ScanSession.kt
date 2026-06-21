@@ -46,7 +46,17 @@ data class ScanSession(
     val updatedAt: Long = System.currentTimeMillis(),
     val syncedAt: Long? = null,
     val lastSyncError: String? = null,
-    val deletedAt: Long? = null
+    val deletedAt: Long? = null,
+
+    /**
+     * Consecutive push failure count. Incremented on each
+     * [SyncStatus.SYNC_ERROR] transition, reset to 0 on
+     * [SyncStatus.SYNCED]. When the value hits
+     * [com.qrscanner.app.data.sync.SyncRepository.PUSH_ABANDON_THRESHOLD]
+     * the row flips to [SyncStatus.SYNC_ABANDONED] and stops retrying
+     * (oracle bg_0ea195ce R3 / I6).
+     */
+    val retryCount: Int = 0
 )
 
 @Entity(
@@ -73,7 +83,10 @@ data class ScanLot(
     val updatedAt: Long = System.currentTimeMillis(),
     val syncedAt: Long? = null,
     val lastSyncError: String? = null,
-    val deletedAt: Long? = null
+    val deletedAt: Long? = null,
+
+    /** See [ScanSession.retryCount]. */
+    val retryCount: Int = 0
 )
 
 // Validation helper

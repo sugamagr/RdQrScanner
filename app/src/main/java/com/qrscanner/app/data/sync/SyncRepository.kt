@@ -18,7 +18,8 @@ import com.qrscanner.app.data.SyncStatus
 import com.qrscanner.app.notifications.SyncNotifier
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.UUID
@@ -67,7 +68,34 @@ class SyncRepository(
         )
     )
 
-    val summaryFlow: Flow<SyncSummary> = mutableSummary.asStateFlow()
+    /**
+     * State machine invariant (oracle bg_0ea195ce R1, R4, I9):
+     *
+     * The pill pendingCount + derived state are produced by combining:
+     *  - mutableSummary: lifecycle-controlled fields (last*At, error msg,
+     *    transient SYNCING/ERROR/SCHEMA_MISSING/INITIALIZING states),
+     *  - sessionDao.observePendingCount(): the LIVE row count from Room
+     *    of DIRTY/SYNC_ERROR/non-active sessions.
+     *
+     * Pill state derivation is centralized here so HomeScreen no longer
+     * has to combine two independent data sources (which raced — the
+     * old logic could show PENDING because the Room Flow emitted faster
+     * than the post-push state reset, even though the DB had nothing
+     * left to push).
+     *
+     * Priority order:
+     *  1. NOT_SIGNED_IN / Initializing — driven externally by HomeScreen
+     *     via CloudSessionStatus; we only emit it when set by callers
+     *  2. SCHEMA_MISSING — blocking setup state, beats live count
+     *  3. SYNCING — transient mid-cycle marker
+     *  4. ERROR — full-fail; partial-success uses PENDING per d1d13fc
+     *  5. liveCount > 0 -> PENDING
+     *  6. else -> SYNCED
+     */
+    val summaryFlow: Flow<SyncSummary> =
+        combine(mutableSummary, sessionDao.observePendingCount()) { summary, liveCount ->
+            derivePillSummary(summary, liveCount)
+        }.distinctUntilChanged()
 
     /**
      * Promotes a just-finalized session subtree from LOCAL_ONLY to DIRTY,
@@ -250,6 +278,15 @@ class SyncRepository(
             } catch (e: Throwable) {
                 if (firstError == null) firstError = e
                 sessionDao.markSyncError(sess.id, e.message ?: e.toString())
+                // R3 circuit breaker — see pushRdNumber catch.
+                val currentSess = sessionDao.getSessionById(sess.id)
+                if (currentSess != null && currentSess.retryCount >= PUSH_ABANDON_THRESHOLD) {
+                    sessionDao.markSyncAbandoned(sess.id)
+                    android.util.Log.w(
+                        "SyncRepository",
+                        "scan_session ${sess.id} abandoned after ${currentSess.retryCount} push failures"
+                    )
+                }
                 continue
             }
 
@@ -376,6 +413,14 @@ class SyncRepository(
             if (shouldNotify) {
                 runCatching { notifier.notifySyncError(remaining) }
             }
+            // R5 (oracle bg_1eadd75b BLOCKER): clear any stale
+            // 'Sync paused' tray notification on partial recovery. The
+            // user just got fresh per-session success notifications;
+            // leaving a contradicting error notification next to them
+            // is the exact UX bug d1d13fc fixed at the pill level.
+            if (pushedSessionCount > 0) {
+                runCatching { notifier.clearSyncError() }
+            }
             Result.failure(firstError)
         } else {
             updateSummary {
@@ -443,6 +488,8 @@ class SyncRepository(
         val cloudId = sess.cloudId ?: throw IllegalStateException(
             "session ${sess.id} reached push without cloudId — finalize path didn't stamp it"
         )
+        // Sessions already have cloudId at finalize time; the call is a
+        // no-op here. Lots + rd_numbers below stamp before upsert per R2.
         sessionDao.markSyncing(sess.id)
         val dto = SessionMapper.toDto(sess).copy(ownerId = ownerId)
         val result = cloudClient.upsertSession(dto)
@@ -468,6 +515,15 @@ class SyncRepository(
                 throw e
             } catch (e: Throwable) {
                 lotDao.markSyncError(lot.id, e.message ?: e.toString())
+                // R3 circuit breaker — see pushRdNumber catch.
+                val current = lotDao.findById(lot.id)
+                if (current != null && current.retryCount >= PUSH_ABANDON_THRESHOLD) {
+                    lotDao.markSyncAbandoned(lot.id)
+                    android.util.Log.w(
+                        "SyncRepository",
+                        "scan_lot ${lot.id} abandoned after ${current.retryCount} push failures"
+                    )
+                }
                 throw e
             }
         }
@@ -476,6 +532,10 @@ class SyncRepository(
 
     private suspend fun pushLot(lot: ScanLot, sessionCloudId: String, ownerId: String): String {
         val cloudId = lot.cloudId ?: UUID.randomUUID().toString()
+        // R2: persist cloudId BEFORE the cloud call. If we crash or lose
+        // the network between upsert and markSynced, the next push reuses
+        // this same cloudId — preventing a duplicate cloud row.
+        if (lot.cloudId == null) lotDao.stampCloudId(lot.id, cloudId)
         lotDao.markSyncing(lot.id)
         val dto = LotMapper.toDto(lot.copy(cloudId = cloudId), sessionCloudId).copy(ownerId = ownerId)
         cloudClient.upsertLot(dto)
@@ -509,6 +569,8 @@ class SyncRepository(
         editorDeviceCloudId: String?
     ): Boolean {
         val cloudId = rd.cloudId ?: UUID.randomUUID().toString()
+        // R2: persist cloudId BEFORE the cloud call (see pushLot).
+        if (rd.cloudId == null) rdNumberDao.stampCloudId(rd.id, cloudId)
         rdNumberDao.markSyncing(rd.id)
         return try {
             val dto = RdNumberMapper
@@ -522,6 +584,18 @@ class SyncRepository(
             throw e
         } catch (e: Throwable) {
             rdNumberDao.markSyncError(rd.id, e.message ?: e.toString())
+            // R3 circuit breaker — read fresh retryCount after the
+            // increment in markSyncError. If we've hit the cap, flip to
+            // SYNC_ABANDONED so promoteSessionsWithDirtyChildren stops
+            // re-promoting the parent forever.
+            val current = rdNumberDao.findByCloudId(cloudId) ?: rdNumberDao.findById(rd.id)
+            if (current != null && current.retryCount >= PUSH_ABANDON_THRESHOLD) {
+                rdNumberDao.markSyncAbandoned(rd.id)
+                android.util.Log.w(
+                    "SyncRepository",
+                    "rd_number ${rd.id} abandoned after ${current.retryCount} push failures"
+                )
+            }
             false
         }
     }
@@ -588,7 +662,21 @@ class SyncRepository(
                     timestamp = System.currentTimeMillis(),
                     error = e.message ?: e.toString()
                 )
-                updateSummary { it.copy(lastErrorMessage = e.message ?: e.toString()) }
+                // W2 (oracle bg_1eadd75b): on pull failure, surface the
+                // problem via the pill instead of silently leaving the
+                // user on "All synced" while the pull is actually
+                // broken. Push state takes precedence (ERROR/PENDING
+                // already mean attention-needed); only escalate when
+                // push state was SYNCED/INITIALIZING — the pre-W2 path
+                // hid pull errors when there were no pending pushes.
+                updateSummary {
+                    val nextState = when (it.state) {
+                        SyncPillState.SYNCED,
+                        SyncPillState.INITIALIZING -> SyncPillState.ERROR
+                        else -> it.state
+                    }
+                    it.copy(state = nextState, lastErrorMessage = e.message ?: e.toString())
+                }
                 return Result.failure(e)
             }
 
@@ -622,17 +710,14 @@ class SyncRepository(
 
         val now = System.currentTimeMillis()
         updateSummary {
-            // Pull success means cloud is reachable + auth works. Reset
-            // any stale ERROR/SCHEMA_MISSING that a prior push failure left
-            // behind so the pill reflects current reality. If pending push
-            // work still exists, the next push cycle will re-set ERROR
-            // immediately on failure; the brief SYNCED window in between
-            // is the eventually-consistent UI behavior we want.
-            val nextState = when {
-                it.pendingCount > 0 -> SyncPillState.PENDING
-                else -> SyncPillState.SYNCED
-            }
-            it.copy(state = nextState, lastSuccessfulPullAt = now, lastErrorMessage = null)
+            // R4 (oracle bg_0ea195ce): set state to SYNCED so the
+            // downstream summaryFlow.combine derives the final pill
+            // value (SYNCED / PENDING) from the LIVE observePendingCount
+            // Flow rather than this snapshot's stale it.pendingCount.
+            // Pull success means cloud is reachable + auth works, so
+            // also clear any stale ERROR/SCHEMA_MISSING/lastErrorMessage
+            // from a prior push failure.
+            it.copy(state = SyncPillState.SYNCED, lastSuccessfulPullAt = now, lastErrorMessage = null)
         }
         notifyRemoteEdits(allNotices)
         return Result.success(Unit)
@@ -904,6 +989,36 @@ class SyncRepository(
     }
 
     companion object {
+        /**
+         * Pure state-machine derivation function — extracted from the
+         * summaryFlow combine block so it can be invariant-tested without
+         * spinning up Room/coroutines (see SyncStateMachineTest).
+         *
+         * Priority order (must match summaryFlow KDoc):
+         *  1. NOT_SIGNED_IN  — auth overlay
+         *  2. INITIALIZING   — auth bootstrap
+         *  3. SCHEMA_MISSING — blocking setup; beats live count
+         *  4. SYNCING        — transient mid-cycle
+         *  5. ERROR          — full-fail (partial uses PENDING per d1d13fc)
+         *  6. liveCount > 0  -> PENDING
+         *  7. else           -> SYNCED
+         *
+         * pendingCount is overridden from the live DB count so the pill
+         * always shows the truth, never the snapshot (oracle R4).
+         */
+        fun derivePillSummary(summary: SyncSummary, liveCount: Int): SyncSummary {
+            val derived = when (summary.state) {
+                SyncPillState.NOT_SIGNED_IN,
+                SyncPillState.INITIALIZING,
+                SyncPillState.SCHEMA_MISSING,
+                SyncPillState.SYNCING,
+                SyncPillState.ERROR -> summary.state
+                SyncPillState.PENDING,
+                SyncPillState.SYNCED -> if (liveCount > 0) SyncPillState.PENDING else SyncPillState.SYNCED
+            }
+            return summary.copy(state = derived, pendingCount = liveCount)
+        }
+
         private const val ERROR_NOTIFY_THRESHOLD = 3
         private const val ERROR_NOTIFY_REFIRE_EVERY = 6
         // Phase 5 T5.4: hard upper bound on drain-loop iterations. With
@@ -911,5 +1026,15 @@ class SyncRepository(
         // exceeds any realistic shop's data set. If a runaway cursor ever
         // hit this we'd want to log + bail out rather than spin.
         private const val MAX_DRAIN_PAGES = 20
+
+        /**
+         * Oracle bg_0ea195ce R3 / I6 — after this many consecutive push
+         * failures on the same row, flip to [SyncStatus.SYNC_ABANDONED]
+         * to break the infinite promote → fail → re-promote loop. 8
+         * matches the WorkManager exponential backoff plateau (≈ 4h),
+         * so a row that's failed 8 times in real-world cadence is
+         * structurally broken, not just flaky-network.
+         */
+        const val PUSH_ABANDON_THRESHOLD = 8
     }
 }

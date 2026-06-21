@@ -79,5 +79,27 @@ enum class SyncStatus {
      * BackoffPolicy.EXPONENTIAL, 30s initial, capped at 4h) until the
      * push succeeds or the user signs out.
      */
-    SYNC_ERROR
+    SYNC_ERROR,
+
+    /**
+     * Permanently failed after exceeding the retry cap (currently 8
+     * consecutive push failures, see [SyncRepository.PUSH_ABANDON_THRESHOLD]).
+     *
+     * Oracle bg_0ea195ce R3 / I6 — without this, a row whose cloud-side
+     * write is structurally impossible (cloud schema drift, FK constraint
+     * the local row will never satisfy, etc.) creates an infinite DIRTY
+     * promotion loop:
+     *
+     *   1. `promoteSessionsWithDirtyChildren` re-promotes the parent
+     *      session to DIRTY every push cycle (the child stays SYNC_ERROR).
+     *   2. Parent push succeeds (idempotent upsert).
+     *   3. Child push fails again, parent re-marked SYNC_ERROR.
+     *   4. Pill stuck PENDING/ERROR forever.
+     *
+     * Rows in this state are EXCLUDED from `getDirtyForPush`,
+     * `observePendingCount`, and `promoteSessionsWithDirtyChildren`.
+     * They surface only in the diagnostics screen for manual intervention
+     * (clear-and-rescan, or contact support).
+     */
+    SYNC_ABANDONED
 }
