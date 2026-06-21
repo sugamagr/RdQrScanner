@@ -83,18 +83,41 @@ export function EditDefaulterDialog({ rd, lotTimestamp, onClose }: Props) {
 
   const candidateMonths = useMemo(() => buildCandidateGrid(anchor), [anchor]);
 
-  // Focus management + ESC handling per WAI-ARIA modal pattern. Remembers
-  // the element that opened the dialog so focus returns there on close
-  // (Wave 2 oracle finding bg_53bf3b2b W1).
+  // Focus management + ESC + Tab-cycling focus trap per WAI-ARIA modal
+  // pattern. Wave 2 oracle finding bg_53bf3b2b W1 + Phase 5 F10:
+  //  - remembers the opener so focus returns on close
+  //  - traps Tab/Shift+Tab inside the dialog (F10 — Tab walking out of
+  //    a modal is a long-standing a11y bug; screen readers + keyboard
+  //    users get lost)
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
     closeBtnRef.current?.focus();
+    const focusableSelector =
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
         onClose();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const root = dialogRef.current;
+      if (!root) return;
+      const focusables = Array.from(
+        root.querySelectorAll<HTMLElement>(focusableSelector)
+      ).filter((el) => el.offsetParent !== null);
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
       }
     };
     window.addEventListener('keydown', onKey);
@@ -117,7 +140,7 @@ export function EditDefaulterDialog({ rd, lotTimestamp, onClose }: Props) {
     >
       <div
         ref={dialogRef}
-        className="w-full max-w-lg overflow-hidden rounded-t-2xl bg-surface shadow-elevated sm:rounded-2xl"
+        className="flex max-h-[100dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl bg-surface shadow-elevated sm:max-h-[90dvh] sm:rounded-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="border-b border-surface-border px-5 py-4">
@@ -132,7 +155,7 @@ export function EditDefaulterDialog({ rd, lotTimestamp, onClose }: Props) {
           </h2>
         </header>
 
-        <div className="space-y-5 px-5 py-5">
+        <div className="flex-1 space-y-5 overflow-y-auto px-5 py-5">
           <div>
             <div className="flex items-center justify-between">
               <label
@@ -164,11 +187,14 @@ export function EditDefaulterDialog({ rd, lotTimestamp, onClose }: Props) {
             <div>
               <p className="text-xs font-medium text-ink-secondary">Which months?</p>
               <p className="mt-0.5 text-[11px] text-ink-muted">
-                Past and future months around the LOT date. Pick {monthsPaid} —
-                currently {selected.length}/{monthsPaid}. The LOT month is
-                outlined.
+                Newest at top, older below. The LOT month is outlined. Pick
+                {' '}{monthsPaid} — currently {selected.length}/{monthsPaid}.
               </p>
-              <div className="mt-3 grid max-h-56 grid-cols-3 gap-1.5 overflow-y-auto sm:grid-cols-4">
+              <div className="mt-3 flex items-center justify-between text-[10px] uppercase tracking-wider text-ink-muted">
+                <span>Future</span>
+                <span>Past →</span>
+              </div>
+              <div className="mt-2 grid max-h-56 grid-cols-3 gap-1.5 overflow-y-auto sm:grid-cols-4">
                 {candidateMonths.map((cand) => {
                   const picked = selected.some(
                     (m) => m.year === cand.year && m.month === cand.month
