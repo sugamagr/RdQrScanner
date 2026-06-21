@@ -1,6 +1,8 @@
 import { supabase } from './supabase';
 import type {
+  AccountSource,
   DeviceRow,
+  RdAccountRow,
   RdNumberRow,
   ScanLotRow,
   ScanSessionRow,
@@ -189,4 +191,119 @@ export async function searchRdNumbers(query: string): Promise<RdSearchHit[]> {
     });
   }
   return hits;
+}
+
+/**
+ * Fetch all rd_accounts visible to the signed-in owner. RLS does the
+ * scoping; we filter `deleted_at IS NULL` client-side because Postgres
+ * tombstone rows can still arrive via realtime echo before the client
+ * cache reconciles. Sorted by lower(name) to match phone-side ordering.
+ */
+export async function fetchAccounts(): Promise<RdAccountRow[]> {
+  const { data, error } = await supabase
+    .from('rd_accounts')
+    .select('*')
+    .is('deleted_at', null)
+    .order('name', { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as RdAccountRow[];
+}
+
+export async function updateAccount(params: {
+  rdNumber: string;
+  name: string;
+  monthlyAmount: number;
+  isActive: boolean;
+}): Promise<void> {
+  const { rdNumber, name, monthlyAmount, isActive } = params;
+  const { error } = await supabase
+    .from('rd_accounts')
+    .update({
+      name,
+      monthly_amount: monthlyAmount,
+      is_active: isActive,
+      last_editor_device_id: null,
+    })
+    .eq('rd_number', rdNumber);
+  if (error) throw error;
+}
+
+export async function markAccountInactive(rdNumber: string): Promise<void> {
+  const { error } = await supabase
+    .from('rd_accounts')
+    .update({ is_active: false, last_editor_device_id: null })
+    .eq('rd_number', rdNumber);
+  if (error) throw error;
+}
+
+export async function reactivateAccount(rdNumber: string): Promise<void> {
+  const { error } = await supabase
+    .from('rd_accounts')
+    .update({ is_active: true, last_editor_device_id: null })
+    .eq('rd_number', rdNumber);
+  if (error) throw error;
+}
+
+export async function softDeleteAccount(rdNumber: string): Promise<void> {
+  const { error } = await supabase
+    .from('rd_accounts')
+    .update({ deleted_at: new Date().toISOString(), last_editor_device_id: null })
+    .eq('rd_number', rdNumber);
+  if (error) throw error;
+}
+
+export interface BulkAccountInput {
+  rdNumber: string;
+  name: string;
+  monthlyAmount: number;
+}
+
+export interface BulkUpsertResult {
+  inserted: number;
+  updated: number;
+  failed: number;
+  errors: Array<{ rdNumber: string; message: string }>;
+}
+
+/**
+ * CSV bulk upload write path. Sends each row as a separate upsert
+ * because PostgREST's array upsert returns the entire merged set and
+ * we want per-row error reporting. For ~few-hundred-row uploads (user
+ * spec) this is acceptable; if the volume grows, batch via .upsert
+ * with a single array call and trade granular errors for throughput.
+ *
+ * All rows are stamped source = 'CSV' + is_active = true +
+ * last_editor_device_id = null so the phone-side attribution renders
+ * 'Portal' for the next pull.
+ */
+export async function bulkUpsertAccounts(
+  rows: BulkAccountInput[],
+  ownerId: string
+): Promise<BulkUpsertResult> {
+  const result: BulkUpsertResult = { inserted: 0, updated: 0, failed: 0, errors: [] };
+  for (const row of rows) {
+    const payload = {
+      rd_number: row.rdNumber,
+      owner_id: ownerId,
+      name: row.name,
+      monthly_amount: row.monthlyAmount,
+      source: 'CSV' as AccountSource,
+      is_active: true,
+      last_editor_device_id: null,
+    };
+    const { error } = await supabase
+      .from('rd_accounts')
+      .upsert(payload, { onConflict: 'owner_id,rd_number' });
+    if (error) {
+      result.failed++;
+      result.errors.push({ rdNumber: row.rdNumber, message: error.message });
+    } else {
+      // PostgREST upsert doesn't expose insert-vs-update distinction
+      // without an extra SELECT round-trip; treat all successes as
+      // "inserted" for the post-import toast. The portal owner cares
+      // about "did it land in cloud?", not the SQL verb.
+      result.inserted++;
+    }
+  }
+  return result;
 }

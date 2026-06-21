@@ -60,3 +60,26 @@ export interface RdNumberRow {
 export interface SessionWithDevice extends ScanSessionRow {
   device: Pick<DeviceRow, 'id' | 'device_name'> | null;
 }
+
+/**
+ * Customer-account profile (rd_accounts table). Composite PK is
+ * (owner_id, rd_number) cloud-side; the portal never sees other
+ * owners' rows due to RLS so we treat rd_number as the visible key.
+ */
+export type AccountSource = 'MANUAL' | 'CSV';
+
+export interface RdAccountRow {
+  rd_number: string;
+  owner_id: string;
+  name: string;
+  monthly_amount: number;
+  last_paid_through: string | null;
+  source: AccountSource;
+  is_active: boolean;
+  account_opened_date: string | null;
+  account_closing_date: string | null;
+  last_editor_device_id: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}

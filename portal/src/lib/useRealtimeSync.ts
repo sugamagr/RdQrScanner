@@ -66,6 +66,13 @@ export function useRealtimeSync(): void {
           qc.invalidateQueries({ queryKey: ['devices'] });
         }
       )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'rd_accounts' },
+        () => {
+          qc.invalidateQueries({ queryKey: ['accounts'] });
+        }
+      )
       .subscribe();
 
     return () => {
