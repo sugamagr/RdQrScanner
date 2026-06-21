@@ -1179,6 +1179,11 @@ private fun RDCameraScreen(
                 numbers = defaulterRows,
                 anchorTimestamp = defaulterLotTimestamp.takeIf { it > 0 }
                     ?: System.currentTimeMillis(),
+                accountLastPaidLookup = { rdNumber ->
+                    app.database.rdAccountDao().findByRdNumber(rdNumber)
+                        ?.lastPaidThrough
+                        ?.let { com.qrscanner.app.util.MonthYear.parseToken(it) }
+                },
                 onDismiss = {
                     showDefaulterEditDialog = false
                     defaulterLotId = null

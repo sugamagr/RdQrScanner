@@ -78,12 +78,24 @@ import kotlinx.coroutines.delay
  * Per-row edit state captured by [DefaulterEditDialog].
  *
  * Invariant: `months.size == count`. Mutations go through [withCount] /
- * [withMonths] / [shiftWindow] / [swapMonth] so the invariant is impossible
- * to violate from the caller side.
+ * [shiftWindow] / [swapMonth] so the invariant is impossible to violate
+ * from the caller side.
+ *
+ * `accountLastPaidThrough` is the YYYY-MM month parsed from the matching
+ * [com.qrscanner.app.data.RdAccount.lastPaidThrough] (null when the row's
+ * RD number has no account profile, or the account has never been paid).
+ * Drives two pieces of UX:
+ *   - auto-suggest: when the row has no stored monthsList, the block
+ *     anchors at nextMonth(lastPaidThrough) instead of LOT date
+ *   - banner: a small "Last paid: through Aug 2025" strip above the
+ *     chip strip when non-null
+ *   - skip-gap detection: Save fires a confirm modal if the block's
+ *     oldest month is strictly later than nextMonth(lastPaidThrough)
  */
 data class DefaulterRowDraft(
     val count: Int,
-    val months: List<MonthYear>
+    val months: List<MonthYear>,
+    val accountLastPaidThrough: MonthYear? = null
 ) {
     fun withCount(newCount: Int, today: MonthYear = MonthYear.current()): DefaulterRowDraft {
         val safe = newCount.coerceIn(RdNumber.MONTHS_MIN, RdNumber.MONTHS_MAX)
@@ -141,10 +153,59 @@ data class DefaulterRowDraft(
 
     fun encodeOrNull(): String? = if (count <= 1) null else MonthYear.encodeList(months)
 
+    /**
+     * The block's oldest month — i.e. the month the operator says
+     * payment STARTED. With the contiguous-block sequential rule, this
+     * is the last element of [months] (newest-first ordering).
+     */
+    fun blockStart(): MonthYear? = months.lastOrNull()
+
+    /**
+     * True iff this row would skip months between
+     * `nextMonth(accountLastPaidThrough)` and [blockStart]. Returns
+     * false if there's no account profile or no stored last-paid month
+     * (no baseline to detect a skip against).
+     */
+    fun skipsMonthsAfterLastPaid(): List<MonthYear> {
+        val lastPaid = accountLastPaidThrough ?: return emptyList()
+        val start = blockStart() ?: return emptyList()
+        val expectedStart = lastPaid.plusOneMonth()
+        if (start <= expectedStart) return emptyList()
+        // Walk forward from expectedStart until reaching start (exclusive)
+        val skipped = mutableListOf<MonthYear>()
+        var cursor = expectedStart
+        while (cursor < start) {
+            skipped += cursor
+            cursor = cursor.plusOneMonth()
+        }
+        return skipped
+    }
+
     companion object {
-        fun fromRow(row: RdNumber, today: MonthYear = MonthYear.current()): DefaulterRowDraft {
-            val resolved = MonthYear.resolveOrAuto(row.monthsList, row.monthsPaid, today)
-            return DefaulterRowDraft(row.monthsPaid, resolved)
+        /**
+         * Builds a row draft for an existing [RdNumber] scan. When the
+         * row has no stored `monthsList` (operator hasn't picked yet)
+         * AND we have a matching account profile with a known
+         * `lastPaidThrough`, anchor the auto-window at the next month
+         * after that (prepayment-aware default). Otherwise fall back to
+         * the LOT-date anchor.
+         */
+        fun fromRow(
+            row: RdNumber,
+            today: MonthYear = MonthYear.current(),
+            accountLastPaidThrough: MonthYear? = null
+        ): DefaulterRowDraft {
+            val resolvedAnchor = when {
+                row.monthsList != null -> today
+                accountLastPaidThrough != null -> accountLastPaidThrough.plusOneMonth()
+                else -> today
+            }
+            val resolved = MonthYear.resolveOrAuto(row.monthsList, row.monthsPaid, resolvedAnchor)
+            return DefaulterRowDraft(
+                count = row.monthsPaid,
+                months = resolved,
+                accountLastPaidThrough = accountLastPaidThrough
+            )
         }
     }
 }
@@ -232,15 +293,33 @@ fun DefaulterEditDialog(
     numbers: List<RdNumber>,
     anchorTimestamp: Long,
     onDismiss: () -> Unit,
-    onSave: (changes: Map<Long, Pair<Int, String?>>) -> Unit
+    onSave: (changes: Map<Long, Pair<Int, String?>>) -> Unit,
+    accountLastPaidLookup: suspend (String) -> MonthYear? = { null }
 ) {
     val today = remember(anchorTimestamp) { MonthYear.fromEpochMillis(anchorTimestamp) }
-    val initial = remember(numbers) {
-        numbers.associate { it.id to DefaulterRowDraft.fromRow(it, today) }
+
+    val accountMonths = remember(numbers) {
+        mutableStateMapOf<String, MonthYear?>().apply {
+            numbers.forEach { put(it.number, null) }
+        }
+    }
+    LaunchedEffect(numbers) {
+        for (rd in numbers.distinctBy { it.number }) {
+            val last = runCatching { accountLastPaidLookup(rd.number) }
+                .onFailure { android.util.Log.w("DefaulterEditDialog", "lookup failed for ${rd.number}", it) }
+                .getOrNull()
+            accountMonths[rd.number] = last
+        }
+    }
+
+    val initial = remember(numbers, accountMonths.toMap()) {
+        numbers.associate { it.id to DefaulterRowDraft.fromRow(it, today, accountMonths[it.number]) }
     }
     val draft = remember(initial) {
         mutableStateMapOf<Long, DefaulterRowDraft>().apply { putAll(initial) }
     }
+    var pendingSkipGap by remember { mutableStateOf<Map<Long, Pair<Int, String?>>?>(null) }
+    var skipGapMessage by remember { mutableStateOf<String?>(null) }
 
     val changedCount = numbers.count { rd ->
         val original = initial[rd.id] ?: return@count false
@@ -332,7 +411,25 @@ fun DefaulterEditDialog(
                                 if (after.count == before.count && after.months == before.months) return@mapNotNull null
                                 rd.id to (after.count to after.encodeOrNull())
                             }.toMap()
-                            onSave(changes)
+                            // Skip-gap detection per user spec: if any
+                            // changed row has block_start > nextMonth(
+                            // lastPaidThrough), surface a confirm modal
+                            // listing the gap months. Operator can
+                            // override (paper book is truth).
+                            val gapNotices = numbers.mapNotNull { rd ->
+                                val after = draft[rd.id] ?: return@mapNotNull null
+                                if (after.count <= 1) return@mapNotNull null
+                                if (!changes.containsKey(rd.id)) return@mapNotNull null
+                                val skipped = after.skipsMonthsAfterLastPaid()
+                                if (skipped.isEmpty()) null
+                                else rd.number to skipped
+                            }
+                            if (gapNotices.isNotEmpty()) {
+                                skipGapMessage = buildSkipGapMessage(gapNotices)
+                                pendingSkipGap = changes
+                            } else {
+                                onSave(changes)
+                            }
                         },
                         modifier = Modifier.weight(2f),
                         colors = ButtonDefaults.buttonColors(containerColor = PrimaryOrange),
@@ -364,6 +461,95 @@ fun DefaulterEditDialog(
                 pickerTarget = null
             }
         )
+    }
+
+    skipGapMessage?.let { message ->
+        val pending = pendingSkipGap
+        Dialog(
+            onDismissRequest = {
+                skipGapMessage = null
+                pendingSkipGap = null
+            },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 28.dp),
+                shape = RoundedCornerShape(20.dp),
+                color = Color.White,
+                tonalElevation = 6.dp
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text(
+                        text = "Skipping months?",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        TextButton(
+                            onClick = {
+                                skipGapMessage = null
+                                pendingSkipGap = null
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Cancel", color = TextSecondary, fontWeight = FontWeight.SemiBold)
+                        }
+                        Button(
+                            onClick = {
+                                val toSave = pending ?: emptyMap()
+                                skipGapMessage = null
+                                pendingSkipGap = null
+                                onSave(toSave)
+                            },
+                            modifier = Modifier.weight(2f),
+                            colors = ButtonDefaults.buttonColors(containerColor = WarningAmber),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("Yes, skip and save", fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Renders the skip-gap warning body. For 1 row with a single gap month:
+ *   "You're skipping Sep 2025 — is that correct? Last paid: through Aug 2025."
+ * For 1 row with multiple consecutive gap months:
+ *   "You're skipping Sep 2025 + Oct 2025 — is that correct? Last paid: through Aug 2025."
+ * For multiple rows, lists each rd_number with its own gap range so the
+ * operator can audit before confirming.
+ */
+private fun buildSkipGapMessage(
+    notices: List<Pair<String, List<MonthYear>>>
+): String {
+    if (notices.size == 1) {
+        val (rd, skipped) = notices.single()
+        val skippedLabel = skipped.joinToString(" + ") { it.formatShort() }
+        val lastPaid = skipped.first().minusOneMonth().formatShort()
+        return "You're skipping $skippedLabel — is that correct? " +
+            "RD #$rd last paid: through $lastPaid."
+    }
+    return buildString {
+        append("Multiple rows skip months:\n")
+        for ((rd, skipped) in notices) {
+            val skippedLabel = skipped.joinToString(" + ") { it.formatShort() }
+            val lastPaid = skipped.first().minusOneMonth().formatShort()
+            append("\nRD #$rd: skips $skippedLabel (last paid: $lastPaid)")
+        }
     }
 }
 
@@ -436,6 +622,16 @@ private fun DefaulterRow(
             MonthStepper(
                 months = draftState.count,
                 onMonthsChange = onCountChange
+            )
+        }
+
+        draftState.accountLastPaidThrough?.let { lastPaid ->
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Last paid: through ${lastPaid.formatShort()}",
+                style = MaterialTheme.typography.labelSmall,
+                color = TextSecondary,
+                modifier = Modifier.padding(start = 2.dp)
             )
         }
 

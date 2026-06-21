@@ -475,6 +475,11 @@ private fun LotCard(
             lotNumber = lot.lotNumber,
             numbers = rdNumberEntities,
             anchorTimestamp = lot.timestamp,
+            accountLastPaidLookup = { rdNumber ->
+                app.database.rdAccountDao().findByRdNumber(rdNumber)
+                    ?.lastPaidThrough
+                    ?.let { com.qrscanner.app.util.MonthYear.parseToken(it) }
+            },
             onDismiss = { showEditDialog = false },
             onSave = { changes ->
                 showEditDialog = false
