@@ -282,7 +282,12 @@ class SupabaseCloudClient(
                     }
                 }
                 order("updated_at", Order.ASCENDING)
-                order("id", Order.ASCENDING)
+                // rd_accounts has NO synthetic `id` column. Its PK is the
+                // composite (owner_id, rd_number) per cloud/schema.sql line
+                // 301. Use rd_number as the tie-breaker — PostgREST returns
+                // 400/42703 ("column id does not exist") otherwise and the
+                // entire pull cycle fails for this table.
+                order("rd_number", Order.ASCENDING)
                 limit(PULL_PAGE_SIZE.toLong())
             }
             .decodeList<RdAccountDto>()
