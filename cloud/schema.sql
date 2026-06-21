@@ -269,5 +269,73 @@ begin
 end$$;
 
 -- =====================================================================
+-- Schema patch v3 (rd_accounts) — paste this if upgrading from v1/v2.
+-- Idempotent: re-running adds nothing. Spec §17 (Account profiles).
+--
+-- Adds the rd_accounts table — customer-account profile metadata
+-- (name, monthly_amount, last_paid_through, source, is_active,
+-- lifecycle dates). Populated from two surfaces:
+--   * AddAccountsScreen spreadsheet on the phone (source = MANUAL)
+--   * /accounts CSV bulk upload on the portal (source = CSV)
+--
+-- After applying, enable Realtime publication for rd_accounts in
+-- Studio → Database → Replication (the patch's publication block at
+-- the bottom does the same thing programmatically, but enabling it
+-- via the dashboard is the more visible record).
+-- =====================================================================
+
+create table if not exists public.rd_accounts (
+    rd_number               text not null,
+    owner_id                uuid not null references auth.users(id) on delete cascade,
+    name                    text not null,
+    monthly_amount          integer not null check (monthly_amount > 0),
+    last_paid_through       text,
+    source                  text not null check (source in ('MANUAL','CSV')),
+    is_active               boolean not null default true,
+    account_opened_date     date,
+    account_closing_date    date,
+    last_editor_device_id   uuid references public.devices(id) on delete set null,
+    created_at              timestamptz not null default now(),
+    updated_at              timestamptz not null default now(),
+    deleted_at              timestamptz,
+    primary key (owner_id, rd_number)
+);
+
+create index if not exists rd_accounts_owner_idx
+    on public.rd_accounts (owner_id);
+create index if not exists rd_accounts_owner_active_idx
+    on public.rd_accounts (owner_id, is_active);
+create index if not exists rd_accounts_name_trgm_idx
+    on public.rd_accounts using gin (lower(name) gin_trgm_ops);
+
+drop trigger if exists trg_rd_accounts_updated_at on public.rd_accounts;
+create trigger trg_rd_accounts_updated_at
+    before update on public.rd_accounts
+    for each row execute function public.set_updated_at();
+
+alter table public.rd_accounts enable row level security;
+
+drop policy if exists "rd_accounts: owner select" on public.rd_accounts;
+create policy "rd_accounts: owner select" on public.rd_accounts
+    for select using (owner_id = auth.uid());
+drop policy if exists "rd_accounts: owner insert" on public.rd_accounts;
+create policy "rd_accounts: owner insert" on public.rd_accounts
+    for insert with check (owner_id = auth.uid());
+drop policy if exists "rd_accounts: owner update" on public.rd_accounts;
+create policy "rd_accounts: owner update" on public.rd_accounts
+    for update using (owner_id = auth.uid()) with check (owner_id = auth.uid());
+
+do $$
+begin
+    perform 1 from pg_publication where pubname = 'supabase_realtime';
+    if found then
+        begin
+            execute 'alter publication supabase_realtime add table public.rd_accounts';
+        exception when duplicate_object then null;
+        end;
+    end if;
+end$$;
+
+-- =====================================================================
 -- End of schema.sql.
 -- =====================================================================
