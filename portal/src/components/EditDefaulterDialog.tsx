@@ -38,31 +38,35 @@ export function EditDefaulterDialog({ rd, lotTimestamp, onClose }: Props) {
   const qc = useQueryClient();
   const anchor = useMemo(() => fromIso(lotTimestamp), [lotTimestamp]);
 
-  const initialList = useMemo<MonthYear[]>(
-    () => parseList(rd.months_list, rd.months_paid) ?? autoWindow(rd.months_paid, anchor),
-    [rd.months_list, rd.months_paid, anchor]
-  );
+  const initialList = useMemo<MonthYear[]>(() => {
+    // Coerce any stored months_list into a contiguous block ending at
+    // the newest stored month. RD payments are sequential by definition
+    // — gappy persisted lists from the old toggle UI get repaired here
+    // by re-anchoring on max(month) and rebuilding the block.
+    const stored = parseList(rd.months_list, rd.months_paid)
+    if (stored != null && stored.length === rd.months_paid) {
+      const newest = stored.reduce((acc, m) =>
+        m.year > acc.year || (m.year === acc.year && m.month > acc.month) ? m : acc
+      )
+      return buildBlockEndingAt(newest, rd.months_paid)
+    }
+    return autoWindow(rd.months_paid, anchor)
+  }, [rd.months_list, rd.months_paid, anchor]);
 
   const [monthsPaid, setMonthsPaid] = useState<number>(rd.months_paid);
   const [selected, setSelected] = useState<MonthYear[]>(initialList);
   const prevMonthsPaidRef = useRef(rd.months_paid);
 
   useEffect(() => {
-    // Only adjust selection size when the SLIDER changes — never as a
-    // reaction to selection edits. Earlier version included `selected`
-    // in deps; after every user deselect the effect re-padded with an
-    // auto-window month, defeating intent (user clicked X to remove,
-    // the effect put X right back). prevMonthsPaidRef gates so the
-    // pad/trim only fires on actual monthsPaid transitions.
+    // On slider change, preserve the anchor (newest month) and rebuild
+    // the contiguous block at the new length. No more pad/trim — that
+    // could produce gappy selections under the old model, and the new
+    // model has no concept of "partial selection" to repair.
     if (prevMonthsPaidRef.current === monthsPaid) return;
     prevMonthsPaidRef.current = monthsPaid;
     setSelected((prev) => {
-      if (prev.length === monthsPaid) return prev;
-      if (monthsPaid > prev.length) {
-        const additions = autoWindow(monthsPaid, anchor).slice(prev.length);
-        return [...prev, ...additions];
-      }
-      return prev.slice(0, monthsPaid);
+      const anchorMonth = prev[0] ?? anchor;
+      return buildBlockEndingAt(anchorMonth, monthsPaid);
     });
   }, [monthsPaid, anchor]);
 
@@ -127,8 +131,12 @@ export function EditDefaulterDialog({ rd, lotTimestamp, onClose }: Props) {
     };
   }, [onClose]);
 
-  const remainingPicks = monthsPaid > 1 ? monthsPaid - selected.length : 0;
-  const saveDisabled = mutation.isPending || (monthsPaid > 1 && selected.length !== monthsPaid);
+  // Selection is always a complete N-month contiguous block under the
+  // anchor-tap model, so Save is only blocked by an in-flight mutation.
+  const saveDisabled = mutation.isPending;
+  const blockLabel = monthsPaid > 1 && selected.length === monthsPaid
+    ? `${formatExport(selected[selected.length - 1])} – ${formatExport(selected[0])}`
+    : '';
 
   return (
     <div
@@ -187,8 +195,9 @@ export function EditDefaulterDialog({ rd, lotTimestamp, onClose }: Props) {
             <div>
               <p className="text-xs font-medium text-ink-secondary">Which months?</p>
               <p className="mt-0.5 text-[11px] text-ink-muted">
-                Newest at top, older below. The LOT month is outlined. Pick
-                {' '}{monthsPaid} — currently {selected.length}/{monthsPaid}.
+                Tap any month to anchor a {monthsPaid}-month block ending
+                there. RD payments are sequential — picks can't skip months.
+                The LOT month is outlined.
               </p>
               <div className="mt-3 flex items-center justify-between text-[10px] uppercase tracking-wider text-ink-muted">
                 <span>Future</span>
@@ -212,9 +221,7 @@ export function EditDefaulterDialog({ rd, lotTimestamp, onClose }: Props) {
                     <button
                       key={`${cand.year}-${cand.month}`}
                       type="button"
-                      onClick={() =>
-                        toggleMonth(selected, cand, monthsPaid, setSelected)
-                      }
+                      onClick={() => setSelected(buildBlockEndingAt(cand, monthsPaid))}
                       className={`${base} ${styles}`}
                       title={isAnchor ? 'LOT month' : undefined}
                     >
@@ -240,11 +247,7 @@ export function EditDefaulterDialog({ rd, lotTimestamp, onClose }: Props) {
             className="text-[11px] text-ink-muted"
             aria-live="polite"
           >
-            {monthsPaid > 1 && remainingPicks > 0
-              ? `Pick ${remainingPicks} more month${remainingPicks === 1 ? '' : 's'} to save.`
-              : monthsPaid > 1 && selected.length > monthsPaid
-                ? `Remove ${selected.length - monthsPaid} to save.`
-                : ''}
+            {blockLabel}
           </span>
           <div className="flex items-center gap-2">
             <button
@@ -272,32 +275,23 @@ export function EditDefaulterDialog({ rd, lotTimestamp, onClose }: Props) {
 }
 
 /**
- * Toggles a candidate month in the selection.
+ * Builds a contiguous N-month block ending at `endMonth` (inclusive),
+ * walking BACKWARD in time. RD payments are inherently sequential — the
+ * old toggle-each-month UX let users construct gappy selections that
+ * didn't reflect any real-world payment pattern. Now one tap anchors
+ * the trailing edge and the prior N-1 months autofill.
  *
- * Behavior:
- *  - If already picked: deselect (always allowed; user might want to swap
- *    one of the auto-window defaults for a different month).
- *  - If not picked and under cap: add.
- *  - If not picked and AT cap: no-op. The footer hint already tells the
- *    user "Remove 1 to save." — silently FIFO-evicting the oldest pick
- *    confused users into thinking the click did nothing (they couldn't
- *    see the off-screen eviction).
+ * Returned in newest-first order so it matches the grid render
+ * direction and the picked-styling comparison stays trivial.
  */
-function toggleMonth(
-  current: MonthYear[],
-  cand: MonthYear,
-  cap: number,
-  set: (next: MonthYear[]) => void
-) {
-  const idx = current.findIndex(
-    (m) => m.year === cand.year && m.month === cand.month
-  );
-  if (idx >= 0) {
-    set([...current.slice(0, idx), ...current.slice(idx + 1)]);
-    return;
+function buildBlockEndingAt(endMonth: MonthYear, count: number): MonthYear[] {
+  const out: MonthYear[] = [];
+  let cursor = endMonth;
+  for (let i = 0; i < count; i++) {
+    out.push(cursor);
+    cursor = minusOneMonth(cursor);
   }
-  if (current.length >= cap) return;
-  set([...current, cand]);
+  return out;
 }
 
 function buildCandidateGrid(anchor: MonthYear): MonthYear[] {

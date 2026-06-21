@@ -115,11 +115,28 @@ data class DefaulterRowDraft(
         return copy(months = shifted)
     }
 
+    /**
+     * Re-anchors the contiguous month block at [picked] (treated as the
+     * newest month) and rebuilds backward. RD payments are inherently
+     * sequential — the prior swap-single-cell semantics allowed gappy
+     * selections that didn't reflect any real-world payment pattern.
+     * The chipIndex param is kept on the call site for back-compat but
+     * the index itself is now irrelevant: the picked month always
+     * becomes the trailing edge of the new block. Matches the portal's
+     * EditDefaulterDialog buildBlockEndingAt model exactly so the two
+     * surfaces agree on the contract.
+     */
     fun swapMonth(index: Int, picked: MonthYear): DefaulterRowDraft {
-        if (index !in months.indices) return this
-        if (picked in months) return this
-        val updated = months.toMutableList().apply { this[index] = picked }
-        return copy(months = updated)
+        val _ignored = index
+        if (count < 1) return this
+        val rebuilt = buildList {
+            var cursor = picked
+            repeat(count) {
+                add(cursor)
+                cursor = cursor.minusOneMonth()
+            }
+        }
+        return copy(months = rebuilt)
     }
 
     fun encodeOrNull(): String? = if (count <= 1) null else MonthYear.encodeList(months)
@@ -255,7 +272,7 @@ fun DefaulterEditDialog(
                 DialogHeader(
                     title = "LOT $lotNumber defaulters",
                     subtitle = if (defaulterCount > 0) {
-                        "$defaulterCount marked • ${numbers.size} total · long-press a chip to swap"
+                        "$defaulterCount marked • ${numbers.size} total · long-press to anchor block end"
                     } else {
                         "Tap + on rows that paid more than one month"
                     }
