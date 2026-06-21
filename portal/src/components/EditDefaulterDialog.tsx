@@ -43,19 +43,26 @@ export function EditDefaulterDialog({ rd, lotTimestamp, onClose }: Props) {
 
   const [monthsPaid, setMonthsPaid] = useState<number>(rd.months_paid);
   const [selected, setSelected] = useState<MonthYear[]>(initialList);
+  const prevMonthsPaidRef = useRef(rd.months_paid);
 
   useEffect(() => {
-    // Adjust the selection size when the slider changes. Keep the
-    // user's prefix so existing picks survive a one-step increment;
-    // pad with the auto-window tail for new slots.
-    if (selected.length === monthsPaid) return;
-    if (monthsPaid > selected.length) {
-      const additions = autoWindow(monthsPaid, anchor).slice(selected.length);
-      setSelected([...selected, ...additions]);
-    } else {
-      setSelected(selected.slice(0, monthsPaid));
-    }
-  }, [monthsPaid, selected, anchor]);
+    // Only adjust selection size when the SLIDER changes — never as a
+    // reaction to selection edits. Earlier version included `selected`
+    // in deps; after every user deselect the effect re-padded with an
+    // auto-window month, defeating intent (user clicked X to remove,
+    // the effect put X right back). prevMonthsPaidRef gates so the
+    // pad/trim only fires on actual monthsPaid transitions.
+    if (prevMonthsPaidRef.current === monthsPaid) return;
+    prevMonthsPaidRef.current = monthsPaid;
+    setSelected((prev) => {
+      if (prev.length === monthsPaid) return prev;
+      if (monthsPaid > prev.length) {
+        const additions = autoWindow(monthsPaid, anchor).slice(prev.length);
+        return [...prev, ...additions];
+      }
+      return prev.slice(0, monthsPaid);
+    });
+  }, [monthsPaid, anchor]);
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -230,6 +237,18 @@ export function EditDefaulterDialog({ rd, lotTimestamp, onClose }: Props) {
   );
 }
 
+/**
+ * Toggles a candidate month in the selection.
+ *
+ * Behavior:
+ *  - If already picked: deselect (always allowed; user might want to swap
+ *    one of the auto-window defaults for a different month).
+ *  - If not picked and under cap: add.
+ *  - If not picked and AT cap: no-op. The footer hint already tells the
+ *    user "Remove 1 to save." — silently FIFO-evicting the oldest pick
+ *    confused users into thinking the click did nothing (they couldn't
+ *    see the off-screen eviction).
+ */
 function toggleMonth(
   current: MonthYear[],
   cand: MonthYear,
@@ -243,10 +262,7 @@ function toggleMonth(
     set([...current.slice(0, idx), ...current.slice(idx + 1)]);
     return;
   }
-  if (current.length >= cap) {
-    set([...current.slice(1), cand]);
-    return;
-  }
+  if (current.length >= cap) return;
   set([...current, cand]);
 }
 
