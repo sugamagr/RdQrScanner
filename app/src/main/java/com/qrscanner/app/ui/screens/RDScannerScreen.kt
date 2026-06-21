@@ -51,6 +51,7 @@ import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -1051,10 +1052,18 @@ private fun RDCameraScreen(
                                     Row(
                                         modifier = Modifier
                                             .background(WarningAmber.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
-                                            .padding(8.dp)
+                                            .padding(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Warning,
+                                            contentDescription = null,
+                                            tint = WarningAmber,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
                                         Text(
-                                            "⚠️ Current LOT has ${currentLotNumbers.size} unsaved numbers",
+                                            "Current LOT has ${currentLotNumbers.size} unsaved numbers",
                                             style = MaterialTheme.typography.bodySmall,
                                             color = WarningAmber
                                         )

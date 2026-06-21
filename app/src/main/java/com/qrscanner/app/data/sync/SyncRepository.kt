@@ -300,6 +300,7 @@ class SyncRepository(
 
         var firstError: Throwable? = null
         var pushedSessionCount = 0
+        var pushedAccountCount = 0
 
         // Push rd_accounts FIRST (master-data, independent of session
         // hierarchy). Future versions may add FK from rd_numbers to
@@ -309,6 +310,7 @@ class SyncRepository(
         for (acct in dirtyAccounts) {
             try {
                 pushRdAccount(acct, ownerId, ownDeviceCloudId)
+                pushedAccountCount++
             } catch (e: CloudException.AuthExpired) {
                 updateSummary { it.copy(state = SyncPillState.ERROR, lastErrorMessage = "auth expired") }
                 return Result.failure(e)
@@ -434,7 +436,14 @@ class SyncRepository(
         }
 
         val now = System.currentTimeMillis()
-        val remaining = sessionDao.getDirtyForPush(limit = 1).size
+        // Remaining = dirty sessions + dirty accounts (both kinds of work).
+        // Limit-1 probes catch the common "still has something pending"
+        // case without scanning the full table.
+        val remaining = sessionDao.getDirtyForPush(limit = 1).size +
+            rdAccountDao.getDirtyForPush(limit = 1).size
+        // Either kind of progress qualifies as "partial success" for
+        // the pill-doesn't-scream-red invariant from Phase 5 R5.
+        val anyProgress = pushedSessionCount > 0 || pushedAccountCount > 0
         return if (firstError != null) {
             // Phase 5 T5.1: SchemaMissing is the user's setup, not a flaky
             // network — route to SCHEMA_MISSING pill + suppress the
@@ -451,7 +460,7 @@ class SyncRepository(
             // SchemaMissing always wins because it's blocking, not retry-able.
             val pillState = when {
                 isSchemaMissing -> SyncPillState.SCHEMA_MISSING
-                pushedSessionCount > 0 -> SyncPillState.PENDING
+                anyProgress -> SyncPillState.PENDING
                 else -> SyncPillState.ERROR
             }
             updateSummary {
@@ -470,7 +479,7 @@ class SyncRepository(
             // worth a tray slot; the per-session success notifications
             // already told the user what landed).
             val shouldNotify = !isSchemaMissing &&
-                pushedSessionCount == 0 &&
+                !anyProgress &&
                 (
                     consecutiveFailures == ERROR_NOTIFY_THRESHOLD ||
                     (consecutiveFailures > ERROR_NOTIFY_THRESHOLD &&
@@ -484,7 +493,7 @@ class SyncRepository(
             // user just got fresh per-session success notifications;
             // leaving a contradicting error notification next to them
             // is the exact UX bug d1d13fc fixed at the pill level.
-            if (pushedSessionCount > 0) {
+            if (anyProgress) {
                 runCatching { notifier.clearSyncError() }
             }
             Result.failure(firstError)

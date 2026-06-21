@@ -63,7 +63,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.FileProvider
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import com.qrscanner.app.QRScannerApp
@@ -80,7 +79,6 @@ import com.qrscanner.app.ui.theme.TextPrimary
 import com.qrscanner.app.ui.theme.TextSecondary
 import com.qrscanner.app.ui.theme.WarningAmber
 import com.qrscanner.app.util.QrPdfExporter
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -214,10 +212,9 @@ fun AddAccountsScreen(
                 if (saving) return@SaveConfirmDialog
                 saving = true
                 scope.launch {
-                    val saved = persistAll(app, drafts)
+                    persistAll(app, drafts)
                     saving = false
                     onNavigateToAccounts()
-                    val _saved = saved // unused but kept for future analytics
                 }
             },
             onSaveAndQr = {
