@@ -40,6 +40,12 @@ export function AccountsPage() {
       qc.invalidateQueries({ queryKey: ['accounts'] });
     },
   });
+  // C3-P6 LOW in-flight guard mirroring the pattern used by every other
+  // mutation in the portal (see SignIn/AccountEditDialog/Delete-
+  // OrInactivate/EditDefaulter/ImportCsv). Rapid double-click on
+  // 'Reactivate' from the overflow menu would otherwise queue two
+  // mutations before React flushes mutation.isPending.
+  const reactivateInFlightRef = useRef(false);
 
   const [search, setSearch] = useState('');
   const [showInactive, setShowInactive] = useState(false);
@@ -57,8 +63,15 @@ export function AccountsPage() {
     return () => window.clearTimeout(t);
   }, [toast]);
 
-  const allAccounts = query.data ?? [];
-  const activeCount = allAccounts.filter((a) => a.is_active).length;
+  // C3-P6 NITPICK: stable memoized reference so the visibleAccounts
+  // useMemo deps array doesn't see a new array identity on every render
+  // when query.data is undefined (the `?? []` literal allocates fresh
+  // each call). Same applies to activeCount/inactiveCount.
+  const allAccounts = useMemo(() => query.data ?? [], [query.data]);
+  const activeCount = useMemo(
+    () => allAccounts.filter((a) => a.is_active).length,
+    [allAccounts]
+  );
   const inactiveCount = allAccounts.length - activeCount;
 
   const visibleAccounts = useMemo(() => {
@@ -281,6 +294,8 @@ export function AccountsPage() {
                           }}
                           onReactivate={() => {
                             setOverflowFor(null);
+                            if (reactivateInFlightRef.current) return;
+                            reactivateInFlightRef.current = true;
                             reactivateMutation.mutate(account.rd_number, {
                               onSuccess: () =>
                                 setToast(`Reactivated: ${account.name}`),
@@ -290,6 +305,9 @@ export function AccountsPage() {
                                     ? `Reactivate failed: ${err.message}`
                                     : 'Reactivate failed.'
                                 ),
+                              onSettled: () => {
+                                reactivateInFlightRef.current = false;
+                              },
                             });
                           }}
                         />
