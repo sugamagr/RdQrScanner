@@ -649,11 +649,16 @@ class SyncRepository(
         ownerId: String,
         editorDeviceCloudId: String?
     ) {
-        val cloudId = account.cloudId ?: UUID.randomUUID().toString()
-        if (account.cloudId == null) rdAccountDao.stampCloudId(account.rdNumber, cloudId)
+        // rd_accounts has no synthetic uuid PK — the natural identity
+        // IS the rdNumber (composite cloud PK (owner_id, rd_number)).
+        // Use rdNumber as the local cloudId marker so findByCloudId
+        // lookups + the wire DTO stay aligned without inventing a
+        // separate UUID that the cloud table has no column for.
+        val cloudId = account.rdNumber
+        if (account.cloudId != cloudId) rdAccountDao.stampCloudId(account.rdNumber, cloudId)
         rdAccountDao.markSyncing(account.rdNumber)
         val dto = com.qrscanner.app.cloud.mappers.RdAccountMapper
-            .toDto(account.copy(cloudId = cloudId), editorDeviceCloudId)
+            .toDto(account, editorDeviceCloudId)
             .copy(ownerId = ownerId)
         cloudClient.upsertRdAccount(dto)
         rdAccountDao.markSynced(account.rdNumber, System.currentTimeMillis(), cloudId)
@@ -982,7 +987,7 @@ class SyncRepository(
             } else {
                 rdAccountDao.mergeFromCloud(
                     rdNumber = dto.rdNumber,
-                    cloudId = dto.id,
+                    cloudId = dto.rdNumber,
                     name = dto.name,
                     monthlyAmount = dto.monthlyAmount,
                     lastPaidThrough = dto.lastPaidThrough,

@@ -15,11 +15,8 @@ import com.qrscanner.app.data.SyncStatus
 internal object RdAccountMapper {
 
     fun toDto(account: RdAccount, editorDeviceCloudId: String?): RdAccountDto {
-        val cloudId = requireNotNull(account.cloudId) {
-            "RdAccount.cloudId must be set before pushing (rdNumber=${account.rdNumber})"
-        }
         return RdAccountDto(
-            id = cloudId,
+            id = account.rdNumber,
             ownerId = "", // filled in by SyncRepository
             rdNumber = account.rdNumber,
             name = account.name,
@@ -47,7 +44,7 @@ internal object RdAccountMapper {
             accountOpenedDate = dto.accountOpenedDate,
             accountClosingDate = dto.accountClosingDate,
             ownerId = dto.ownerId,
-            cloudId = dto.id,
+            cloudId = dto.rdNumber,
             syncStatus = SyncStatus.SYNCED,
             updatedAt = IsoTime.toEpochMillis(dto.updatedAt),
             syncedAt = IsoTime.toEpochMillis(dto.updatedAt),
