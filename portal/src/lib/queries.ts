@@ -8,6 +8,25 @@ import type {
   ScanSessionRow,
 } from '../types/db';
 
+/**
+ * Resolves the current owner_id for defense-in-depth filtering on
+ * mutations. RLS at cloud/schema.sql §318-326 already blocks cross-
+ * owner writes, but adding the explicit `.eq('owner_id', x)` filter
+ * here means the wire payload itself encodes the constraint and any
+ * future RLS misconfiguration gets caught client-side before the
+ * round trip. Throws if there's no live session so a caller never
+ * silently runs an unfiltered mutation.
+ */
+async function requireOwnerId(): Promise<string> {
+  const { data, error } = await supabase.auth.getUser();
+  if (error) throw error;
+  const ownerId = data.user?.id;
+  if (!ownerId) {
+    throw new Error('No active session — refusing to mutate without owner_id scope.');
+  }
+  return ownerId;
+}
+
 export const SESSIONS_PAGE_SIZE = 30;
 
 export interface SessionsPage {
@@ -57,6 +76,7 @@ export async function fetchSession(sessionId: string): Promise<ScanSessionRow | 
     .from('scan_sessions')
     .select('*')
     .eq('id', sessionId)
+    .is('deleted_at', null)
     .maybeSingle();
   if (error) throw error;
   return (data as ScanSessionRow | null) ?? null;
@@ -100,6 +120,7 @@ export async function updateRdNumberMonths(params: {
   monthsList: string | null;
 }): Promise<void> {
   const { id, monthsPaid, monthsList } = params;
+  const ownerId = await requireOwnerId();
   const { error } = await supabase
     .from('rd_numbers')
     .update({
@@ -112,7 +133,9 @@ export async function updateRdNumberMonths(params: {
       // the banner + Channel C notification.
       last_editor_device_id: null,
     })
-    .eq('id', id);
+    .eq('id', id)
+    .eq('owner_id', ownerId)
+    .is('deleted_at', null);
   if (error) throw error;
 }
 
@@ -216,6 +239,7 @@ export async function updateAccount(params: {
   isActive: boolean;
 }): Promise<void> {
   const { rdNumber, name, monthlyAmount, isActive } = params;
+  const ownerId = await requireOwnerId();
   const { error } = await supabase
     .from('rd_accounts')
     .update({
@@ -224,31 +248,42 @@ export async function updateAccount(params: {
       is_active: isActive,
       last_editor_device_id: null,
     })
-    .eq('rd_number', rdNumber);
+    .eq('rd_number', rdNumber)
+    .eq('owner_id', ownerId)
+    .is('deleted_at', null);
   if (error) throw error;
 }
 
 export async function markAccountInactive(rdNumber: string): Promise<void> {
+  const ownerId = await requireOwnerId();
   const { error } = await supabase
     .from('rd_accounts')
     .update({ is_active: false, last_editor_device_id: null })
-    .eq('rd_number', rdNumber);
+    .eq('rd_number', rdNumber)
+    .eq('owner_id', ownerId)
+    .is('deleted_at', null);
   if (error) throw error;
 }
 
 export async function reactivateAccount(rdNumber: string): Promise<void> {
+  const ownerId = await requireOwnerId();
   const { error } = await supabase
     .from('rd_accounts')
     .update({ is_active: true, last_editor_device_id: null })
-    .eq('rd_number', rdNumber);
+    .eq('rd_number', rdNumber)
+    .eq('owner_id', ownerId)
+    .is('deleted_at', null);
   if (error) throw error;
 }
 
 export async function softDeleteAccount(rdNumber: string): Promise<void> {
+  const ownerId = await requireOwnerId();
   const { error } = await supabase
     .from('rd_accounts')
     .update({ deleted_at: new Date().toISOString(), last_editor_device_id: null })
-    .eq('rd_number', rdNumber);
+    .eq('rd_number', rdNumber)
+    .eq('owner_id', ownerId)
+    .is('deleted_at', null);
   if (error) throw error;
 }
 
@@ -280,6 +315,16 @@ export async function bulkUpsertAccounts(
   rows: BulkAccountInput[],
   ownerId: string
 ): Promise<BulkUpsertResult> {
+  // Defence-in-depth: even though the caller passes ownerId, validate
+  // against the live session before writing. Defends against a stale
+  // useAuth() snapshot or a caller bug from spraying writes under the
+  // wrong owner_id and tripping RLS only on the second hop.
+  const liveOwnerId = await requireOwnerId();
+  if (liveOwnerId !== ownerId) {
+    throw new Error(
+      'bulkUpsertAccounts: caller ownerId does not match active session — refusing to write.'
+    );
+  }
   const result: BulkUpsertResult = { inserted: 0, updated: 0, failed: 0, errors: [] };
   for (const row of rows) {
     const payload = {

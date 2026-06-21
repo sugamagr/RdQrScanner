@@ -91,8 +91,8 @@ interface ScanSessionDao {
     @Query("UPDATE scan_sessions SET cloudId = COALESCE(cloudId, :cloudId) WHERE id = :id")
     suspend fun stampCloudId(id: Long, cloudId: String)
 
-    @Query("UPDATE scan_sessions SET syncStatus = 'SYNCED', syncedAt = :syncedAt, cloudId = COALESCE(cloudId, :cloudId), lastSyncError = NULL, retryCount = 0 WHERE id = :id")
-    suspend fun markSynced(id: Long, syncedAt: Long, cloudId: String)
+    @Query("UPDATE scan_sessions SET syncStatus = 'SYNCED', syncedAt = :syncedAt, updatedAt = :cloudUpdatedAt, cloudId = COALESCE(cloudId, :cloudId), lastSyncError = NULL, retryCount = 0 WHERE id = :id")
+    suspend fun markSynced(id: Long, syncedAt: Long, cloudUpdatedAt: Long, cloudId: String)
 
     @Query("UPDATE scan_sessions SET syncStatus = 'SYNC_ERROR', lastSyncError = :error, retryCount = retryCount + 1 WHERE id = :id")
     suspend fun markSyncError(id: Long, error: String)
@@ -322,8 +322,8 @@ interface ScanLotDao {
     @Query("UPDATE scan_lots SET cloudId = COALESCE(cloudId, :cloudId) WHERE id = :id")
     suspend fun stampCloudId(id: Long, cloudId: String)
 
-    @Query("UPDATE scan_lots SET syncStatus = 'SYNCED', syncedAt = :syncedAt, cloudId = COALESCE(cloudId, :cloudId), lastSyncError = NULL, retryCount = 0 WHERE id = :id")
-    suspend fun markSynced(id: Long, syncedAt: Long, cloudId: String)
+    @Query("UPDATE scan_lots SET syncStatus = 'SYNCED', syncedAt = :syncedAt, updatedAt = :cloudUpdatedAt, cloudId = COALESCE(cloudId, :cloudId), lastSyncError = NULL, retryCount = 0 WHERE id = :id")
+    suspend fun markSynced(id: Long, syncedAt: Long, cloudUpdatedAt: Long, cloudId: String)
 
     @Query("UPDATE scan_lots SET syncStatus = 'SYNC_ERROR', lastSyncError = :error, retryCount = retryCount + 1 WHERE id = :id")
     suspend fun markSyncError(id: Long, error: String)

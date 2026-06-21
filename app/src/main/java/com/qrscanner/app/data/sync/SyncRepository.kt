@@ -566,13 +566,38 @@ class SyncRepository(
         // Sessions already have cloudId at finalize time; the call is a
         // no-op here. Lots + rd_numbers below stamp before upsert per R2.
         sessionDao.markSyncing(sess.id)
-        val dto = SessionMapper.toDto(sess).copy(ownerId = ownerId)
+        // Re-audit gate B finding: SessionMapper.toDto hardcodes
+        // defaultCount = 0 with a comment claiming the SyncRepository
+        // would compute it, but no caller did. Result: cloud's
+        // denormalized scan_sessions.default_count stayed at 0 for every
+        // phone-pushed session, breaking the portal session list's
+        // 'N defaulters' badge. Computed here at push time from the
+        // already-persisted rd_numbers rows — no Room migration needed
+        // because the count is derivable on demand. Tombstones excluded
+        // so a soft-deleted defaulter doesn't inflate the count.
+        val defaultCount = rdNumberDao.getAllRowsInSession(sess.id)
+            .count { it.monthsPaid > 1 && it.deletedAt == null }
+        val dto = SessionMapper.toDto(sess).copy(
+            ownerId = ownerId,
+            defaultCount = defaultCount
+        )
         val result = cloudClient.upsertSession(dto)
         val displayNumber = result.displayNumber
         if (displayNumber != sess.displayNumber) {
             sessionDao.update(sess.copy(displayNumber = displayNumber, cloudId = cloudId))
         }
-        sessionDao.markSynced(sess.id, System.currentTimeMillis(), cloudId)
+        // Stamp local updatedAt to the server-trigger-bumped value so the
+        // next realtime echo / pull does NOT re-merge this row (re-audit
+        // gate B fix #6). Without this, every push caused one wasted
+        // mergeFromCloud write per pull cycle because cloud.updatedAt
+        // was always > local.updatedAt by however long the upsert
+        // round-trip took.
+        sessionDao.markSynced(
+            sess.id,
+            System.currentTimeMillis(),
+            IsoTime.toEpochMillis(result.updatedAt),
+            cloudId
+        )
         return cloudId
     }
 
@@ -613,8 +638,13 @@ class SyncRepository(
         if (lot.cloudId == null) lotDao.stampCloudId(lot.id, cloudId)
         lotDao.markSyncing(lot.id)
         val dto = LotMapper.toDto(lot.copy(cloudId = cloudId), sessionCloudId).copy(ownerId = ownerId)
-        cloudClient.upsertLot(dto)
-        lotDao.markSynced(lot.id, System.currentTimeMillis(), cloudId)
+        val result = cloudClient.upsertLot(dto)
+        lotDao.markSynced(
+            lot.id,
+            System.currentTimeMillis(),
+            IsoTime.toEpochMillis(result.updatedAt),
+            cloudId
+        )
         return cloudId
     }
 
@@ -660,8 +690,13 @@ class SyncRepository(
         val dto = com.qrscanner.app.cloud.mappers.RdAccountMapper
             .toDto(account, editorDeviceCloudId)
             .copy(ownerId = ownerId)
-        cloudClient.upsertRdAccount(dto)
-        rdAccountDao.markSynced(account.rdNumber, System.currentTimeMillis(), cloudId)
+        val result = cloudClient.upsertRdAccount(dto)
+        rdAccountDao.markSynced(
+            account.rdNumber,
+            System.currentTimeMillis(),
+            IsoTime.toEpochMillis(result.updatedAt),
+            cloudId
+        )
     }
 
     /** Returns true on success, false on non-auth failure (parent re-marks SYNC_ERROR). AuthExpired re-throws. */
@@ -679,8 +714,13 @@ class SyncRepository(
             val dto = RdNumberMapper
                 .toDto(rd.copy(cloudId = cloudId), lotCloudId, editorDeviceCloudId)
                 .copy(ownerId = ownerId)
-            cloudClient.upsertRdNumber(dto)
-            rdNumberDao.markSynced(rd.id, System.currentTimeMillis(), cloudId)
+            val result = cloudClient.upsertRdNumber(dto)
+            rdNumberDao.markSynced(
+                rd.id,
+                System.currentTimeMillis(),
+                IsoTime.toEpochMillis(result.updatedAt),
+                cloudId
+            )
             true
         } catch (e: CloudException.AuthExpired) {
             rdNumberDao.markSyncError(rd.id, "auth expired")
@@ -1061,6 +1101,7 @@ class SyncRepository(
                     scannedAt = IsoTime.toEpochMillis(dto.scannedAt),
                     monthsPaid = dto.monthsPaid,
                     monthsList = dto.monthsList,
+                    lastEditorDeviceId = dto.lastEditorDeviceId,
                     updatedAt = updatedAt,
                     deletedAt = deletedAt
                 )

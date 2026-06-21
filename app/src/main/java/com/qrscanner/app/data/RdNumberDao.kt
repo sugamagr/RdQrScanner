@@ -96,8 +96,8 @@ interface RdNumberDao {
     @Query("UPDATE rd_numbers SET cloudId = COALESCE(cloudId, :cloudId) WHERE id = :id")
     suspend fun stampCloudId(id: Long, cloudId: String)
 
-    @Query("UPDATE rd_numbers SET syncStatus = 'SYNCED', syncedAt = :syncedAt, cloudId = COALESCE(cloudId, :cloudId), lastSyncError = NULL, retryCount = 0 WHERE id = :id")
-    suspend fun markSynced(id: Long, syncedAt: Long, cloudId: String)
+    @Query("UPDATE rd_numbers SET syncStatus = 'SYNCED', syncedAt = :syncedAt, updatedAt = :cloudUpdatedAt, cloudId = COALESCE(cloudId, :cloudId), lastSyncError = NULL, retryCount = 0 WHERE id = :id")
+    suspend fun markSynced(id: Long, syncedAt: Long, cloudUpdatedAt: Long, cloudId: String)
 
     @Query("UPDATE rd_numbers SET syncStatus = 'SYNC_ERROR', lastSyncError = :error, retryCount = retryCount + 1 WHERE id = :id")
     suspend fun markSyncError(id: Long, error: String)
@@ -133,6 +133,7 @@ interface RdNumberDao {
             scannedAt = :scannedAt,
             monthsPaid = :monthsPaid,
             monthsList = :monthsList,
+            lastEditorDeviceId = :lastEditorDeviceId,
             syncStatus = 'SYNCED',
             updatedAt = :updatedAt,
             syncedAt = :updatedAt,
@@ -151,6 +152,7 @@ interface RdNumberDao {
         scannedAt: Long,
         monthsPaid: Int,
         monthsList: String?,
+        lastEditorDeviceId: String?,
         updatedAt: Long,
         deletedAt: Long?
     ): Int

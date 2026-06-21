@@ -254,13 +254,14 @@ interface RdAccountDao {
         UPDATE rd_accounts SET
             syncStatus = 'SYNCED',
             syncedAt = :syncedAt,
+            updatedAt = :cloudUpdatedAt,
             cloudId = COALESCE(cloudId, :cloudId),
             lastSyncError = NULL,
             retryCount = 0
         WHERE rdNumber = :rdNumber
         """
     )
-    suspend fun markSynced(rdNumber: String, syncedAt: Long, cloudId: String)
+    suspend fun markSynced(rdNumber: String, syncedAt: Long, cloudUpdatedAt: Long, cloudId: String)
 
     @Query(
         """

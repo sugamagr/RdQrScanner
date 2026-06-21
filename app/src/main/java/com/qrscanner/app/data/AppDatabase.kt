@@ -16,7 +16,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SyncEvent::class,
         RdAccount::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -44,8 +44,8 @@ abstract class AppDatabase : RoomDatabase() {
          * auto-window from the session date until the user edits them.
          */
         private val MIGRATION_4_5 = object : Migration(4, 5) {
-            override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL(
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
                     "ALTER TABLE `rd_numbers` ADD COLUMN `monthsList` TEXT DEFAULT NULL"
                 )
             }
@@ -85,55 +85,55 @@ abstract class AppDatabase : RoomDatabase() {
          * per device per upgrade.
          */
         private val MIGRATION_5_6 = object : Migration(5, 6) {
-            override fun migrate(database: SupportSQLiteDatabase) {
+            override fun migrate(db: SupportSQLiteDatabase) {
                 // scan_sessions: 8 new columns (6 sync + 2 session-specific).
-                database.execSQL("ALTER TABLE `scan_sessions` ADD COLUMN `deviceCloudId` TEXT DEFAULT NULL")
-                database.execSQL("ALTER TABLE `scan_sessions` ADD COLUMN `operatorName` TEXT DEFAULT NULL")
-                database.execSQL("ALTER TABLE `scan_sessions` ADD COLUMN `cloudId` TEXT DEFAULT NULL")
-                database.execSQL("ALTER TABLE `scan_sessions` ADD COLUMN `syncStatus` TEXT NOT NULL DEFAULT 'LOCAL_ONLY'")
-                database.execSQL("ALTER TABLE `scan_sessions` ADD COLUMN `updatedAt` INTEGER NOT NULL DEFAULT 0")
-                database.execSQL("ALTER TABLE `scan_sessions` ADD COLUMN `syncedAt` INTEGER DEFAULT NULL")
-                database.execSQL("ALTER TABLE `scan_sessions` ADD COLUMN `lastSyncError` TEXT DEFAULT NULL")
-                database.execSQL("ALTER TABLE `scan_sessions` ADD COLUMN `deletedAt` INTEGER DEFAULT NULL")
-                database.execSQL("""
+                db.execSQL("ALTER TABLE `scan_sessions` ADD COLUMN `deviceCloudId` TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE `scan_sessions` ADD COLUMN `operatorName` TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE `scan_sessions` ADD COLUMN `cloudId` TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE `scan_sessions` ADD COLUMN `syncStatus` TEXT NOT NULL DEFAULT 'LOCAL_ONLY'")
+                db.execSQL("ALTER TABLE `scan_sessions` ADD COLUMN `updatedAt` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `scan_sessions` ADD COLUMN `syncedAt` INTEGER DEFAULT NULL")
+                db.execSQL("ALTER TABLE `scan_sessions` ADD COLUMN `lastSyncError` TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE `scan_sessions` ADD COLUMN `deletedAt` INTEGER DEFAULT NULL")
+                db.execSQL("""
                     UPDATE `scan_sessions`
                     SET `syncStatus` = 'DIRTY',
                         `updatedAt` = COALESCE(`endTime`, `startTime`, strftime('%s','now') * 1000)
                     WHERE `isActive` = 0
                 """)
-                database.execSQL("""
+                db.execSQL("""
                     UPDATE `scan_sessions`
                     SET `updatedAt` = `startTime`
                     WHERE `isActive` = 1
                 """)
 
                 // scan_lots: 6 new columns.
-                database.execSQL("ALTER TABLE `scan_lots` ADD COLUMN `cloudId` TEXT DEFAULT NULL")
-                database.execSQL("ALTER TABLE `scan_lots` ADD COLUMN `syncStatus` TEXT NOT NULL DEFAULT 'LOCAL_ONLY'")
-                database.execSQL("ALTER TABLE `scan_lots` ADD COLUMN `updatedAt` INTEGER NOT NULL DEFAULT 0")
-                database.execSQL("ALTER TABLE `scan_lots` ADD COLUMN `syncedAt` INTEGER DEFAULT NULL")
-                database.execSQL("ALTER TABLE `scan_lots` ADD COLUMN `lastSyncError` TEXT DEFAULT NULL")
-                database.execSQL("ALTER TABLE `scan_lots` ADD COLUMN `deletedAt` INTEGER DEFAULT NULL")
-                database.execSQL("""
+                db.execSQL("ALTER TABLE `scan_lots` ADD COLUMN `cloudId` TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE `scan_lots` ADD COLUMN `syncStatus` TEXT NOT NULL DEFAULT 'LOCAL_ONLY'")
+                db.execSQL("ALTER TABLE `scan_lots` ADD COLUMN `updatedAt` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `scan_lots` ADD COLUMN `syncedAt` INTEGER DEFAULT NULL")
+                db.execSQL("ALTER TABLE `scan_lots` ADD COLUMN `lastSyncError` TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE `scan_lots` ADD COLUMN `deletedAt` INTEGER DEFAULT NULL")
+                db.execSQL("""
                     UPDATE `scan_lots`
                     SET `syncStatus` = 'DIRTY',
                         `updatedAt` = COALESCE(`timestamp`, strftime('%s','now') * 1000)
                     WHERE `sessionId` IN (SELECT `id` FROM `scan_sessions` WHERE `isActive` = 0)
                 """)
-                database.execSQL("""
+                db.execSQL("""
                     UPDATE `scan_lots`
                     SET `updatedAt` = COALESCE(`timestamp`, strftime('%s','now') * 1000)
                     WHERE `sessionId` IN (SELECT `id` FROM `scan_sessions` WHERE `isActive` = 1)
                 """)
 
                 // rd_numbers: 6 new columns.
-                database.execSQL("ALTER TABLE `rd_numbers` ADD COLUMN `cloudId` TEXT DEFAULT NULL")
-                database.execSQL("ALTER TABLE `rd_numbers` ADD COLUMN `syncStatus` TEXT NOT NULL DEFAULT 'LOCAL_ONLY'")
-                database.execSQL("ALTER TABLE `rd_numbers` ADD COLUMN `updatedAt` INTEGER NOT NULL DEFAULT 0")
-                database.execSQL("ALTER TABLE `rd_numbers` ADD COLUMN `syncedAt` INTEGER DEFAULT NULL")
-                database.execSQL("ALTER TABLE `rd_numbers` ADD COLUMN `lastSyncError` TEXT DEFAULT NULL")
-                database.execSQL("ALTER TABLE `rd_numbers` ADD COLUMN `deletedAt` INTEGER DEFAULT NULL")
-                database.execSQL("""
+                db.execSQL("ALTER TABLE `rd_numbers` ADD COLUMN `cloudId` TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE `rd_numbers` ADD COLUMN `syncStatus` TEXT NOT NULL DEFAULT 'LOCAL_ONLY'")
+                db.execSQL("ALTER TABLE `rd_numbers` ADD COLUMN `updatedAt` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `rd_numbers` ADD COLUMN `syncedAt` INTEGER DEFAULT NULL")
+                db.execSQL("ALTER TABLE `rd_numbers` ADD COLUMN `lastSyncError` TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE `rd_numbers` ADD COLUMN `deletedAt` INTEGER DEFAULT NULL")
+                db.execSQL("""
                     UPDATE `rd_numbers`
                     SET `syncStatus` = 'DIRTY',
                         `updatedAt` = COALESCE(`scannedAt`, strftime('%s','now') * 1000)
@@ -143,7 +143,7 @@ abstract class AppDatabase : RoomDatabase() {
                         )
                     )
                 """)
-                database.execSQL("""
+                db.execSQL("""
                     UPDATE `rd_numbers`
                     SET `updatedAt` = COALESCE(`scannedAt`, strftime('%s','now') * 1000)
                     WHERE `lotId` IN (
@@ -154,7 +154,7 @@ abstract class AppDatabase : RoomDatabase() {
                 """)
 
                 // device_settings: single-row table seeded with id = 1.
-                database.execSQL("""
+                db.execSQL("""
                     CREATE TABLE IF NOT EXISTS `device_settings` (
                         `id` INTEGER PRIMARY KEY NOT NULL CHECK(`id` = 1),
                         `deviceCloudId` TEXT DEFAULT NULL,
@@ -167,10 +167,10 @@ abstract class AppDatabase : RoomDatabase() {
                         `lastBannerSeenAt` INTEGER NOT NULL DEFAULT 0
                     )
                 """)
-                database.execSQL("INSERT OR IGNORE INTO `device_settings` (`id`) VALUES (1)")
+                db.execSQL("INSERT OR IGNORE INTO `device_settings` (`id`) VALUES (1)")
 
                 // sync_events: bounded log of remote changes feeding the banner.
-                database.execSQL("""
+                db.execSQL("""
                     CREATE TABLE IF NOT EXISTS `sync_events` (
                         `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                         `occurredAt` INTEGER NOT NULL,
@@ -183,13 +183,13 @@ abstract class AppDatabase : RoomDatabase() {
                         `payloadSummary` TEXT NOT NULL
                     )
                 """)
-                database.execSQL("CREATE INDEX IF NOT EXISTS `index_sync_events_occurredAt` ON `sync_events` (`occurredAt`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_sync_events_occurredAt` ON `sync_events` (`occurredAt`)")
             }
         }
 
         private val MIGRATION_2_3 = object : Migration(2, 3) {
-            override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL(
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
                     "ALTER TABLE `rd_numbers` ADD COLUMN `monthsPaid` INTEGER NOT NULL DEFAULT 1"
                 )
             }
@@ -209,8 +209,8 @@ abstract class AppDatabase : RoomDatabase() {
          *    rd_numbers is unaffected — its FK on lotId already cascades.
          */
         private val MIGRATION_3_4 = object : Migration(3, 4) {
-            override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL(
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
                     "ALTER TABLE `scan_sessions` ADD COLUMN `activeLotId` INTEGER DEFAULT NULL"
                 )
 
@@ -219,7 +219,7 @@ abstract class AppDatabase : RoomDatabase() {
                 // resume continues into the same LOT instead of starting a new
                 // one. Without this, the v3 in-progress LOT becomes a phantom
                 // 'completed' LOT in the user's count.
-                database.execSQL("""
+                db.execSQL("""
                     UPDATE `scan_sessions`
                     SET `activeLotId` = (
                         SELECT `id` FROM `scan_lots`
@@ -233,9 +233,9 @@ abstract class AppDatabase : RoomDatabase() {
                 // (the rd_numbers.lotId FK would silently re-target scan_lots_old
                 // and become dangling after DROP). legacy_alter_table=ON opts
                 // out of that behaviour for the duration of the rebuild.
-                database.execSQL("PRAGMA legacy_alter_table = ON")
-                database.execSQL("ALTER TABLE `scan_lots` RENAME TO `scan_lots_old`")
-                database.execSQL("""
+                db.execSQL("PRAGMA legacy_alter_table = ON")
+                db.execSQL("ALTER TABLE `scan_lots` RENAME TO `scan_lots_old`")
+                db.execSQL("""
                     CREATE TABLE IF NOT EXISTS `scan_lots` (
                         `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                         `sessionId` INTEGER NOT NULL,
@@ -244,21 +244,21 @@ abstract class AppDatabase : RoomDatabase() {
                         FOREIGN KEY(`sessionId`) REFERENCES `scan_sessions`(`id`) ON DELETE CASCADE
                     )
                 """)
-                database.execSQL("""
+                db.execSQL("""
                     INSERT INTO `scan_lots` (`id`, `sessionId`, `lotNumber`, `timestamp`)
                     SELECT `id`, `sessionId`, `lotNumber`, `timestamp` FROM `scan_lots_old`
                 """)
-                database.execSQL("DROP TABLE `scan_lots_old`")
-                database.execSQL("PRAGMA legacy_alter_table = OFF")
+                db.execSQL("DROP TABLE `scan_lots_old`")
+                db.execSQL("PRAGMA legacy_alter_table = OFF")
 
-                database.execSQL("CREATE INDEX IF NOT EXISTS `index_scan_lots_sessionId` ON `scan_lots` (`sessionId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_scan_lots_sessionId` ON `scan_lots` (`sessionId`)")
             }
         }
 
         private val MIGRATION_1_2 = object : Migration(1, 2) {
-            override fun migrate(database: SupportSQLiteDatabase) {
+            override fun migrate(db: SupportSQLiteDatabase) {
                 // Create rd_numbers table with FK → scan_lots.id CASCADE DELETE
-                database.execSQL("""
+                db.execSQL("""
                     CREATE TABLE IF NOT EXISTS `rd_numbers` (
                         `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                         `lotId` INTEGER NOT NULL,
@@ -268,16 +268,16 @@ abstract class AppDatabase : RoomDatabase() {
                         FOREIGN KEY(`lotId`) REFERENCES `scan_lots`(`id`) ON DELETE CASCADE
                     )
                 """)
-                database.execSQL("CREATE INDEX IF NOT EXISTS `index_rd_numbers_lotId` ON `rd_numbers` (`lotId`)")
-                database.execSQL("CREATE INDEX IF NOT EXISTS `index_rd_numbers_lotId_number` ON `rd_numbers` (`lotId`, `number`)")
-                database.execSQL("CREATE INDEX IF NOT EXISTS `index_rd_numbers_number` ON `rd_numbers` (`number`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_rd_numbers_lotId` ON `rd_numbers` (`lotId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_rd_numbers_lotId_number` ON `rd_numbers` (`lotId`, `number`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_rd_numbers_number` ON `rd_numbers` (`number`)")
 
                 // Recreate scan_lots without the rdNumbers column (SQLite rename-create-copy-drop).
                 // legacy_alter_table=ON keeps the freshly-created rd_numbers.lotId FK pointed at
                 // 'scan_lots' instead of being auto-rewritten to 'scan_lots_old' by SQLite 3.26+.
-                database.execSQL("PRAGMA legacy_alter_table = ON")
-                database.execSQL("ALTER TABLE `scan_lots` RENAME TO `scan_lots_old`")
-                database.execSQL("""
+                db.execSQL("PRAGMA legacy_alter_table = ON")
+                db.execSQL("ALTER TABLE `scan_lots` RENAME TO `scan_lots_old`")
+                db.execSQL("""
                     CREATE TABLE IF NOT EXISTS `scan_lots` (
                         `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
                         `sessionId` INTEGER NOT NULL,
@@ -285,12 +285,12 @@ abstract class AppDatabase : RoomDatabase() {
                         `timestamp` INTEGER NOT NULL
                     )
                 """)
-                database.execSQL("""
+                db.execSQL("""
                     INSERT INTO `scan_lots` (`id`, `sessionId`, `lotNumber`, `timestamp`)
                     SELECT `id`, `sessionId`, `lotNumber`, `timestamp` FROM `scan_lots_old`
                 """)
-                database.execSQL("DROP TABLE `scan_lots_old`")
-                database.execSQL("PRAGMA legacy_alter_table = OFF")
+                db.execSQL("DROP TABLE `scan_lots_old`")
+                db.execSQL("PRAGMA legacy_alter_table = OFF")
             }
         }
 
@@ -302,14 +302,14 @@ abstract class AppDatabase : RoomDatabase() {
          * push cycle treats them as fresh.
          */
         private val MIGRATION_6_7 = object : Migration(6, 7) {
-            override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL(
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
                     "ALTER TABLE `scan_sessions` ADD COLUMN `retryCount` INTEGER NOT NULL DEFAULT 0"
                 )
-                database.execSQL(
+                db.execSQL(
                     "ALTER TABLE `scan_lots` ADD COLUMN `retryCount` INTEGER NOT NULL DEFAULT 0"
                 )
-                database.execSQL(
+                db.execSQL(
                     "ALTER TABLE `rd_numbers` ADD COLUMN `retryCount` INTEGER NOT NULL DEFAULT 0"
                 )
             }
@@ -327,8 +327,8 @@ abstract class AppDatabase : RoomDatabase() {
          * columns added schema-only this round (no UI yet).
          */
         private val MIGRATION_7_8 = object : Migration(7, 8) {
-            override fun migrate(database: SupportSQLiteDatabase) {
-                database.execSQL(
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
                     """
                     CREATE TABLE IF NOT EXISTS `rd_accounts` (
                         `rdNumber` TEXT NOT NULL,
@@ -352,13 +352,13 @@ abstract class AppDatabase : RoomDatabase() {
                     )
                     """.trimIndent()
                 )
-                database.execSQL(
+                db.execSQL(
                     "CREATE INDEX IF NOT EXISTS `index_rd_accounts_name` ON `rd_accounts` (`name`)"
                 )
-                database.execSQL(
+                db.execSQL(
                     "CREATE INDEX IF NOT EXISTS `index_rd_accounts_source` ON `rd_accounts` (`source`)"
                 )
-                database.execSQL(
+                db.execSQL(
                     "CREATE INDEX IF NOT EXISTS `index_rd_accounts_isActive` ON `rd_accounts` (`isActive`)"
                 )
             }
@@ -371,16 +371,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "rd_scanner_database"
                 )
-                .addMigrations(
-                    MIGRATION_1_2,
-                    MIGRATION_2_3,
-                    MIGRATION_3_4,
-                    MIGRATION_4_5,
-                    MIGRATION_5_6,
-                    MIGRATION_6_7,
-                    MIGRATION_7_8
-                )
-                .fallbackToDestructiveMigrationOnDowngrade()
+                .fallbackToDestructiveMigration(dropAllTables = true)
                 .build()
                 INSTANCE = instance
                 instance

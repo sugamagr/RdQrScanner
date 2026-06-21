@@ -106,7 +106,20 @@ data class RdNumber(
     val deletedAt: Long? = null,
 
     /** See [ScanSession.retryCount]. */
-    val retryCount: Int = 0
+    val retryCount: Int = 0,
+
+    /**
+     * Cloud devices.id of whoever last wrote this row. Phones stamp own
+     * deviceCloudId on every push; the portal leaves this NULL so the
+     * merge attribution code can render "edited by Portal" badges
+     * (SyncRepository.mergeRdNumbers line ~1043-1047). Added in v9 to
+     * close the wire-vs-local-storage symmetry gap: pre-v9, the field
+     * existed in RdNumberDto + cloud schema but had no Room column, so
+     * pulls couldn't persist the attribution and the badge stayed
+     * blank after the next process restart. v9 MIGRATION_8_9 adds the
+     * column with default null so existing rows keep deserialising.
+     */
+    val lastEditorDeviceId: String? = null
 ) {
     companion object {
         const val MONTHS_MIN = 1

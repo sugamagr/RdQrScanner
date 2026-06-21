@@ -52,6 +52,7 @@ internal object RdNumberMapper {
             updatedAt = IsoTime.toEpochMillis(dto.updatedAt),
             syncedAt = IsoTime.toEpochMillis(dto.updatedAt),
             lastSyncError = null,
-            deletedAt = IsoTime.toEpochMillisOrNull(dto.deletedAt)
+            deletedAt = IsoTime.toEpochMillisOrNull(dto.deletedAt),
+            lastEditorDeviceId = dto.lastEditorDeviceId
         )
 }
