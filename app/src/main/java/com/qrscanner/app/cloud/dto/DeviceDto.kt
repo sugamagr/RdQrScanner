@@ -1,5 +1,7 @@
 package com.qrscanner.app.cloud.dto
 
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -15,16 +17,23 @@ import kotlinx.serialization.Serializable
  * Convention for nullables: cloud schema NOT NULL columns have non-null
  * Kotlin types; nullable columns have Kotlin `?`. The mapper enforces
  * the entity invariants.
+ *
+ * EncodeDefault on the two nullable defaulted fields (deviceModel,
+ * appVersion) — see RdNumberDto KDoc for the bug class #3 rationale.
+ * Lower impact than other DTOs because device model + version are set
+ * once at registration and never edited; still annotated for the same
+ * defense in case a future code path ever clears one.
  */
+@OptIn(ExperimentalSerializationApi::class)
 @Serializable
 data class DeviceDto(
     val id: String,
     @SerialName("owner_id") val ownerId: String,
     @SerialName("device_name") val deviceName: String,
-    @SerialName("device_model") val deviceModel: String? = null,
+    @EncodeDefault @SerialName("device_model") val deviceModel: String? = null,
     @SerialName("first_seen_at") val firstSeenAt: String,
     @SerialName("last_seen_at") val lastSeenAt: String,
-    @SerialName("app_version") val appVersion: String? = null,
+    @EncodeDefault @SerialName("app_version") val appVersion: String? = null,
     @SerialName("created_at") val createdAt: String,
     @SerialName("updated_at") val updatedAt: String
 )

@@ -439,20 +439,28 @@ class SupabaseCloudClient(
     }
 
     private fun PostgresAction.toPayload(table: CloudTable): CloudRealtimePayload? {
+        // rd_accounts has composite PK (owner_id, rd_number) with NO 'id'
+        // column. Every other table has a synthetic uuid 'id' PK. Reading
+        // record["id"] on an rd_accounts payload returns null and the
+        // ?: return null upstream silently drops every realtime event for
+        // that table — phone never gets portal-side account edits until
+        // the 5-min poll backstop. Branch on table so rd_accounts pulls
+        // rd_number (the natural key) instead.
+        val idKey = if (table == CloudTable.RD_ACCOUNTS) "rd_number" else "id"
         return when (this) {
             is PostgresAction.Insert -> CloudRealtimePayload(
                 table = table,
-                cloudId = record["id"]?.toString()?.trim('"') ?: return null,
+                cloudId = record[idKey]?.toString()?.trim('"') ?: return null,
                 event = CloudRealtimeEvent.INSERT
             )
             is PostgresAction.Update -> CloudRealtimePayload(
                 table = table,
-                cloudId = record["id"]?.toString()?.trim('"') ?: return null,
+                cloudId = record[idKey]?.toString()?.trim('"') ?: return null,
                 event = CloudRealtimeEvent.UPDATE
             )
             is PostgresAction.Delete -> CloudRealtimePayload(
                 table = table,
-                cloudId = oldRecord["id"]?.toString()?.trim('"') ?: return null,
+                cloudId = oldRecord[idKey]?.toString()?.trim('"') ?: return null,
                 event = CloudRealtimeEvent.DELETE
             )
             is PostgresAction.Select -> null

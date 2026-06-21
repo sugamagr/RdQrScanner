@@ -137,6 +137,7 @@ interface RdNumberDao {
             updatedAt = :updatedAt,
             syncedAt = :updatedAt,
             lastSyncError = NULL,
+            retryCount = 0,
             deletedAt = :deletedAt
         WHERE id = :id AND updatedAt < :updatedAt
         """

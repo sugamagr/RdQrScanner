@@ -181,12 +181,14 @@ interface ScanSessionDao {
             startTime = :startTime,
             endTime = :endTime,
             isActive = 0,
+            activeLotId = NULL,
             totalLots = :totalLots,
             totalRdNumbers = :totalRdNumbers,
             syncStatus = 'SYNCED',
             updatedAt = :updatedAt,
             syncedAt = :updatedAt,
             lastSyncError = NULL,
+            retryCount = 0,
             deletedAt = :deletedAt
         WHERE id = :id AND updatedAt < :updatedAt
         """
@@ -356,6 +358,7 @@ interface ScanLotDao {
             updatedAt = :updatedAt,
             syncedAt = :updatedAt,
             lastSyncError = NULL,
+            retryCount = 0,
             deletedAt = :deletedAt
         WHERE id = :id AND updatedAt < :updatedAt
         """

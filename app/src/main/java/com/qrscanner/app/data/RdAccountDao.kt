@@ -287,6 +287,14 @@ interface RdAccountDao {
      * tie-breaker rule (Phase 5 T5.7): local wins on equal
      * `updatedAt` so a local DIRTY edit racing with the cloud echo of
      * itself survives.
+     *
+     * Resets retryCount = 0: a row that was SYNC_ABANDONED locally
+     * (retryCount >= PUSH_ABANDON_THRESHOLD) but then fixed via
+     * portal/CSV upload should NOT immediately re-abandon on its next
+     * local-edit failure. Without the reset, the user "fixes" the row
+     * from the portal, edits it on the phone, and the very first push
+     * failure flips the row back to SYNC_ABANDONED. The reset gives
+     * each merged row a fresh circuit-breaker window.
      */
     @Query(
         """
@@ -305,6 +313,7 @@ interface RdAccountDao {
             updatedAt = :updatedAt,
             syncedAt = :updatedAt,
             lastSyncError = NULL,
+            retryCount = 0,
             deletedAt = :deletedAt
         WHERE rdNumber = :rdNumber AND updatedAt < :updatedAt
         """
