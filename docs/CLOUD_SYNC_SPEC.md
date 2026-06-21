@@ -27,14 +27,15 @@ This document is the **single source of truth** for the cloud-sync + portal feat
 14. [Realtime channel design](#14-realtime-channel-design)
 15. [Android-side architecture](#15-android-side-architecture)
 16. [Portal architecture](#16-portal-architecture)
-17. [Migration plan (v5 → v6)](#17-migration-plan-v5--v6)
-18. [Phase-by-phase build plan](#18-phase-by-phase-build-plan)
-19. [Acceptance criteria per phase](#19-acceptance-criteria-per-phase)
-20. [Runbook (setup from scratch)](#20-runbook-setup-from-scratch)
-21. [Failure modes and recovery](#21-failure-modes-and-recovery)
-22. [Cost and free-tier limits](#22-cost-and-free-tier-limits)
-23. [Open questions / deferred items](#23-open-questions--deferred-items)
-24. [Glossary](#24-glossary)
+17. [Account profiles (rd_accounts)](#17-account-profiles-rd_accounts)
+18. [Migration plan (v5 → v6)](#18-migration-plan-v5--v6)
+19. [Phase-by-phase build plan](#19-phase-by-phase-build-plan)
+20. [Acceptance criteria per phase](#20-acceptance-criteria-per-phase)
+21. [Runbook (setup from scratch)](#21-runbook-setup-from-scratch)
+22. [Failure modes and recovery](#22-failure-modes-and-recovery)
+23. [Cost and free-tier limits](#23-cost-and-free-tier-limits)
+24. [Open questions / deferred items](#24-open-questions--deferred-items)
+25. [Glossary](#25-glossary)
 
 ---
 
@@ -120,7 +121,7 @@ Every architectural choice that an outsider would reasonably question. If you fi
 
 | # | Decision | Rationale | Alternatives considered |
 |---|---|---|---|
-| D1 | **Supabase over Firebase** | Relational data model matches our schema 1:1. SQL-shaped queries for the portal. No metered reads. Owner-portable Postgres. | Firebase Firestore was the alternative; lost on data-model fit and aggregate-query support. See §22 for cost comparison. |
+| D1 | **Supabase over Firebase** | Relational data model matches our schema 1:1. SQL-shaped queries for the portal. No metered reads. Owner-portable Postgres. | Firebase Firestore was the alternative; lost on data-model fit and aggregate-query support. See §23 for cost comparison. |
 | D2 | **One shared owner account, all phones sign in with same credentials** | Simplest. Matches "small shop with 2 trusted operators." Per-operator auth is overkill at this scale. | Per-operator sub-accounts (deferred to v2). Anonymous device-only auth (rejected — recovery story is brittle). |
 | D3 | **Operator name captured as a free-text string per phone, not as an auth principal** | Lets us track "Ravi scanned this" without the complexity of per-user auth. Operator-switching is a one-tap action in settings. | Real per-user auth (D2 alternative). |
 | D4 | **Two-way sync, last-writer-wins on `updatedAt`** | Owner explicitly needs to edit defaulter months from the portal. Last-writer-wins is acceptable because real-world conflict probability is ≈ 0 for a 2-phone shop. | One-way phone→cloud (rejected — owner needs portal edits). Operational transformation (rejected — massive overkill). Hybrid lock-on-dirty (rejected — adds code for negligible benefit at this scale). |
@@ -218,9 +219,31 @@ UNIQUE constraint: `(session_id, lot_number)` — no two LOTs in a session share
 
 Indexes: `(lot_id, position)`, `(owner_id)`, `(owner_id, number)` for cross-session RD number search.
 
+### Table: `rd_accounts`
+
+Account profiles. See §17 for the full contract; included here for the cloud-data-model index.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `rd_number` | text | PK part (composite with owner_id) | The visible identity. `^\d{9,15}$`. |
+| `owner_id` | uuid | PK part, NOT NULL, REFERENCES auth.users(id) ON DELETE CASCADE | |
+| `name` | text | NOT NULL | Holder name. |
+| `monthly_amount` | int | NOT NULL, CHECK (> 0) | Rupees per month. |
+| `last_paid_through` | text |  | `YYYY-MM`, phone-derived, monotonic-only on push. |
+| `source` | text | NOT NULL, CHECK IN ('MANUAL', 'CSV') | Origin. CSV locks phone edit affordance. |
+| `is_active` | boolean | NOT NULL, default true | Soft state. Auto-reactivates on scan. |
+| `account_opened_date` | date |  | Schema-only in v8. |
+| `account_closing_date` | date |  | Schema-only in v8. Independent of `is_active`. |
+| `last_editor_device_id` | uuid | REFERENCES devices(id) | NULL = portal edit. |
+| `created_at` | timestamptz | NOT NULL, default now() | |
+| `updated_at` | timestamptz | NOT NULL, default now() | LWW basis. |
+| `deleted_at` | timestamptz |  | Tombstone marker. NULL = live. |
+
+Indexes: `(owner_id, rd_number)` (the composite PK), `(owner_id, is_active)`, GIN `pg_trgm` on `name` for portal search.
+
 ### Database triggers
 
-A single trigger on each of `devices`, `scan_sessions`, `scan_lots`, `rd_numbers`: `BEFORE UPDATE`, `SET updated_at = now()`. This guarantees `updated_at` is always touched on UPDATE, regardless of whether the client remembered to set it. (Client also sets it for the optimistic local copy.)
+A single trigger on each of `devices`, `scan_sessions`, `scan_lots`, `rd_numbers`, `rd_accounts`: `BEFORE UPDATE`, `SET updated_at = now()`. This guarantees `updated_at` is always touched on UPDATE, regardless of whether the client remembered to set it. (Client also sets it for the optimistic local copy.)
 
 ```sql
 CREATE OR REPLACE FUNCTION set_updated_at() RETURNS trigger AS $$
@@ -330,6 +353,44 @@ State transitions:
 - Remote pulled row that doesn't exist locally: created as `SYNCED`.
 - Remote pulled row that differs from local synced: see §11 (conflict resolution).
 
+### New entity: `RdAccount` (v8)
+
+Added in schema v8 to support account profiles (see §17 for the full contract). Composite PK on `(rdNumber)` locally — there's no autogen Long PK; the RD number string *is* the identity.
+
+```kotlin
+@Entity(
+    tableName = "rd_accounts",
+    indices = [Index("isActive"), Index("syncStatus")],
+)
+data class RdAccount(
+    @PrimaryKey val rdNumber: String,
+    val name: String,
+    val monthlyAmount: Int,
+    val lastPaidThrough: String? = null,    // "YYYY-MM" — phone-derived only
+    val source: AccountSource = AccountSource.MANUAL,
+    val isActive: Boolean = true,
+    val accountOpenedDate: String? = null,  // ISO date, schema-only in v8
+    val accountClosingDate: String? = null, // ISO date, independent of isActive
+    val lastEditorDeviceId: String? = null,
+
+    // Sync metadata (same shape as other entities)
+    val cloudId: String? = null,            // = rdNumber for this entity
+    val syncStatus: SyncStatus = SyncStatus.LOCAL_ONLY,
+    val updatedAt: Long = System.currentTimeMillis(),
+    val syncedAt: Long? = null,
+    val lastSyncError: String? = null,
+    val deletedAt: Long? = null,
+)
+
+enum class AccountSource { MANUAL, CSV }
+```
+
+DAO highlights (full surface in `RdAccountDao.kt`):
+
+- `findByRdNumber(rdNumber)` — filters tombstones; used by the scan path + defaulter auto-suggest.
+- `findByRdNumberIncludingDeleted(rdNumber)` — used only by the CSV resurrect path.
+- `resurrectTombstone(rdNumber)` — clears `deletedAt = NULL` + flips `syncStatus = DIRTY`; phone-side mirror of the portal's `bulkUpsertAccounts` `deleted_at: null` stamp.
+
 ### New table: `device_settings`
 
 A single-row table holding per-phone settings:
@@ -396,6 +457,18 @@ A flat reference. For every local table, the cloud table, and how each column tr
 | `rd_numbers.monthsList` | `months_list` | direct |
 | `device_settings.deviceCloudId` | `devices.id` | direct |
 | `device_settings.deviceName` | `devices.device_name` | direct |
+| `rd_accounts.rdNumber` (PK) | `rd_accounts.rd_number` (PK part) | direct |
+| `rd_accounts.cloudId` | (= `rd_number`) | identity — no separate UUID |
+| `rd_accounts.name` | `name` | direct |
+| `rd_accounts.monthlyAmount` | `monthly_amount` | direct |
+| `rd_accounts.lastPaidThrough` | `last_paid_through` | direct (text `YYYY-MM`) |
+| `rd_accounts.source` | `source` | enum name (`MANUAL` / `CSV`) |
+| `rd_accounts.isActive` | `is_active` | direct |
+| `rd_accounts.accountOpenedDate` | `account_opened_date` | ISO date string ↔ date |
+| `rd_accounts.accountClosingDate` | `account_closing_date` | ISO date string ↔ date |
+| `rd_accounts.lastEditorDeviceId` | `last_editor_device_id` | direct, NULL = portal edit |
+| `rd_accounts.updatedAt` | `updated_at` | epoch ms ↔ timestamptz |
+| `rd_accounts.deletedAt` | `deleted_at` | epoch ms ↔ timestamptz, NULL = live |
 
 **Invariant:** every row's `cloudId` is generated by the **originating phone** at row-creation time (using `UUID.randomUUID().toString()`). This means a row knows its cloud identity before it ever touches the network, which makes uploads idempotent. Replaying the same INSERT (with `ON CONFLICT DO UPDATE`) is safe.
 
@@ -574,6 +647,7 @@ When the app is foregrounded, the phone subscribes to:
 - `realtime:public:scan_lots:owner_id=eq.<me>`
 - `realtime:public:rd_numbers:owner_id=eq.<me>`
 - `realtime:public:devices:owner_id=eq.<me>`
+- `realtime:public:rd_accounts:owner_id=eq.<me>`  (v8 — see §17)
 
 On any payload, the phone runs a targeted pull for the affected row. This gives ~1s cross-device latency on the happy path. The 5-min poll is a backstop.
 
@@ -701,23 +775,24 @@ ALTER TABLE devices ENABLE ROW LEVEL SECURITY;
 ALTER TABLE scan_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE scan_lots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE rd_numbers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE rd_accounts ENABLE ROW LEVEL SECURITY;  -- v8
 
 -- SELECT: see your own data
 CREATE POLICY "owner can read own devices" ON devices
   FOR SELECT USING (owner_id = auth.uid());
 CREATE POLICY "owner can read own sessions" ON scan_sessions
   FOR SELECT USING (owner_id = auth.uid());
--- ... and so on for lots, rd_numbers
+-- ... and so on for lots, rd_numbers, rd_accounts
 
 -- INSERT: only into your own rows
 CREATE POLICY "owner can insert own devices" ON devices
   FOR INSERT WITH CHECK (owner_id = auth.uid());
--- ... and so on
+-- ... and so on (including rd_accounts)
 
 -- UPDATE: only update your own rows
 CREATE POLICY "owner can update own devices" ON devices
   FOR UPDATE USING (owner_id = auth.uid()) WITH CHECK (owner_id = auth.uid());
--- ... and so on
+-- ... and so on (including rd_accounts)
 
 -- DELETE: we never DELETE from the client side; only set deleted_at.
 -- No DELETE policies. Hard deletes are admin-only (via Supabase dashboard).
@@ -759,6 +834,9 @@ Channels are subscribed when the app comes to foreground (in `MainActivity.onSta
 com.qrscanner.app
 ├── data
 │   ├── ... existing entities, DAOs, AppDatabase
+│   ├── RdAccount.kt                  ← v8 (see §17)
+│   ├── RdAccountDao.kt               ← v8
+│   ├── AccountSource.kt              ← v8 (MANUAL | CSV)
 │   ├── sync                          ← NEW PACKAGE
 │   │   ├── SyncStatus.kt
 │   │   ├── SyncDao.kt
@@ -771,9 +849,11 @@ com.qrscanner.app
 │       │   ├── ScanSessionDto.kt
 │       │   ├── ScanLotDto.kt
 │       │   ├── RdNumberDto.kt
-│       │   └── DeviceDto.kt
+│       │   ├── DeviceDto.kt
+│       │   └── RdAccountDto.kt       ← v8
 │       └── mappers                   (Entity ↔ DTO)
 │           ├── ScanSessionMapper.kt
+│           ├── RdAccountMapper.kt    ← v8
 │           └── ... etc
 ├── work
 │   ├── SyncPushWorker.kt             (one-shot, push only)
@@ -1164,13 +1244,14 @@ network conditions), so the non-fair mutex doesn't risk starvation.
 | `/sessions` | List of finalized sessions. Filters: date range, device, operator. Sort: end_time desc by default. Click a row → `/sessions/:id`. |
 | `/sessions/:id` | Detail view. LOTs as a list of cards, each expandable to show RD numbers + defaulter chips. "Edit defaulter months" button per row → modal with same picker UX as the app. |
 | `/search` | Free-text search by RD number. Returns the session(s) that number appears in. |
+| `/accounts` | **v8** — Account profiles list. Sortable table (Name / RD Number / Monthly amount / Paid till / Source / Actions). Edit dialog, Mark Inactive / Delete / Reactivate, and bulk CSV upload (Import CSV button). Full contract in §17. |
 | `/stats` | Aggregate dashboard. Total scans per day (line chart), defaulter rate over time, top operators by scan count, etc. |
 | `/devices` | Read-only list of registered phones with last_seen_at. |
 | `/settings` | Sign-out, profile name. (Minimal in v1.) |
 
 ### Realtime in the portal
 
-Same approach: subscribe to `scan_sessions`, `scan_lots`, `rd_numbers` channels. On any change, invalidate the relevant TanStack Query cache key, causing a re-fetch and rerender. Within ~1s of a phone finalizing a session, the portal's session list re-renders with the new entry at the top.
+Same approach: subscribe to `scan_sessions`, `scan_lots`, `rd_numbers`, `devices`, and `rd_accounts` channels (5 total — the 5th joins in v8 for the Accounts list). On any change, invalidate the relevant TanStack Query cache key (`['sessions']`, `['accounts']`, etc.), causing a re-fetch and rerender. Within ~1s of a phone finalizing a session or creating an account, the portal's corresponding list re-renders with the new entry at the top.
 
 ### Auth
 
@@ -1199,7 +1280,121 @@ DNS via Cloudflare (we'll use a subdomain we own).
 
 ---
 
-## 17. Migration plan (v5 → v6)
+## 17. Account profiles (rd_accounts)
+
+### Why this exists
+
+An RD number is just a string. A scanned RD number on its own does not tell the operator *whose* book this is, *how much* they pay per month, or *which month they last paid through*. The pre-v8 workflow recovered that context by hand (operator reads the printed name, recalls the denomination), which broke at scale: typos, forgotten denominations, "did I already collect from him this month?" become real problems above ~50 accounts.
+
+The `rd_accounts` table makes the account a **first-class entity** with a profile (name + monthly amount + paid-till state) that lives in both the phone and the portal, syncs across devices, and carries the auto-suggest signal into the defaulter dialog so the operator never has to remember "Sharma uncle is paid through August."
+
+### Entity model
+
+A single row per `(owner_id, rd_number)`. The natural composite PK is intentional: there is no need for a synthetic `id uuid` — the RD number string is globally unique within an owner's book (enforced by the phone-side regex `^\d{9,15}$` + the DB composite PK).
+
+| Field | Type | Why |
+|---|---|---|
+| `rd_number` | text, PK part | The visible identity. Stable across the account's life. |
+| `owner_id` | uuid, PK part, FK auth.users | RLS scoping; cascade delete on owner removal. |
+| `name` | text, NOT NULL | The account holder's name as the operator entered it (or as CSV upload provided). |
+| `monthly_amount` | int, NOT NULL, CHECK > 0 | Rupees per month. Drives caption on bulk-QR PDFs. |
+| `last_paid_through` | text, nullable, format `YYYY-MM` | Most recent month for which payment was recorded. **Phone-derived only** — never editable in the portal. NULL = never paid. |
+| `source` | text, NOT NULL, CHECK IN (`MANUAL`, `CSV`) | Where the account profile originated. CSV rows lock the edit affordance on the phone (Snackbar: "This account can only be edited by Sugam"). |
+| `is_active` | boolean, NOT NULL, default true | Soft state. Inactive accounts hide from the default Accounts list, do not block new-account creation by themselves, and **auto-reactivate on scan**. |
+| `account_opened_date` | date, nullable | Schema-only in v8 — no UI surface yet. Reserved for the future "account aging" report. |
+| `account_closing_date` | date, nullable | Schema-only in v8 — independent of `is_active`. "I marked it inactive" ≠ "the bank closed the account." |
+| `last_editor_device_id` | uuid, FK devices, nullable | Attribution. NULL = portal edit ("Portal" badge). Non-NULL = phone edit ("via Counter Phone"). |
+| `created_at` | timestamptz, NOT NULL, default now() | |
+| `updated_at` | timestamptz, NOT NULL, default now(), trigger-maintained | LWW basis. |
+| `deleted_at` | timestamptz, nullable | Tombstone. NULL = live. Soft-delete only; hard-delete is admin-only via Supabase Studio. |
+
+Cloud table DDL is appended to `cloud/schema.sql` as the "Schema patch v3" block (idempotent — safe to re-run after partial application). Indexes: `(owner_id, rd_number)` (the PK), `(owner_id, is_active)` for the Accounts list, and a `pg_trgm` GIN on `name` for the portal search box.
+
+### Three distinct row states
+
+The interplay of `is_active` and `deleted_at` defines three states with different visibility + reuse semantics:
+
+| `is_active` | `deleted_at` | State | Visible? | RD number reusable for new account? | Reactivates on scan? |
+|---|---|---|---|---|---|
+| true | NULL | **Active** | Yes (default list) | No (DB unique constraint blocks) | n/a |
+| false | NULL | **Mark Inactive** | Toggle "Show inactive" | No (composite PK blocks) | **Yes** |
+| n/a | non-NULL | **Soft-deleted** | Never | **Yes** (after tombstone, a new MANUAL row may insert) | n/a |
+
+This is the locked contract behind the two-path delete dialog: "Mark Inactive" is the recommended primary path because it preserves payment history and reactivates trivially; "Delete" is the secondary danger path that wipes the profile entirely and lets the operator reuse the RD number from scratch.
+
+### Auto-reactivate-on-scan
+
+In `RDScannerScreen.kt`, immediately after `rdNumberDao.insert(...)` on a successful scan, the phone runs:
+
+```kotlin
+val account = rdAccountDao.findByRdNumber(scannedNumber)
+if (account != null && !account.isActive) {
+    rdAccountDao.upsert(
+        account.copy(
+            isActive = true,
+            syncStatus = SyncStatus.DIRTY,
+            updatedAt = System.currentTimeMillis(),
+        )
+    )
+    Toast.makeText(context, "Account reactivated: ${account.name}", LONG).show()
+}
+```
+
+Soft-deleted rows are explicitly NOT reactivated (they're invisible to `findByRdNumber`; only `findByRdNumberIncludingDeleted` returns them, and that's only used by the CSV resurrect path).
+
+### CSV bulk upload (portal-only)
+
+The portal `/accounts` page exposes an "Import CSV" affordance — three-column strict header `name,rd_number,monthly_amount`. Validation rules:
+- Header row is case-insensitive + whitespace-stripped (papaparse `transformHeader`).
+- `rd_number` regex `^\d{9,15}$`.
+- `monthly_amount` must be a positive integer (no floats, no zero).
+- In-file dedupe: if the CSV has the same `rd_number` twice, the second occurrence is flagged as an error.
+- Every imported row stamps `source = 'CSV'`, `is_active = true`, `last_editor_device_id = null`, and **`deleted_at = null`** — that last one is what resurrects a tombstoned row on re-import (mirrors phone `RdAccountDao.resurrectTombstone()`).
+
+Per-row upsert (not array form) so each failure is reportable in the result toast (`Imported 47 · skipped 3 invalid · 1 failed`).
+
+### Conflict resolution
+
+LWW by `updated_at`, same as §11. Three project-specific clarifications:
+
+1. **Portal CSV always wins.** The user's locked decision: a CSV upload's `updated_at` (server-stamped at upsert) is by definition newer than any prior phone edit on the same `rd_number`. The phone pulls the new name/amount on next sync.
+2. **`last_paid_through` is monotonic-only on push.** When the phone finalizes a session and `markSessionForSync` recomputes the holder's latest paid month, the upsert clause is `SET last_paid_through = GREATEST(EXCLUDED.last_paid_through, rd_accounts.last_paid_through)`. The phone *cannot* push a value older than what's already there — defends against an out-of-order replay overwriting a more recent payment.
+3. **The portal NEVER edits `last_paid_through`.** It's not in the edit dialog form, not in `updateAccount()` query, never sent. The field is a phone-derived signal only.
+
+### Push order
+
+Inside `SyncRepository.runPushLocked()`, accounts push **before** sessions:
+
+```
+dirty accounts → upsert /rd_accounts ...........(idempotent, owner+rd PK)
+dirty sessions → upsert /scan_sessions ..........(needs accounts? no, but consistent ordering)
+dirty lots → upsert /scan_lots
+dirty rd_numbers → upsert /rd_numbers
+```
+
+Master-data first principle: even though there's no FK from sessions to accounts, the operator's mental model is "accounts exist, then I scan against them," and sync ordering should mirror that.
+
+### Realtime channel
+
+A fifth channel `realtime:public:rd_accounts:owner_id=eq.<me>` joins the existing four (devices, sessions, lots, rd_numbers). On the phone the handler runs a targeted pull → `mergeRdAccounts`. The portal handler invalidates the `['accounts']` TanStack Query key. No `RemoteEditNotice` is emitted on account merges — they're silent background sync; the cross-device "owner edited Session #47" notice pattern (§15.5) is only for session-level edits where the operator might be mid-scan.
+
+### Defaulter dialog auto-suggest
+
+When the operator opens the defaulter month picker for a freshly-scanned RD number, the dialog now:
+1. Looks up `rdAccountDao.findByRdNumber(scannedNumber)`.
+2. If `lastPaidThrough != null`, the month-picker block builds **backward** from `nextMonth(lastPaidThrough)` and shows a banner "Last paid: through Aug 2025" above the slider.
+3. On save, if the operator's chosen `block_start_month > lastPaidThrough + 1`, a "Skip gap?" confirmation modal fires — guards against "I forgot September existed."
+
+If the account doesn't exist (operator skipped the AddAccount flow), behavior falls back to the pre-v8 anchor logic — the dialog still works; the auto-suggest just doesn't fire.
+
+### Open phase-2 deferrals
+
+- **OCR thermal-print mode** for reading the dot-matrix RD book directly into a new account profile — researched but not built; lives in §24.
+- **Account-aging report** using `account_opened_date` — schema-ready, UI deferred.
+
+---
+
+## 18. Migration plan (v5 → v6)
 
 This is a schema migration on Android only. No data migration on the cloud side — the cloud database is empty until we first sync.
 
@@ -1290,7 +1485,7 @@ If the user upgrades while a session is `isActive=1` mid-scan, that session keep
 
 ---
 
-## 18. Phase-by-phase build plan
+## 19. Phase-by-phase build plan
 
 We split the work into 5 self-contained phases. Each phase ends with a working app at that level of capability. Phase boundaries are commit boundaries — after each phase you should have a green build, a clean tree, and tests-by-eyeball that the prior phase's behavior still works.
 
@@ -1381,7 +1576,7 @@ Calendar: spread realistically over 3–4 weeks.
 
 ---
 
-## 18.5 Continuous QC Cadence (mandatory at short intervals)
+## 19.5 Continuous QC Cadence (mandatory at short intervals)
 
 The defaulter feature shipped clean only because we ran 5 oracle review rounds (29 oracle invocations + 5 main-chat sweeps) with main-chat static verification between each. The same cadence applies here, formalized so an unattended overnight build can't skip it.
 
@@ -1437,7 +1632,7 @@ At the end of each Phase (1 through 5), in addition to per-unit QC:
 
 2. **Main-chat sweep** synthesizing oracle findings against the spec contract.
 
-3. **Acceptance criteria checklist** (§19) must be checked off with evidence (test output, screenshot, Supabase Studio screenshot, etc.) before declaring phase complete.
+3. **Acceptance criteria checklist** (§20) must be checked off with evidence (test output, screenshot, Supabase Studio screenshot, etc.) before declaring phase complete.
 
 4. **Update spec** to reflect anything reality forced different from plan. Commit as `docs(spec): update §X for phase N divergence`.
 
@@ -1460,7 +1655,7 @@ Without it, I can produce 12 days of code that looks done and isn't. With it, ev
 
 ---
 
-## 19. Acceptance criteria per phase
+## 20. Acceptance criteria per phase
 
 Concrete, testable. "Done" means each box is checked.
 
@@ -1506,7 +1701,7 @@ Concrete, testable. "Done" means each box is checked.
 
 ---
 
-## 20. Runbook (setup from scratch)
+## 21. Runbook (setup from scratch)
 
 A new engineer should be able to follow this and have a working system end-to-end.
 
@@ -1576,11 +1771,11 @@ DNS: optionally point a subdomain at the Pages project.
 5. Open the portal URL in a browser, sign in with the same creds.
 6. See the session at the top of `/sessions`.
 
-If any step fails, see §21.
+If any step fails, see §22.
 
 ---
 
-## 21. Failure modes and recovery
+## 22. Failure modes and recovery
 
 A non-exhaustive but representative list. Add to this as we learn.
 
@@ -1645,7 +1840,7 @@ A non-exhaustive but representative list. Add to this as we learn.
 
 ---
 
-## 22. Cost and free-tier limits
+## 23. Cost and free-tier limits
 
 A snapshot reality check. Numbers as of doc creation; subject to provider changes.
 
@@ -1680,7 +1875,7 @@ A snapshot reality check. Numbers as of doc creation; subject to provider change
 
 ---
 
-## 23. Open questions / deferred items
+## 24. Open questions / deferred items
 
 Items we've consciously left for later. If any of these become "I need this now" during the build, surface to the spec — don't unilaterally add.
 
@@ -1699,7 +1894,7 @@ Items we've consciously left for later. If any of these become "I need this now"
 
 ---
 
-## 24. Glossary
+## 25. Glossary
 
 - **Owner**: the human who creates the Supabase auth account. There is one per system.
 - **Operator**: a human who uses the phone. Not an auth principal; identified by free-text name.
@@ -1707,6 +1902,11 @@ Items we've consciously left for later. If any of these become "I need this now"
 - **Session** ("scan session"): one continuous scanning period on one phone, ended by tapping "End Session." Contains 0..N LOTs.
 - **LOT**: a batch of RD numbers scanned in one go within a session, ended by tapping "Finish LOT."
 - **RD number**: a single scanned account number, with optional defaulter metadata (`monthsPaid`, `monthsList`).
+- **RD account** (v8): a first-class profile for an RD number — `name`, `monthlyAmount`, `lastPaidThrough`, source (MANUAL/CSV), state (active/inactive/tombstoned). See §17.
+- **Account source** (v8): `MANUAL` (added on the phone via AddAccounts spreadsheet) or `CSV` (added via the portal bulk upload). CSV rows lock the phone edit affordance.
+- **Mark Inactive** (v8): the recommended close-out path — preserves payment history, hides from default list, auto-reactivates on scan. Distinct from soft-delete.
+- **Tombstone resurrect** (v8): the CSV-reimport path that clears `deleted_at` on a soft-deleted row, making it visible again. Mirrors phone-side `RdAccountDao.resurrectTombstone()`.
+- **`lastPaidThrough`** (v8): the most recent `YYYY-MM` for which the operator recorded payment on an account. Phone-derived only; monotonic-only on push (cannot regress); never editable in the portal.
 - **Defaulter**: an RD number where `monthsPaid > 1`.
 - **Active session**: a session locally where `is_active = true` and `end_time` is null. Device-private. Never in cloud.
 - **Finalized session**: a session where `is_active = false`. Eligible to sync.
@@ -1714,7 +1914,7 @@ Items we've consciously left for later. If any of these become "I need this now"
 - **DIRTY / SYNCING / SYNCED / SYNC_ERROR / LOCAL_ONLY**: see §6. The five states of a local row's sync lifecycle.
 - **Push**: phone → cloud.
 - **Pull**: cloud → phone.
-- **Cloud ID**: the UUID that identifies a row across devices. Same row across all devices has the same cloudId.
+- **Cloud ID**: the UUID that identifies a row across devices. Same row across all devices has the same cloudId. For `rd_accounts` the cloudId *is* the `rd_number` string (no separate UUID).
 - **`updated_at`**: server-trigger-maintained timestamp used for conflict resolution. The newer one wins.
 - **Silent overwrite / silent loser**: when a sync merge discards local changes because remote is newer. We log it but don't surface to user.
 - **Status pill**: the small visual indicator on HomeScreen showing sync state.
