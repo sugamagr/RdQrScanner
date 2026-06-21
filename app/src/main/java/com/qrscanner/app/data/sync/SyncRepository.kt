@@ -604,7 +604,19 @@ class SyncRepository(
         }
 
         val now = System.currentTimeMillis()
-        updateSummary { it.copy(lastSuccessfulPullAt = now, lastErrorMessage = null) }
+        updateSummary {
+            // Pull success means cloud is reachable + auth works. Reset
+            // any stale ERROR/SCHEMA_MISSING that a prior push failure left
+            // behind so the pill reflects current reality. If pending push
+            // work still exists, the next push cycle will re-set ERROR
+            // immediately on failure; the brief SYNCED window in between
+            // is the eventually-consistent UI behavior we want.
+            val nextState = when {
+                it.pendingCount > 0 -> SyncPillState.PENDING
+                else -> SyncPillState.SYNCED
+            }
+            it.copy(state = nextState, lastSuccessfulPullAt = now, lastErrorMessage = null)
+        }
         notifyRemoteEdits(allNotices)
         return Result.success(Unit)
     }
