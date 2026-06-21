@@ -48,6 +48,16 @@ const config: Config = {
       borderRadius: {
         pill: '9999px',
       },
+      keyframes: {
+        'csv-progress': {
+          '0%': { transform: 'translateX(-100%)' },
+          '50%': { transform: 'translateX(150%)' },
+          '100%': { transform: 'translateX(350%)' },
+        },
+      },
+      animation: {
+        'csv-progress': 'csv-progress 1.2s ease-in-out infinite',
+      },
     },
   },
   plugins: [],

@@ -113,10 +113,11 @@ export function DeleteOrInactivateDialog({ account, onClose }: Props) {
 
         <div className="flex-1 space-y-3 overflow-y-auto px-5 py-5 text-sm">
           <p className="text-ink-primary">
-            <span className="font-semibold">Mark inactive (recommended)</span> — the
-            account stays in the system, you can re-activate it any time, and all
-            past payment history is preserved. Pick this when an account closes
-            naturally.
+            <span className="font-semibold">Mark inactive</span>
+            <span className="ml-1.5 inline-flex rounded-pill bg-accent-mint/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-accent-mint-ink">
+              Recommended
+            </span>
+            <span> — the account stays in the system, you can re-activate it any time, and all past payment history is preserved. Pick this when an account closes naturally.</span>
           </p>
           <p className="text-ink-secondary">
             <span className="font-semibold text-danger">Delete</span> — wipes the

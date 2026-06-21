@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowDown,
   ArrowUp,
@@ -7,15 +7,18 @@ import {
   Edit3,
   Lock,
   MoreVertical,
+  Search as SearchIcon,
   Upload,
+  Users,
+  X,
 } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { AccountEditDialog } from '../components/AccountEditDialog';
 import { DeleteOrInactivateDialog } from '../components/DeleteOrInactivateDialog';
 import { ImportCsvDialog } from '../components/ImportCsvDialog';
-import { fetchAccounts } from '../lib/queries';
+import { fetchAccounts, reactivateAccount } from '../lib/queries';
 import { useAuth } from '../lib/auth';
-import { formatNumber, formatRelativeTime } from '../lib/format';
+import { formatNumber } from '../lib/format';
 import type { RdAccountRow } from '../types/db';
 
 type SortKey = 'name' | 'rd_number' | 'monthly_amount' | 'last_paid_through';
@@ -24,10 +27,18 @@ type SortDir = 'asc' | 'desc';
 export function AccountsPage() {
   const { user } = useAuth();
   const ownerId = user?.id ?? '';
+  const qc = useQueryClient();
 
   const query = useQuery({
     queryKey: ['accounts'],
     queryFn: fetchAccounts,
+  });
+
+  const reactivateMutation = useMutation({
+    mutationFn: (rdNumber: string) => reactivateAccount(rdNumber),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['accounts'] });
+    },
   });
 
   const [search, setSearch] = useState('');
@@ -39,6 +50,12 @@ export function AccountsPage() {
   const [importing, setImporting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [overflowFor, setOverflowFor] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = window.setTimeout(() => setToast(null), 4000);
+    return () => window.clearTimeout(t);
+  }, [toast]);
 
   const allAccounts = query.data ?? [];
   const activeCount = allAccounts.filter((a) => a.is_active).length;
@@ -101,17 +118,30 @@ export function AccountsPage() {
       />
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        <label className="contents">
-          <span className="sr-only">Search accounts</span>
+        <div className="relative w-full max-w-sm sm:w-72">
+          <SearchIcon
+            aria-hidden="true"
+            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted"
+          />
           <input
             type="text"
-            placeholder="Search name or RD number"
+            placeholder="Search by name or RD number"
             aria-label="Search accounts"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full max-w-sm rounded-pill border border-surface-border bg-surface px-3.5 py-1.5 text-sm placeholder:text-ink-muted sm:w-72"
+            className="w-full rounded-pill border border-surface-border bg-surface py-1.5 pl-9 pr-9 text-sm placeholder:text-ink-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           />
-        </label>
+          {search.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setSearch('')}
+              aria-label="Clear search"
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-ink-muted transition-colors hover:bg-surface-alt hover:text-ink-primary"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
         {inactiveCount > 0 && (
           <button
             type="button"
@@ -136,12 +166,17 @@ export function AccountsPage() {
       {isInitialLoad && <Skeletons />}
 
       {!isInitialLoad && visibleAccounts.length === 0 && !query.isError && (
-        <EmptyState isFiltered={search.length > 0 || !showInactive} />
+        <EmptyState
+          isFiltered={search.length > 0 || (inactiveCount > 0 && !showInactive)}
+          onImportClick={() => setImporting(true)}
+          importDisabled={!ownerId}
+        />
       )}
 
       {!isInitialLoad && visibleAccounts.length > 0 && (
         <div className="mt-6 overflow-x-auto rounded-2xl border border-surface-border bg-surface shadow-card">
           <table className="w-full min-w-[760px] text-left text-sm">
+            <caption className="sr-only">RD Accounts list</caption>
             <thead className="border-b border-surface-border bg-surface-alt text-xs uppercase tracking-wide text-ink-secondary">
               <tr>
                 <SortableTh sortKey="name" current={sortKey} dir={sortDir} onClick={toggleSort}>
@@ -150,7 +185,13 @@ export function AccountsPage() {
                 <SortableTh sortKey="rd_number" current={sortKey} dir={sortDir} onClick={toggleSort}>
                   RD Number
                 </SortableTh>
-                <SortableTh sortKey="monthly_amount" current={sortKey} dir={sortDir} onClick={toggleSort}>
+                <SortableTh
+                  sortKey="monthly_amount"
+                  current={sortKey}
+                  dir={sortDir}
+                  onClick={toggleSort}
+                  align="right"
+                >
                   Monthly amount
                 </SortableTh>
                 <SortableTh
@@ -158,6 +199,7 @@ export function AccountsPage() {
                   current={sortKey}
                   dir={sortDir}
                   onClick={toggleSort}
+                  align="right"
                 >
                   Paid till
                 </SortableTh>
@@ -187,16 +229,16 @@ export function AccountsPage() {
                     <td className="px-4 py-3 align-middle font-mono text-ink-secondary">
                       {account.rd_number}
                     </td>
-                    <td className="px-4 py-3 align-middle font-mono text-ink-primary">
+                    <td className="px-4 py-3 align-middle text-right font-mono text-ink-primary">
                       ₹{formatNumber(account.monthly_amount)}
                     </td>
-                    <td className="px-4 py-3 align-middle text-ink-secondary">
+                    <td className="px-4 py-3 align-middle text-right text-ink-secondary">
                       {account.last_paid_through ? (
                         <span className="font-medium text-accent-mint-ink">
                           {formatPaidTill(account.last_paid_through)}
                         </span>
                       ) : (
-                        <span className="text-ink-muted">Not started</span>
+                        <span className="text-ink-muted">—</span>
                       )}
                     </td>
                     <td className="px-4 py-3 align-middle">
@@ -209,7 +251,9 @@ export function AccountsPage() {
                           CSV
                         </span>
                       ) : (
-                        <span className="text-[11px] text-ink-muted">Manual</span>
+                        <span className="inline-flex rounded-pill bg-surface-alt px-2 py-0.5 text-[10px] font-medium text-ink-muted ring-1 ring-surface-border">
+                          Manual
+                        </span>
                       )}
                     </td>
                     <td className="px-4 py-3 align-middle">
@@ -217,42 +261,38 @@ export function AccountsPage() {
                         <button
                           type="button"
                           onClick={() => setEditing(account)}
-                          className="rounded-lg p-1.5 text-ink-secondary hover:bg-surface-alt hover:text-ink-primary"
+                          className="rounded-lg p-1.5 text-ink-secondary transition-colors hover:bg-surface-alt hover:text-ink-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                           aria-label={`Edit ${account.name}`}
                         >
                           <Edit3 className="h-4 w-4" />
                         </button>
-                        <div className="relative">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setOverflowFor((cur) =>
-                                cur === account.rd_number ? null : account.rd_number
-                              )
-                            }
-                            className="rounded-lg p-1.5 text-ink-secondary hover:bg-surface-alt hover:text-ink-primary"
-                            aria-label={`More actions for ${account.name}`}
-                          >
-                            <MoreVertical className="h-4 w-4" />
-                          </button>
-                          {overflowFor === account.rd_number && (
-                            <div
-                              className="absolute right-0 top-full z-10 mt-1 w-44 rounded-xl border border-surface-border bg-surface py-1 shadow-elevated"
-                              onMouseLeave={() => setOverflowFor(null)}
-                            >
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setOverflowFor(null);
-                                  setDeleting(account);
-                                }}
-                                className="block w-full px-3 py-1.5 text-left text-xs text-ink-primary hover:bg-surface-alt"
-                              >
-                                Mark inactive / Delete
-                              </button>
-                            </div>
-                          )}
-                        </div>
+                        <OverflowMenu
+                          account={account}
+                          isOpen={overflowFor === account.rd_number}
+                          onToggle={() =>
+                            setOverflowFor((cur) =>
+                              cur === account.rd_number ? null : account.rd_number
+                            )
+                          }
+                          onClose={() => setOverflowFor(null)}
+                          onMarkInactiveOrDelete={() => {
+                            setOverflowFor(null);
+                            setDeleting(account);
+                          }}
+                          onReactivate={() => {
+                            setOverflowFor(null);
+                            reactivateMutation.mutate(account.rd_number, {
+                              onSuccess: () =>
+                                setToast(`Reactivated: ${account.name}`),
+                              onError: (err) =>
+                                setToast(
+                                  err instanceof Error
+                                    ? `Reactivate failed: ${err.message}`
+                                    : 'Reactivate failed.'
+                                ),
+                            });
+                          }}
+                        />
                       </div>
                     </td>
                   </tr>
@@ -277,14 +317,109 @@ export function AccountsPage() {
         />
       )}
       {toast && (
-        <div className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center">
+        <div
+          role="status"
+          aria-live="polite"
+          className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center"
+        >
           <button
             type="button"
             onClick={() => setToast(null)}
-            className="pointer-events-auto rounded-pill bg-ink-primary px-4 py-2 text-xs font-medium text-white shadow-elevated"
+            className="pointer-events-auto inline-flex items-center gap-2 rounded-pill bg-ink-primary px-4 py-2 text-xs font-medium text-white shadow-elevated"
           >
-            {toast} · tap to dismiss
+            <span>{toast}</span>
+            <X className="h-3 w-3 opacity-70" />
           </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OverflowMenu({
+  account,
+  isOpen,
+  onToggle,
+  onClose,
+  onMarkInactiveOrDelete,
+  onReactivate,
+}: {
+  account: RdAccountRow;
+  isOpen: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+  onMarkInactiveOrDelete: () => void;
+  onReactivate: () => void;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+        triggerRef.current?.focus();
+      }
+    };
+    const onClickOutside = (e: MouseEvent) => {
+      if (!containerRef.current?.contains(e.target as Node)) onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('mousedown', onClickOutside);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('mousedown', onClickOutside);
+    };
+  }, [isOpen, onClose]);
+
+  return (
+    <div className="relative" ref={containerRef}>
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={onToggle}
+        aria-haspopup="menu"
+        aria-expanded={isOpen}
+        aria-label={`More actions for ${account.name}`}
+        className="rounded-lg p-1.5 text-ink-secondary transition-colors hover:bg-surface-alt hover:text-ink-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+      >
+        <MoreVertical className="h-4 w-4" />
+      </button>
+      {isOpen && (
+        <div
+          role="menu"
+          className="absolute right-0 top-full z-10 mt-1 w-48 rounded-xl border border-surface-border bg-surface py-1 shadow-elevated"
+        >
+          {account.is_active ? (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={onMarkInactiveOrDelete}
+              className="block w-full px-3 py-2 text-left text-xs text-ink-primary transition-colors hover:bg-surface-alt focus-visible:bg-surface-alt focus-visible:outline-none"
+            >
+              Mark inactive / Delete
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={onReactivate}
+                className="block w-full px-3 py-2 text-left text-xs font-medium text-accent-mint-ink transition-colors hover:bg-accent-mint/10 focus-visible:bg-accent-mint/10 focus-visible:outline-none"
+              >
+                Reactivate
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={onMarkInactiveOrDelete}
+                className="block w-full px-3 py-2 text-left text-xs text-danger transition-colors hover:bg-danger/5 focus-visible:bg-danger/5 focus-visible:outline-none"
+              >
+                Delete permanently
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>
@@ -313,21 +448,27 @@ function SortableTh({
   dir,
   onClick,
   children,
+  align = 'left',
 }: {
   sortKey: SortKey;
   current: SortKey;
   dir: SortDir;
   onClick: (key: SortKey) => void;
   children: React.ReactNode;
+  align?: 'left' | 'right';
 }) {
   const isActive = current === sortKey;
   const Icon = !isActive ? ArrowUpDown : dir === 'asc' ? ArrowUp : ArrowDown;
+  const ariaSort = !isActive ? 'none' : dir === 'asc' ? 'ascending' : 'descending';
   return (
-    <th className="px-4 py-3 font-medium">
+    <th
+      aria-sort={ariaSort}
+      className={`px-4 py-3 font-medium ${align === 'right' ? 'text-right' : ''}`}
+    >
       <button
         type="button"
         onClick={() => onClick(sortKey)}
-        className={`inline-flex items-center gap-1 transition-colors ${
+        className={`inline-flex items-center gap-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
           isActive ? 'text-ink-primary' : 'hover:text-ink-primary'
         }`}
       >
@@ -351,17 +492,39 @@ function Skeletons() {
   );
 }
 
-function EmptyState({ isFiltered }: { isFiltered: boolean }) {
+function EmptyState({
+  isFiltered,
+  onImportClick,
+  importDisabled,
+}: {
+  isFiltered: boolean;
+  onImportClick: () => void;
+  importDisabled: boolean;
+}) {
   return (
     <div className="mt-6 rounded-2xl border border-dashed border-surface-border bg-surface p-12 text-center">
-      <p className="text-sm font-medium text-ink-primary">
+      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-surface-alt text-ink-muted">
+        <Users className="h-7 w-7" aria-hidden="true" />
+      </div>
+      <p className="mt-4 text-sm font-medium text-ink-primary">
         {isFiltered ? 'No accounts match.' : 'No accounts yet.'}
       </p>
-      <p className="mt-1 text-xs text-ink-secondary">
+      <p className="mx-auto mt-1 max-w-md text-xs text-ink-secondary">
         {isFiltered
           ? 'Try a different search or toggle "Show inactive".'
           : 'Import a CSV or add accounts from a phone to populate this list.'}
       </p>
+      {!isFiltered && (
+        <button
+          type="button"
+          onClick={onImportClick}
+          disabled={importDisabled}
+          className="mt-5 inline-flex items-center gap-1.5 rounded-pill bg-primary px-3.5 py-1.5 text-xs font-semibold text-white shadow-card transition-colors hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Upload className="h-3.5 w-3.5" />
+          Import CSV
+        </button>
+      )}
     </div>
   );
 }
@@ -379,6 +542,4 @@ function formatPaidTill(yyyyMm: string): string {
   return `${names[monthIdx]} ${year}`;
 }
 
-// Used for a future spec extension; suppresses unused import warning
-// on formatRelativeTime in this revision without removing the import.
-void formatRelativeTime;
+

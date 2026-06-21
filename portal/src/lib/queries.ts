@@ -290,6 +290,11 @@ export async function bulkUpsertAccounts(
       source: 'CSV' as AccountSource,
       is_active: true,
       last_editor_device_id: null,
+      // Resurrect tombstoned rows on CSV re-import. Mirrors phone-side
+      // RdAccountDao.resurrectTombstone(). Without this the upsert
+      // updates the row but leaves deleted_at set, making it invisible
+      // to fetchAccounts() (which filters .is('deleted_at', null)).
+      deleted_at: null,
     };
     const { error } = await supabase
       .from('rd_accounts')

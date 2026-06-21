@@ -1,6 +1,12 @@
-import { useEffect, useRef, useState, type ChangeEvent } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type DragEvent,
+} from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Download, Loader2, Upload, X } from 'lucide-react';
+import { Download, FileSpreadsheet, Loader2, Upload, X } from 'lucide-react';
 import {
   bulkUpsertAccounts,
   type BulkUpsertResult,
@@ -32,9 +38,38 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
   const [file, setFile] = useState<File | null>(null);
   const [parseResult, setParseResult] = useState<CsvParseResult | null>(null);
   const [showAllErrors, setShowAllErrors] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
+
+  const handleFile = async (picked: File | null) => {
+    setFile(picked);
+    setParseResult(null);
+    setShowAllErrors(false);
+    if (picked) {
+      const result = await parseAccountsCsv(picked);
+      setParseResult(result);
+    }
+  };
+
+  const onDragOver = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    if (!isDragging) setIsDragging(true);
+  };
+  const onDragLeave = (e: DragEvent<HTMLDivElement>) => {
+    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+    setIsDragging(false);
+  };
+  const onDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const dropped = e.dataTransfer.files?.[0];
+    if (dropped && /\.csv$/i.test(dropped.name)) {
+      void handleFile(dropped);
+    }
+  };
 
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
@@ -73,13 +108,7 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
 
   const onFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
     const picked = e.target.files?.[0] ?? null;
-    setFile(picked);
-    setParseResult(null);
-    setShowAllErrors(false);
-    if (picked) {
-      const result = await parseAccountsCsv(picked);
-      setParseResult(result);
-    }
+    await handleFile(picked);
   };
 
   const upload = useMutation<BulkUpsertResult>({
@@ -146,7 +175,16 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
             Download template
           </button>
 
-          <div className="rounded-2xl border-2 border-dashed border-surface-border bg-surface-alt p-6 text-center">
+          <div
+            onDragOver={onDragOver}
+            onDragLeave={onDragLeave}
+            onDrop={onDrop}
+            className={`rounded-2xl border-2 border-dashed p-6 text-center transition-colors ${
+              isDragging
+                ? 'border-primary bg-primary/5'
+                : 'border-surface-border bg-surface-alt'
+            }`}
+          >
             <input
               ref={fileInputRef}
               type="file"
@@ -155,9 +193,20 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
               className="sr-only"
               id="csv-file-input"
             />
+            <FileSpreadsheet
+              aria-hidden="true"
+              className={`mx-auto h-8 w-8 transition-colors ${
+                isDragging ? 'text-primary' : 'text-ink-muted'
+              }`}
+            />
+            <p className="mt-2 text-xs text-ink-secondary">
+              {isDragging
+                ? 'Drop your CSV file to load it'
+                : 'Drag a CSV file here, or'}
+            </p>
             <label
               htmlFor="csv-file-input"
-              className="inline-flex cursor-pointer items-center gap-1.5 rounded-pill bg-primary px-4 py-2 text-xs font-semibold text-white shadow-card hover:bg-primary-dark"
+              className="mt-2 inline-flex cursor-pointer items-center gap-1.5 rounded-pill bg-primary px-4 py-2 text-xs font-semibold text-white shadow-card transition-colors hover:bg-primary-dark"
             >
               <Upload className="h-3.5 w-3.5" />
               {file ? 'Choose a different file' : 'Choose CSV file'}
@@ -237,6 +286,25 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
                   </ul>
                 </div>
               )}
+            </div>
+          )}
+
+          {upload.isPending && parseResult && (
+            <div
+              role="progressbar"
+              aria-label="Uploading accounts"
+              className="space-y-1.5"
+            >
+              <div className="flex items-center justify-between text-[11px] text-ink-secondary">
+                <span>
+                  Importing {parseResult.valid.length} account
+                  {parseResult.valid.length === 1 ? '' : 's'}…
+                </span>
+                <Loader2 className="h-3 w-3 animate-spin text-primary" />
+              </div>
+              <div className="h-1 overflow-hidden rounded-full bg-surface-alt">
+                <div className="h-full w-1/3 animate-csv-progress rounded-full bg-primary" />
+              </div>
             </div>
           )}
 
