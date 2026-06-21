@@ -1,5 +1,5 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
-import { useAuth } from './lib/auth';
+import { useAuth } from './lib/useAuth';
 import { useRealtimeSync } from './lib/useRealtimeSync';
 import { SignInPage } from './pages/SignIn';
 import { SessionsPage } from './pages/Sessions';

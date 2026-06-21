@@ -1,6 +1,6 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
-import { useAuth } from '../lib/auth';
+import { useAuth } from '../lib/useAuth';
 
 export function SignInPage() {
   const { session, signIn, expiryReason } = useAuth();

@@ -1,31 +1,14 @@
 import {
-  createContext,
-  useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from 'react';
-import type { Session, User } from '@supabase/supabase-js';
+import type { Session } from '@supabase/supabase-js';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
-
-interface AuthContextValue {
-  user: User | null;
-  session: Session | null;
-  loading: boolean;
-  /**
-   * Set to a friendly reason when the session ended involuntarily
-   * (refresh failure, server-side revoke). Cleared on the next
-   * successful sign-in. The SignIn page surfaces this as a soft hint.
-   */
-  expiryReason: string | null;
-  signIn: (email: string, password: string) => Promise<{ error: string | null }>;
-  signOut: () => Promise<void>;
-}
-
-const AuthContext = createContext<AuthContextValue | null>(null);
+import { AuthContext, type AuthContextValue } from './useAuth';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
@@ -114,12 +97,4 @@ function friendlyAuthError(raw: string, status?: number): string {
     return 'Server error. Try again in a moment.';
   }
   return raw;
-}
-
-export function useAuth(): AuthContextValue {
-  const ctx = useContext(AuthContext);
-  if (!ctx) {
-    throw new Error('useAuth must be used inside <AuthProvider>');
-  }
-  return ctx;
 }

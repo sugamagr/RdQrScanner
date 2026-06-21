@@ -17,7 +17,7 @@ import { AccountEditDialog } from '../components/AccountEditDialog';
 import { DeleteOrInactivateDialog } from '../components/DeleteOrInactivateDialog';
 import { ImportCsvDialog } from '../components/ImportCsvDialog';
 import { fetchAccounts, reactivateAccount } from '../lib/queries';
-import { useAuth } from '../lib/auth';
+import { useAuth } from '../lib/useAuth';
 import { formatNumber } from '../lib/format';
 import type { RdAccountRow } from '../types/db';
 

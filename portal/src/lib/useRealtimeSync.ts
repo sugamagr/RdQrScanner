@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
-import { useAuth } from './auth';
+import { useAuth } from './useAuth';
 
 /**
  * Subscribes to Supabase Realtime for the four data tables and
