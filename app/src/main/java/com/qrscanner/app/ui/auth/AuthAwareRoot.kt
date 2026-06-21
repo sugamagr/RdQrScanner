@@ -28,8 +28,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import android.content.Context
 import androidx.core.content.ContextCompat
 import com.qrscanner.app.QRScannerApp
+import com.qrscanner.app.R
 import com.qrscanner.app.cloud.CloudException
 import com.qrscanner.app.cloud.CloudSessionStatus
 import com.qrscanner.app.cloud.dto.DeviceDto
@@ -146,9 +148,9 @@ fun AuthAwareRoot() {
                             // (oracle adversarial #6).
                             runCatching { app.syncScheduler.enqueuePush() }
                         } catch (e: CloudException) {
-                            signInError = e.toUserMessage()
+                            signInError = e.toUserMessage(context)
                         } catch (e: Exception) {
-                            signInError = e.message ?: "unknown error"
+                            signInError = e.message ?: context.getString(R.string.auth_error_unknown)
                         } finally {
                             signInLoading = false
                         }
@@ -199,10 +201,10 @@ fun AuthAwareRoot() {
                             // (oracle regression W5 + spec §17 contract).
                             runCatching { app.syncScheduler.enqueuePush() }
                         } catch (e: CloudException) {
-                            firstRunError = e.toUserMessage()
+                            firstRunError = e.toUserMessage(context)
                             android.util.Log.w("AuthAwareRoot", "first-run cloud push failed", e)
                         } catch (e: Exception) {
-                            firstRunError = e.message ?: "Couldn't save device. Try again."
+                            firstRunError = e.message ?: context.getString(R.string.firstrun_save_failed)
                             android.util.Log.w("AuthAwareRoot", "first-run unexpected failure", e)
                         } finally {
                             firstRunSaving = false
@@ -318,15 +320,18 @@ private fun appVersion(context: android.content.Context): String? = try {
     null
 }
 
-private fun CloudException.toUserMessage(): String = when (this) {
-    is CloudException.Network -> "No network — try again when you're online."
-    is CloudException.InvalidCredentials -> "Email or password incorrect."
-    is CloudException.AuthExpired -> "Session expired. Sign in again."
-    is CloudException.NotConfigured -> "Cloud sync not configured."
-    is CloudException.Server -> "Server error ($status). Try again in a moment."
-    is CloudException.Conflict -> message ?: "Conflict during sign-in."
-    is CloudException.SchemaMissing -> "Cloud database setup pending — see SHIP_READY.md."
-    is CloudException.Unknown -> message ?: "Unknown error."
+// All branches resolve via string resources so Hindi locale (values-hi/strings.xml)
+// renders correctly. C5-P5 oracle finding: strings existed in resources but were
+// shadowed by hardcoded English here, breaking i18n.
+private fun CloudException.toUserMessage(context: Context): String = when (this) {
+    is CloudException.Network -> context.getString(R.string.signin_error_no_network)
+    is CloudException.InvalidCredentials -> context.getString(R.string.auth_error_invalid_credentials)
+    is CloudException.AuthExpired -> context.getString(R.string.auth_error_session_expired)
+    is CloudException.NotConfigured -> context.getString(R.string.auth_error_not_configured)
+    is CloudException.Server -> context.getString(R.string.auth_error_server, status)
+    is CloudException.Conflict -> message ?: context.getString(R.string.auth_error_conflict)
+    is CloudException.SchemaMissing -> context.getString(R.string.auth_error_schema_missing)
+    is CloudException.Unknown -> message ?: context.getString(R.string.auth_error_unknown)
 }
 
 private const val SPINNER_TIMEOUT_MS = 600L

@@ -30,10 +30,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.qrscanner.app.R
 import com.qrscanner.app.data.SyncEvent
 import com.qrscanner.app.data.SyncEventType
 import com.qrscanner.app.ui.theme.AccentMint
@@ -98,8 +100,13 @@ fun RecentChangesBanner(
                 }
                 Spacer(modifier = Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
+                    val headerText = if (lines.size == 1) {
+                        stringResource(R.string.banner_title_one)
+                    } else {
+                        stringResource(R.string.banner_title_many, lines.size)
+                    }
                     Text(
-                        text = headerFor(lines.size),
+                        text = headerText,
                         style = MaterialTheme.typography.labelMedium.copy(
                             fontWeight = FontWeight.SemiBold,
                             color = TextSecondary
@@ -118,11 +125,12 @@ fun RecentChangesBanner(
                     }
                 }
                 Spacer(modifier = Modifier.width(8.dp))
+                val dismissLabel = stringResource(R.string.banner_dismiss)
                 Box(
                     modifier = Modifier
                         .size(44.dp)
                         .clickable(onClick = onDismiss)
-                        .semantics { contentDescription = "Dismiss" },
+                        .semantics { contentDescription = dismissLabel },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -135,11 +143,6 @@ fun RecentChangesBanner(
             }
         }
     }
-}
-
-private fun headerFor(lineCount: Int): String = when (lineCount) {
-    1 -> "1 recent update"
-    else -> "$lineCount recent updates"
 }
 
 /**

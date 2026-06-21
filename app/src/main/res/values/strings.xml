@@ -24,8 +24,6 @@
         <item quantity="one">%d session waiting · tap to retry</item>
         <item quantity="other">%d sessions waiting · tap to retry</item>
     </plurals>
-    <string name="notif_remote_edit_title">Owner edited a session</string>
-    <string name="notif_remote_edit_body">Session #%1$d · %2$d defaulter months updated</string>
     <string name="notif_remote_session_finalized_title">Session #%1$d synced</string>
     <string name="notif_remote_session_finalized_body">%1$s finished a session on another phone.</string>
     <string name="notif_remote_defaulter_edit_title">Session #%1$d updated</string>
@@ -41,7 +39,16 @@
     <string name="signin_button">Sign in</string>
     <string name="signin_loading">Signing in…</string>
     <string name="signin_error_generic">Couldn\'t sign in. Check your email + password and try again.</string>
-    <string name="signin_error_no_network">No network. Try again when you\'re online.</string>
+    <string name="signin_error_no_network">No network — try again when you\'re online.</string>
+    <!-- CloudException.toUserMessage() catalog (AuthAwareRoot) -->
+    <string name="auth_error_invalid_credentials">Email or password incorrect.</string>
+    <string name="auth_error_session_expired">Session expired. Sign in again.</string>
+    <string name="auth_error_not_configured">Cloud sync not configured.</string>
+    <string name="auth_error_server">Server error (%1$d). Try again in a moment.</string>
+    <string name="auth_error_conflict">Conflict during sign-in.</string>
+    <string name="auth_error_schema_missing">Cloud database setup pending — see SHIP_READY.md.</string>
+    <string name="auth_error_unknown">Unknown error.</string>
+    <string name="firstrun_save_failed">Couldn\'t save device. Try again.</string>
 
     <!-- First-run setup screen -->
     <string name="firstrun_title">Name this phone</string>
@@ -66,8 +73,6 @@
     <string name="settings_switch_operator">Switch operator</string>
     <string name="settings_sign_out">Sign out</string>
     <string name="settings_sync_status">Sync status</string>
-    <string name="settings_force_push">Force push now</string>
-    <string name="settings_force_pull">Force pull now</string>
     <string name="settings_diagnostics">Sync diagnostics</string>
 
     <!-- Sync pill states -->

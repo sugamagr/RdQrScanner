@@ -24,8 +24,6 @@
         <item quantity="one">%d सेशन अटका है · रिट्राई के लिए टैप करें</item>
         <item quantity="other">%d सेशन अटके हैं · रिट्राई के लिए टैप करें</item>
     </plurals>
-    <string name="notif_remote_edit_title">मालिक ने सेशन एडिट किया</string>
-    <string name="notif_remote_edit_body">सेशन #%1$d · %2$d डिफ़ॉल्टर महीने अपडेट हुए</string>
     <string name="notif_remote_session_finalized_title">सेशन #%1$d सिंक हुआ</string>
     <string name="notif_remote_session_finalized_body">%1$s ने दूसरे फ़ोन पर सेशन पूरा किया।</string>
     <string name="notif_remote_defaulter_edit_title">सेशन #%1$d अपडेट हुआ</string>
@@ -41,7 +39,16 @@
     <string name="signin_button">साइन इन</string>
     <string name="signin_loading">साइन इन हो रहा है…</string>
     <string name="signin_error_generic">साइन इन नहीं हो पाया। ईमेल और पासवर्ड चेक करें।</string>
-    <string name="signin_error_no_network">नेटवर्क नहीं है। ऑनलाइन होने पर फिर से कोशिश करें।</string>
+    <string name="signin_error_no_network">नेटवर्क नहीं है — ऑनलाइन होने पर फिर से कोशिश करें।</string>
+    <!-- CloudException error catalog -->
+    <string name="auth_error_invalid_credentials">ईमेल या पासवर्ड गलत है।</string>
+    <string name="auth_error_session_expired">सेशन ख़त्म हो गया। फिर से साइन इन करें।</string>
+    <string name="auth_error_not_configured">क्लाउड सिंक सेटअप नहीं है।</string>
+    <string name="auth_error_server">सर्वर एरर (%1$d)। थोड़ी देर में फिर कोशिश करें।</string>
+    <string name="auth_error_conflict">साइन इन के दौरान कॉन्फ्लिक्ट हुआ।</string>
+    <string name="auth_error_schema_missing">क्लाउड डेटाबेस सेटअप बाकी है — SHIP_READY.md देखें।</string>
+    <string name="auth_error_unknown">अज्ञात एरर।</string>
+    <string name="firstrun_save_failed">डिवाइस सेव नहीं हो पाई। फिर कोशिश करें।</string>
 
     <!-- First-run setup -->
     <string name="firstrun_title">फ़ोन का नाम रखें</string>
@@ -66,8 +73,6 @@
     <string name="settings_switch_operator">ऑपरेटर बदलें</string>
     <string name="settings_sign_out">साइन आउट</string>
     <string name="settings_sync_status">सिंक स्थिति</string>
-    <string name="settings_force_push">अभी पुश करें</string>
-    <string name="settings_force_pull">अभी पुल करें</string>
     <string name="settings_diagnostics">सिंक डायग्नोस्टिक्स</string>
 
     <!-- Pill states -->
