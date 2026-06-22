@@ -374,7 +374,7 @@ private fun ReviewRow(row: LotReviewRow, onUpdateSelected: (List<MonthYear>) -> 
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = stringResource(
-                            R.string.lotreview_regression_one,
+                            R.string.lotreview_regression_warning,
                             newest.formatShort(),
                             lastPaid.formatShort()
                         ),

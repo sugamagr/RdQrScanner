@@ -103,12 +103,11 @@
     <string name="lotreview_subtitle_one">1 अकाउंट · महीना चुनें, +/- से और जोड़ें</string>
     <string name="lotreview_subtitle_many">%1$d अकाउंट · महीना चुनें, +/- से और जोड़ें</string>
     <string name="lotreview_no_profile">(अभी प्रोफ़ाइल नहीं)</string>
-    <string name="lotreview_last_paid">पिछले पेड: %1$s तक</string>
+    <string name="lotreview_last_paid">आखिरी पेड: %1$s तक</string>
     <string name="lotreview_months_label">%1$d महीने</string>
     <string name="lotreview_confirm_one">1 एंट्री कन्फर्म करें</string>
     <string name="lotreview_confirm_many">%1$d एंट्री कन्फर्म करें</string>
-    <string name="lotreview_regression_one">%1$s पिछले पेड (%2$s) से पहले — नीचे कन्फर्म करें</string>
-    <string name="lotreview_regression_many">%1$s पिछले पेड (%2$s) से पहले — नीचे कन्फर्म करें</string>
+    <string name="lotreview_regression_warning">%1$s आखिरी पेड (%2$s) से पहले — नीचे कन्फर्म करें</string>
     <string name="lotreview_discard_title">LOT रिव्यू छोड़ें?</string>
     <string name="lotreview_discard_body">स्कैन की गई एंट्री 1 महीने की डिफ़ॉल्ट सेटिंग से रहेंगी।</string>
     <string name="lotreview_discard_cancel">एडिट करते रहें</string>
@@ -123,9 +122,9 @@
 
     <!-- Account paid-till editor -->
     <string name="account_paid_till_label">पेड टिल</string>
-    <string name="account_paid_till_never">अभी तक नहीं</string>
+    <string name="account_paid_till_never">कभी नहीं</string>
     <string name="account_paid_till_pick">महीना चुनें</string>
-    <string name="account_paid_till_clear">खाली करें (अभी तक नहीं)</string>
+    <string name="account_paid_till_clear">खाली करें (कभी नहीं)</string>
     <string name="account_paid_till_backward_title">\'पेड टिल\' पीछे ले जाएँ?</string>
     <string name="account_paid_till_backward_body">%1$s की \'पेड टिल\' %2$s से वापस %3$s पर ले जाएँ? पुरानी स्कैन एंट्री वैसी ही रहेंगी।</string>
     <string name="account_paid_till_clear_title">\'पेड टिल\' खाली करें?</string>

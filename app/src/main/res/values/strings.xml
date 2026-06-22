@@ -106,8 +106,7 @@
     <string name="lotreview_months_label">%1$d mo</string>
     <string name="lotreview_confirm_one">Confirm 1 entry</string>
     <string name="lotreview_confirm_many">Confirm %1$d entries</string>
-    <string name="lotreview_regression_one">%1$s before last paid (%2$s) — confirm below</string>
-    <string name="lotreview_regression_many">%1$s before last paid (%2$s) — confirm below</string>
+    <string name="lotreview_regression_warning">%1$s before last paid (%2$s) — confirm below</string>
     <string name="lotreview_discard_title">Discard LOT review?</string>
     <string name="lotreview_discard_body">Scanned numbers will keep their default 1-month entries.</string>
     <string name="lotreview_discard_cancel">Keep editing</string>
