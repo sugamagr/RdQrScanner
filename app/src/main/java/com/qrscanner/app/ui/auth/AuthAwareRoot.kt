@@ -176,11 +176,20 @@ fun AuthAwareRoot() {
                             // ever cleans up (oracle round 6 WARNING #8).
                             val cloudId = UUID.randomUUID().toString()
                             val nowIso = IsoTime.fromEpochMillis(System.currentTimeMillis())
-                            app.database.deviceSettingsDao().updateIdentity(
-                                deviceCloudId = cloudId,
-                                deviceName = deviceName,
-                                operatorName = operatorName,
-                                ownerId = ownerId
+                            // Q3=B pre-release uses fallbackToDestructiveMigration which
+                            // skips MIGRATION_5_6's device_settings row seed on fresh
+                            // installs. updateIdentity()'s UPDATE WHERE id=1 would
+                            // silently affect 0 rows, leaving the user stuck on
+                            // FirstRunSetupScreen forever. Use upsert (REPLACE) so
+                            // the seed-vs-no-seed paths converge.
+                            val existing = app.database.deviceSettingsDao().get()
+                            app.database.deviceSettingsDao().upsert(
+                                (existing ?: DeviceSettings()).copy(
+                                    deviceCloudId = cloudId,
+                                    deviceName = deviceName,
+                                    operatorName = operatorName,
+                                    ownerId = ownerId
+                                )
                             )
                             app.cloudClient.upsertDevice(
                                 DeviceDto(
