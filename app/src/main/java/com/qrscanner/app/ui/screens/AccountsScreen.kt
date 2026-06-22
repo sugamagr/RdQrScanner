@@ -296,12 +296,16 @@ fun AccountsScreen(onNavigateBack: () -> Unit) {
                         is com.qrscanner.app.ui.components.PaidTillEdit.Unchanged -> Unit
                         is com.qrscanner.app.ui.components.PaidTillEdit.Cleared ->
                             app.database.rdAccountDao().clearLastPaidThrough(acc.rdNumber, now)
-                        is com.qrscanner.app.ui.components.PaidTillEdit.SetTo ->
-                            app.database.rdAccountDao().setLastPaidThroughExplicit(
-                                acc.rdNumber,
-                                paidTillEdit.newValue.toToken(),
-                                now
-                            )
+                        is com.qrscanner.app.ui.components.PaidTillEdit.SetTo -> {
+                            val token = paidTillEdit.newValue.toToken()
+                            if (paidTillEdit.isRegression) {
+                                app.database.rdAccountDao()
+                                    .setLastPaidThroughExplicit(acc.rdNumber, token, now)
+                            } else {
+                                app.database.rdAccountDao()
+                                    .updateLastPaidThroughMonotonic(acc.rdNumber, token, now)
+                            }
+                        }
                     }
                     runCatching { app.syncScheduler.enqueuePush() }
                 }

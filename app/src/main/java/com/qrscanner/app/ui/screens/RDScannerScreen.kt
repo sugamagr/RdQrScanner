@@ -215,8 +215,21 @@ private fun RDCameraScreen(
     var lotReviewLotNumber by rememberSaveable { mutableIntStateOf(0) }
     var lotReviewLotId by rememberSaveable { mutableStateOf<Long?>(null) }
     var lotReviewLotTimestamp by rememberSaveable { mutableLongStateOf(0L) }
-    var lotReviewRows by remember { mutableStateOf<List<com.qrscanner.app.ui.screens.LotReviewRow>>(emptyList()) }
+    var lotReviewBaseRows by remember { mutableStateOf<List<com.qrscanner.app.ui.screens.LotReviewRow>>(emptyList()) }
     var lotReviewLoading by remember { mutableStateOf(false) }
+    // Operator's per-row month deltas, keyed by RdNumber.id. Saveable so
+    // rotation + process death don't silently drop in-flight edits before
+    // the operator taps Confirm. Compact format: "id=YYYY-MM,YYYY-MM;..."
+    // keeps the Bundle small even for large LOTs (50 rows × ~30 bytes).
+    var lotReviewEdits by rememberSaveable(stateSaver = LotReviewEditsSaver) {
+        mutableStateOf<Map<Long, List<com.qrscanner.app.util.MonthYear>>>(emptyMap())
+    }
+    val lotReviewRows = remember(lotReviewBaseRows, lotReviewEdits) {
+        lotReviewBaseRows.map { base ->
+            val edit = lotReviewEdits[base.rdNumber.id]
+            if (edit != null) base.copy(selected = edit) else base
+        }
+    }
     var pendingPostSave by rememberSaveable(stateSaver = PostSaveSaver) {
         mutableStateOf<PostSave?>(null)
     }
@@ -303,7 +316,7 @@ private fun RDCameraScreen(
         }
         val pendingLotId = lotReviewLotId
         if (pendingLotId != null && showLotReviewScreen) {
-            lotReviewRows = buildLotReviewRows(app, pendingLotId, lotReviewLotTimestamp)
+            lotReviewBaseRows = buildLotReviewRows(app, pendingLotId, lotReviewLotTimestamp)
         }
         isHydrated = true
     }
@@ -568,7 +581,8 @@ private fun RDCameraScreen(
             lotReviewLotTimestamp = savedTimestamp
             pendingPostSave = if (alsoEndSession) PostSave.EndSession else PostSave.Continue
             lotReviewLoading = true
-            lotReviewRows = buildLotReviewRows(app, lotId, savedTimestamp)
+            lotReviewBaseRows = buildLotReviewRows(app, lotId, savedTimestamp)
+            lotReviewEdits = emptyMap()
             lotReviewLoading = false
             showLotReviewScreen = true
         }
@@ -592,7 +606,8 @@ private fun RDCameraScreen(
                 lotReviewLotTimestamp = savedTimestamp
                 pendingPostSave = PostSave.EndSession
                 lotReviewLoading = true
-                lotReviewRows = buildLotReviewRows(app, lotId, savedTimestamp)
+                lotReviewBaseRows = buildLotReviewRows(app, lotId, savedTimestamp)
+                lotReviewEdits = emptyMap()
                 lotReviewLoading = false
                 showLotReviewScreen = true
             } else {
@@ -1180,22 +1195,17 @@ private fun RDCameraScreen(
             }
         }
 
-        if (showLotReviewScreen && !lotReviewLoading) {
+        if (showLotReviewScreen && !lotReviewLoading && lotReviewRows.isNotEmpty()) {
             LotReviewScreen(
                 lotNumber = lotReviewLotNumber,
                 rows = lotReviewRows,
                 onUpdateRow = { rowId, newSelected ->
-                    lotReviewRows = lotReviewRows.map { existing ->
-                        if (existing.rdNumber.id == rowId) {
-                            existing.copy(selected = newSelected)
-                        } else {
-                            existing
-                        }
-                    }
+                    lotReviewEdits = lotReviewEdits + (rowId to newSelected)
                 },
                 onConfirm = { edits ->
                     showLotReviewScreen = false
                     lotReviewLotId = null
+                    lotReviewEdits = emptyMap()
                     scope.launch {
                         val now = System.currentTimeMillis()
                         edits.forEach { edit ->
@@ -1239,6 +1249,7 @@ private fun RDCameraScreen(
                 onDiscard = {
                     showLotReviewScreen = false
                     lotReviewLotId = null
+                    lotReviewEdits = emptyMap()
                     pendingPostSave?.let { executePostSave(it) }
                     pendingPostSave = null
                 }
@@ -1301,6 +1312,37 @@ private val PostSaveSaver: Saver<PostSave?, String> = Saver(
             "E" -> PostSave.EndSession
             else -> null
         }
+    }
+)
+
+/**
+ * Persists the LOT review's per-row month-list deltas across config
+ * change + process death. Wire format: "rowId=YYYY-MM,YYYY-MM;...".
+ * Empty map encodes to empty string. Malformed segments are skipped on
+ * restore (defensive — a Bundle truncation never crashes the screen).
+ *
+ * Bundle-size guarantee: each segment ~30 bytes for typical 1-3 month
+ * selections; a 50-row LOT stays well under 2KB.
+ */
+private val LotReviewEditsSaver: Saver<Map<Long, List<com.qrscanner.app.util.MonthYear>>, String> = Saver(
+    save = { deltas ->
+        if (deltas.isEmpty()) "" else deltas.entries.joinToString(";") { (id, months) ->
+            "$id=${com.qrscanner.app.util.MonthYear.encodeList(months)}"
+        }
+    },
+    restore = { token ->
+        if (token.isBlank()) emptyMap()
+        else token.split(";").mapNotNull { entry ->
+            val sep = entry.indexOf('=')
+            if (sep <= 0) return@mapNotNull null
+            val id = entry.substring(0, sep).toLongOrNull() ?: return@mapNotNull null
+            val listToken = entry.substring(sep + 1)
+            if (listToken.isBlank()) return@mapNotNull null
+            val count = listToken.count { it == ',' } + 1
+            val parsed = com.qrscanner.app.util.MonthYear.parseList(listToken, count)
+                ?: return@mapNotNull null
+            id to parsed
+        }.toMap()
     }
 )
 

@@ -45,10 +45,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -430,20 +435,24 @@ private fun adjustSelection(current: List<MonthYear>, newCount: Int): List<Month
 private fun CountStepper(count: Int, onCountChange: (Int) -> Unit) {
     val canDec = count > RdNumber.MONTHS_MIN
     val canInc = count < RdNumber.MONTHS_MAX
+    val haptics = LocalHapticFeedback.current
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
-            .background(SurfaceWhite, RoundedCornerShape(22.dp))
-            .padding(horizontal = 4.dp, vertical = 4.dp)
+            .background(SurfaceWhite, RoundedCornerShape(24.dp))
+            .padding(horizontal = 2.dp, vertical = 2.dp)
     ) {
         StepperButton(
             icon = Icons.Default.Remove,
             enabled = canDec,
-            onClick = { onCountChange(count - 1) }
+            onClick = {
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onCountChange(count - 1)
+            }
         )
         Box(
             modifier = Modifier
-                .width(60.dp)
+                .width(56.dp)
                 .padding(horizontal = 4.dp),
             contentAlignment = Alignment.Center
         ) {
@@ -459,7 +468,10 @@ private fun CountStepper(count: Int, onCountChange: (Int) -> Unit) {
         StepperButton(
             icon = Icons.Default.Add,
             enabled = canInc,
-            onClick = { onCountChange(count + 1) }
+            onClick = {
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onCountChange(count + 1)
+            }
         )
     }
 }
@@ -470,22 +482,30 @@ private fun StepperButton(
     enabled: Boolean,
     onClick: () -> Unit
 ) {
+    // 44dp WCAG-compliant touch target wrapping a 36dp visible chip,
+    // matching the ChipShiftButton pattern in DefaulterDialogs.kt.
     Box(
         modifier = Modifier
-            .size(36.dp)
-            .background(
-                color = if (enabled) DisabledBackground else DisabledBackground.copy(alpha = 0.5f),
-                shape = CircleShape
-            )
+            .size(44.dp)
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = if (enabled) PrimaryOrange else DisabledContent,
-            modifier = Modifier.size(18.dp)
-        )
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .background(
+                    color = if (enabled) DisabledBackground else DisabledBackground.copy(alpha = 0.5f),
+                    shape = CircleShape
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (enabled) PrimaryOrange else DisabledContent,
+                modifier = Modifier.size(18.dp)
+            )
+        }
     }
 }
 
@@ -506,20 +526,23 @@ private fun MonthBar(
     onAnchorPick: (MonthYear) -> Unit
 ) {
     val today = remember { MonthYear.current() }
-    val anchor = remember(selected) { selected.minOrNull() ?: today }
-    val range = remember(anchor) {
+    val haptics = LocalHapticFeedback.current
+    // Anchor the rendered range to the INITIAL selection only. Re-keying
+    // on every selection change would re-scroll the bar on every tap,
+    // visually yanking the operator's view. The range stays fixed; the
+    // selected highlight moves within it.
+    val initialAnchor = remember { selected.minOrNull() ?: today }
+    val range = remember(initialAnchor) {
         MonthYear.range(
-            from = anchor.minusBy(MONTH_BAR_BACK),
-            to = anchor.plusBy(MONTH_BAR_FORWARD)
+            from = initialAnchor.minusBy(MONTH_BAR_BACK),
+            to = initialAnchor.plusBy(MONTH_BAR_FORWARD)
         )
     }
     val selectedSet = remember(selected) { selected.toSet() }
     val listState = rememberLazyListState()
 
-    LaunchedEffect(anchor, range) {
-        val idx = range.indexOf(anchor).coerceAtLeast(0)
-        // Center the anchor: scroll so the selected block sits ~2 cells
-        // from the left edge to leave room for backward picks.
+    LaunchedEffect(initialAnchor, range) {
+        val idx = range.indexOf(initialAnchor).coerceAtLeast(0)
         listState.scrollToItem((idx - 2).coerceAtLeast(0))
     }
 
@@ -531,10 +554,17 @@ private fun MonthBar(
     ) {
         items(range, key = { it.toToken() }) { month ->
             val isSelected = month in selectedSet
+            val isToday = month == today
             MonthBarCell(
                 month = month,
                 isSelected = isSelected,
-                onClick = { if (!isSelected) onAnchorPick(month) }
+                isToday = isToday,
+                onClick = {
+                    if (!isSelected) {
+                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onAnchorPick(month)
+                    }
+                }
             )
         }
     }
@@ -544,28 +574,47 @@ private fun MonthBar(
 private fun MonthBarCell(
     month: MonthYear,
     isSelected: Boolean,
+    isToday: Boolean,
     onClick: () -> Unit
 ) {
     val bg = if (isSelected) PrimaryOrange else SurfaceWhite
     val textColor = if (isSelected) Color.White else TextPrimary
-    val borderColor = if (isSelected) PrimaryOrange else TextSecondary.copy(alpha = 0.25f)
+    // 44dp WCAG touch target wraps the 40dp visible chip. Operator can
+    // tap any non-selected cell to re-anchor; selected cells are no-ops
+    // per the locked decision.
     Box(
         modifier = Modifier
-            .height(40.dp)
-            .background(bg, RoundedCornerShape(10.dp))
-            .clickable(enabled = !isSelected, onClick = onClick)
-            .padding(horizontal = 12.dp),
+            .height(44.dp)
+            .clickable(enabled = !isSelected, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = month.formatShort(),
-            style = MaterialTheme.typography.labelMedium.copy(
-                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                color = textColor
-            ),
-            maxLines = 1,
-            softWrap = false
-        )
+        Box(
+            modifier = Modifier
+                .height(40.dp)
+                .background(bg, RoundedCornerShape(10.dp))
+                .padding(horizontal = 12.dp)
+                .then(
+                    if (isToday && !isSelected) Modifier.drawBehind {
+                        val r = 3.dp.toPx()
+                        drawCircle(
+                            color = PrimaryOrange,
+                            radius = r,
+                            center = Offset(size.width / 2f, size.height - r * 2f)
+                        )
+                    } else Modifier
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = month.formatShort(),
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                    color = textColor
+                ),
+                maxLines = 1,
+                softWrap = false
+            )
+        }
     }
 }
 
@@ -704,7 +753,9 @@ private fun RegressionConfirmDialog(
                                 edit.accountLastPaidThrough?.formatShort() ?: "—",
                                 edit.newestSelected?.formatShort() ?: "—"
                             ),
-                            style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary)
+                            style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
