@@ -1392,9 +1392,14 @@ private suspend fun buildLotReviewRows(
             // Stored newest-first; flip to oldest-first for the UI.
             existing.sorted()
         } else {
-            val startAt = accountLastPaid?.let { lp ->
-                if (lp >= anchor) lp.plusOneMonth() else anchor
-            } ?: anchor
+            // Auto-anchor: always at nextMonth(lastPaidThrough) when a
+            // paid-through baseline exists — matches the spec contract
+            // at RdAccountDao.kt:185-186 and the legacy DefaulterDialogs
+            // behavior. Falls back to LOT date (anchor) only when the
+            // account has no profile or no paid history. The earlier
+            // `if (lp >= anchor) ... else anchor` was inverted: it
+            // skipped months for defaulters (the common case).
+            val startAt = accountLastPaid?.plusOneMonth() ?: anchor
             buildList {
                 var cursor = startAt
                 repeat(rd.monthsPaid.coerceAtLeast(1)) {
