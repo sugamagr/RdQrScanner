@@ -276,7 +276,7 @@ fun AccountsScreen(onNavigateBack: () -> Unit) {
         EditAccountDialog(
             account = acc,
             onDismiss = { editing = null },
-            onSave = { newName, newAmount, newActive ->
+            onSave = { newName, newAmount, newActive, paidTillEdit ->
                 editing = null
                 scope.launch {
                     val now = System.currentTimeMillis()
@@ -287,6 +287,22 @@ fun AccountsScreen(onNavigateBack: () -> Unit) {
                         isActive = newActive,
                         updatedAt = now
                     )
+                    // Operator-driven paid-till edits route to the explicit
+                    // DAO methods (no monotonic guard). The dialog has
+                    // already confirmed backward moves + clears via modal
+                    // before reaching this branch, so we never need to
+                    // re-validate here.
+                    when (paidTillEdit) {
+                        is com.qrscanner.app.ui.components.PaidTillEdit.Unchanged -> Unit
+                        is com.qrscanner.app.ui.components.PaidTillEdit.Cleared ->
+                            app.database.rdAccountDao().clearLastPaidThrough(acc.rdNumber, now)
+                        is com.qrscanner.app.ui.components.PaidTillEdit.SetTo ->
+                            app.database.rdAccountDao().setLastPaidThroughExplicit(
+                                acc.rdNumber,
+                                paidTillEdit.newValue.toToken(),
+                                now
+                            )
+                    }
                     runCatching { app.syncScheduler.enqueuePush() }
                 }
             }

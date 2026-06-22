@@ -129,5 +129,34 @@ data class MonthYear(val year: Int, val month: Int) : Comparable<MonthYear> {
             count: Int,
             endingAt: MonthYear = current()
         ): List<MonthYear> = parseList(raw, count) ?: autoWindow(count, endingAt)
+
+        /**
+         * Signed difference in months: positive when [other] is later
+         * than [this], negative when earlier, zero when equal. Used by
+         * the LOT review month bar to compute the index of an anchor
+         * month inside the rendered range so the LazyRow can scroll
+         * it into view on open.
+         */
+        fun monthsBetween(from: MonthYear, to: MonthYear): Int =
+            (to.year - from.year) * 12 + (to.month - from.month)
+
+        /**
+         * Generates a contiguous inclusive range starting at [from] and
+         * ending at [to], oldest-first. Caller is responsible for
+         * ordering; this helper preserves natural calendar order so the
+         * LOT review bar reads left-to-right as time-forward.
+         * Returns empty when [to] is strictly earlier than [from].
+         */
+        fun range(from: MonthYear, to: MonthYear): List<MonthYear> {
+            if (to < from) return emptyList()
+            val span = monthsBetween(from, to) + 1
+            val result = ArrayList<MonthYear>(span)
+            var cursor = from
+            repeat(span) {
+                result.add(cursor)
+                cursor = cursor.plusOneMonth()
+            }
+            return result
+        }
     }
 }

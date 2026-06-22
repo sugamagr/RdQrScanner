@@ -183,7 +183,9 @@ interface RdAccountDao {
      * than the current (string comparison works because YYYY-MM
      * tokens sort lexically the same as chronologically). Marks
      * DIRTY for sync. Called by
-     * [com.qrscanner.app.data.sync.SyncRepository.markSessionForSync].
+     * [com.qrscanner.app.data.sync.SyncRepository.markSessionForSync]
+     * for AUTOMATIC scan-driven advances where a stray scan must
+     * never silently regress the record.
      */
     @Query(
         """
@@ -201,6 +203,51 @@ interface RdAccountDao {
         newMonth: String,
         updatedAt: Long
     ): Int
+
+    /**
+     * Explicit operator-driven write of [RdAccount.lastPaidThrough].
+     * NO strict-greater guard — used by the LOT review screen and the
+     * Accounts edit dialog so the operator can correct a wrong past
+     * month ("paper book is truth"). The caller is responsible for
+     * surfacing a confirm modal before invoking this when the new
+     * value would regress an existing one. Marks DIRTY for sync.
+     */
+    @Query(
+        """
+        UPDATE rd_accounts SET
+            lastPaidThrough = :newMonth,
+            updatedAt = :updatedAt,
+            syncStatus = 'DIRTY',
+            retryCount = 0
+        WHERE rdNumber = :rdNumber
+          AND deletedAt IS NULL
+        """
+    )
+    suspend fun setLastPaidThroughExplicit(
+        rdNumber: String,
+        newMonth: String,
+        updatedAt: Long
+    ): Int
+
+    /**
+     * Clears [RdAccount.lastPaidThrough] back to NULL ("never paid").
+     * Used only from the Accounts edit dialog when the operator
+     * explicitly wants to reset the paid-till anchor. Marks DIRTY for
+     * sync. After clearing, the next scan-driven advance auto-anchors
+     * at the LOT date again.
+     */
+    @Query(
+        """
+        UPDATE rd_accounts SET
+            lastPaidThrough = NULL,
+            updatedAt = :updatedAt,
+            syncStatus = 'DIRTY',
+            retryCount = 0
+        WHERE rdNumber = :rdNumber
+          AND deletedAt IS NULL
+        """
+    )
+    suspend fun clearLastPaidThrough(rdNumber: String, updatedAt: Long): Int
 
     // ── Sync push helpers (mirror RdNumberDao) ────────────────────────
 

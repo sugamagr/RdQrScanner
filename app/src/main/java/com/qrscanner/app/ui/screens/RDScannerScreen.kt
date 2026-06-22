@@ -109,8 +109,6 @@ import com.qrscanner.app.data.RdNumber
 import com.qrscanner.app.data.ScanLot
 import com.qrscanner.app.data.ScanSession
 import com.qrscanner.app.util.isValidRdNumber
-import com.qrscanner.app.ui.components.DefaulterAskDialog
-import com.qrscanner.app.ui.components.DefaulterEditDialog
 import com.qrscanner.app.ui.components.ResumeSessionDialog
 import com.qrscanner.app.ui.theme.AccentCoral
 import com.qrscanner.app.ui.theme.AccentMint
@@ -209,16 +207,16 @@ private fun RDCameraScreen(
     var resumeSummary by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var sessionPendingResume by remember { mutableStateOf<ScanSession?>(null) }
 
-    // Defaulter flow state — set after a successful LOT save, drives the
-    // ask -> (optional edit) -> post-save sequence. Saveable booleans so a
-    // config change mid-flow keeps the dialog up; the row list is re-hydrated
-    // from DB on recompose via the lot number it points at.
-    var showDefaulterAskDialog by rememberSaveable { mutableStateOf(false) }
-    var showDefaulterEditDialog by rememberSaveable { mutableStateOf(false) }
-    var defaulterLotNumber by rememberSaveable { mutableIntStateOf(0) }
-    var defaulterLotId by rememberSaveable { mutableStateOf<Long?>(null) }
-    var defaulterLotTimestamp by rememberSaveable { mutableLongStateOf(0L) }
-    var defaulterRows by remember { mutableStateOf<List<RdNumber>>(emptyList()) }
+    // LOT review flow state — drives the new full-screen review that
+    // replaces the old DefaulterAskDialog + DefaulterEditDialog pair.
+    // Saveable so config change mid-review keeps the screen up; the
+    // row list is re-hydrated from DB on recompose via lotId.
+    var showLotReviewScreen by rememberSaveable { mutableStateOf(false) }
+    var lotReviewLotNumber by rememberSaveable { mutableIntStateOf(0) }
+    var lotReviewLotId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var lotReviewLotTimestamp by rememberSaveable { mutableLongStateOf(0L) }
+    var lotReviewRows by remember { mutableStateOf<List<com.qrscanner.app.ui.screens.LotReviewRow>>(emptyList()) }
+    var lotReviewLoading by remember { mutableStateOf(false) }
     var pendingPostSave by rememberSaveable(stateSaver = PostSaveSaver) {
         mutableStateOf<PostSave?>(null)
     }
@@ -303,9 +301,9 @@ private fun RDCameraScreen(
             currentLotNumbers.clear()
             currentLotNumbers.addAll(rows.sortedByDescending { it.position }.map { it.number })
         }
-        val pendingLotId = defaulterLotId
-        if (pendingLotId != null && (showDefaulterAskDialog || showDefaulterEditDialog)) {
-            defaulterRows = app.database.rdNumberDao().getNumbersForLotSync(pendingLotId)
+        val pendingLotId = lotReviewLotId
+        if (pendingLotId != null && showLotReviewScreen) {
+            lotReviewRows = buildLotReviewRows(app, pendingLotId, lotReviewLotTimestamp)
         }
         isHydrated = true
     }
@@ -454,7 +452,7 @@ private fun RDCameraScreen(
     // Pause camera analysis whenever any dialog is open; resume when all closed.
     // Also pause while the session is still hydrating from DB.
     val anyDialogOpen = !isHydrated || showResumeDialog || showEndSessionDialog ||
-            showFinishLotDialog || showDefaulterAskDialog || showDefaulterEditDialog
+            showFinishLotDialog || showLotReviewScreen
     LaunchedEffect(anyDialogOpen) {
         if (anyDialogOpen) {
             scanningEnabledRef.set(false)
@@ -557,7 +555,7 @@ private fun RDCameraScreen(
         scope.launch {
             val session = currentSession ?: return@launch
             val savedLotNumber = currentLotNumber
-            val savedRows = app.database.rdNumberDao().getNumbersForLotSync(lotId)
+            val savedTimestamp = System.currentTimeMillis()
 
             app.database.scanSessionDao().setActiveLotId(session.id, null)
             totalLotsInSession++
@@ -565,12 +563,14 @@ private fun RDCameraScreen(
             currentLotId = null
             currentLotNumbers.clear()
 
-            defaulterLotId = lotId
-            defaulterLotNumber = savedLotNumber
-            defaulterLotTimestamp = System.currentTimeMillis()
-            defaulterRows = savedRows
+            lotReviewLotId = lotId
+            lotReviewLotNumber = savedLotNumber
+            lotReviewLotTimestamp = savedTimestamp
             pendingPostSave = if (alsoEndSession) PostSave.EndSession else PostSave.Continue
-            showDefaulterAskDialog = true
+            lotReviewLoading = true
+            lotReviewRows = buildLotReviewRows(app, lotId, savedTimestamp)
+            lotReviewLoading = false
+            showLotReviewScreen = true
         }
     }
 
@@ -580,19 +580,21 @@ private fun RDCameraScreen(
             val lotId = currentLotId
             if (lotId != null && currentLotNumbers.isNotEmpty()) {
                 val savedLotNumber = currentLotNumber
-                val savedRows = app.database.rdNumberDao().getNumbersForLotSync(lotId)
+                val savedTimestamp = System.currentTimeMillis()
                 app.database.scanSessionDao().setActiveLotId(session.id, null)
                 totalLotsInSession++
                 currentLotNumber++
                 currentLotId = null
                 currentLotNumbers.clear()
 
-                defaulterLotId = lotId
-                defaulterLotNumber = savedLotNumber
-                defaulterLotTimestamp = System.currentTimeMillis()
-                defaulterRows = savedRows
+                lotReviewLotId = lotId
+                lotReviewLotNumber = savedLotNumber
+                lotReviewLotTimestamp = savedTimestamp
                 pendingPostSave = PostSave.EndSession
-                showDefaulterAskDialog = true
+                lotReviewLoading = true
+                lotReviewRows = buildLotReviewRows(app, lotId, savedTimestamp)
+                lotReviewLoading = false
+                showLotReviewScreen = true
             } else {
                 if (lotId != null) {
                     app.database.scanLotDao().deleteIfEmpty(lotId)
@@ -1178,68 +1180,67 @@ private fun RDCameraScreen(
             }
         }
 
-        if (showDefaulterAskDialog) {
-            DefaulterAskDialog(
-                lotNumber = defaulterLotNumber,
-                onNo = {
-                    showDefaulterAskDialog = false
-                    defaulterLotId = null
-                    pendingPostSave?.let { executePostSave(it) }
-                    pendingPostSave = null
+        if (showLotReviewScreen && !lotReviewLoading) {
+            LotReviewScreen(
+                lotNumber = lotReviewLotNumber,
+                rows = lotReviewRows,
+                onUpdateRow = { rowId, newSelected ->
+                    lotReviewRows = lotReviewRows.map { existing ->
+                        if (existing.rdNumber.id == rowId) {
+                            existing.copy(selected = newSelected)
+                        } else {
+                            existing
+                        }
+                    }
                 },
-                onYes = {
-                    showDefaulterAskDialog = false
-                    showDefaulterEditDialog = true
-                }
-            )
-        }
-
-        if (showDefaulterEditDialog) {
-            DefaulterEditDialog(
-                lotNumber = defaulterLotNumber,
-                numbers = defaulterRows,
-                anchorTimestamp = defaulterLotTimestamp.takeIf { it > 0 }
-                    ?: System.currentTimeMillis(),
-                accountLastPaidLookup = { rdNumber ->
-                    app.database.rdAccountDao().findByRdNumber(rdNumber)
-                        ?.lastPaidThrough
-                        ?.let { com.qrscanner.app.util.MonthYear.parseToken(it) }
-                },
-                onDismiss = {
-                    showDefaulterEditDialog = false
-                    defaulterLotId = null
-                    pendingPostSave?.let { executePostSave(it) }
-                    pendingPostSave = null
-                },
-                onSave = { changes ->
-                    showDefaulterEditDialog = false
-                    defaulterLotId = null
+                onConfirm = { edits ->
+                    showLotReviewScreen = false
+                    lotReviewLotId = null
                     scope.launch {
                         val now = System.currentTimeMillis()
-                        changes.forEach { (id, valueAndList) ->
-                            val (months, monthsList) = valueAndList
-                            app.database.rdNumberDao().updateMonths(id, months, monthsList)
-                            // Flip the edited row back to DIRTY so the push worker
-                            // picks it up. updateMonths leaves syncStatus untouched,
-                            // so a row already SYNCED from a prior push would be
-                            // invisible to runPush otherwise (Phase 2 T2.5).
-                            app.database.rdNumberDao().markDirty(id, now)
+                        edits.forEach { edit ->
+                            // Per-row month count + list write. updateMonths
+                            // leaves syncStatus untouched so markDirty bumps
+                            // it back to DIRTY for the push worker (Phase 2
+                            // T2.5). Selecting newest=current with count=1 is
+                            // a no-op encoding (null) but we still markDirty
+                            // since updatedAt advances.
+                            app.database.rdNumberDao().updateMonths(
+                                edit.rowId,
+                                edit.newCount,
+                                edit.encodedMonthsList
+                            )
+                            app.database.rdNumberDao().markDirty(edit.rowId, now)
+                            // Operator-driven paid-till write: regression uses
+                            // the explicit setter (no monotonic guard) per
+                            // "paper book is truth"; advances use the
+                            // monotonic setter to match auto-finalize.
+                            val newest = edit.newestSelected ?: return@forEach
+                            val token = newest.toToken()
+                            if (edit.isRegression) {
+                                app.database.rdAccountDao()
+                                    .setLastPaidThroughExplicit(edit.rdNumber, token, now)
+                            } else {
+                                app.database.rdAccountDao()
+                                    .updateLastPaidThroughMonotonic(edit.rdNumber, token, now)
+                            }
                         }
-                        if (changes.isNotEmpty()) {
+                        if (edits.isNotEmpty()) {
                             Toast.makeText(
                                 context,
-                                "Marked ${changes.size} defaulter${if (changes.size == 1) "" else "s"}",
+                                "Saved ${edits.size} entr${if (edits.size == 1) "y" else "ies"}",
                                 Toast.LENGTH_SHORT
                             ).show()
-                            try {
-                                app.syncScheduler.enqueuePush()
-                            } catch (e: Throwable) {
-                                android.util.Log.w("RDScannerScreen", "defaulter edit: deferred sync enqueue", e)
-                            }
                         }
                         pendingPostSave?.let { executePostSave(it) }
                         pendingPostSave = null
                     }
+                },
+                onDiscard = {
+                    showLotReviewScreen = false
+                    lotReviewLotId = null
+                    pendingPostSave?.let { executePostSave(it) }
+                    pendingPostSave = null
                 }
             )
         }
@@ -1302,6 +1303,56 @@ private val PostSaveSaver: Saver<PostSave?, String> = Saver(
         }
     }
 )
+
+/**
+ * Hydrates a [LotReviewRow] list for the given finished LOT. Reads
+ * every RdNumber in the LOT, joins each to its (optional) RdAccount
+ * profile, and seeds the per-row month selection from existing
+ * monthsList when present or from auto-anchor at nextMonth(paidThrough)
+ * otherwise. The hydrated rows feed [LotReviewScreen] directly.
+ *
+ * Selection convention matches LotReviewScreen.LotReviewRow: oldest-first
+ * in memory (anchor = first element). The DB stores newest-first, so the
+ * existing-monthsList branch reverses on read.
+ */
+private suspend fun buildLotReviewRows(
+    app: com.qrscanner.app.QRScannerApp,
+    lotId: Long,
+    lotTimestamp: Long
+): List<com.qrscanner.app.ui.screens.LotReviewRow> {
+    val rdRows = app.database.rdNumberDao().getNumbersForLotSync(lotId)
+    val anchor = com.qrscanner.app.util.MonthYear.fromEpochMillis(
+        lotTimestamp.takeIf { it > 0 } ?: System.currentTimeMillis()
+    )
+    return rdRows.map { rd ->
+        val account = runCatching { app.database.rdAccountDao().findByRdNumber(rd.number) }
+            .getOrNull()
+        val accountLastPaid = account?.lastPaidThrough
+            ?.let { com.qrscanner.app.util.MonthYear.parseToken(it) }
+        val existing = com.qrscanner.app.util.MonthYear.parseList(rd.monthsList, rd.monthsPaid)
+        val selected: List<com.qrscanner.app.util.MonthYear> = if (existing != null) {
+            // Stored newest-first; flip to oldest-first for the UI.
+            existing.sorted()
+        } else {
+            val startAt = accountLastPaid?.let { lp ->
+                if (lp >= anchor) lp.plusOneMonth() else anchor
+            } ?: anchor
+            buildList {
+                var cursor = startAt
+                repeat(rd.monthsPaid.coerceAtLeast(1)) {
+                    add(cursor)
+                    cursor = cursor.plusOneMonth()
+                }
+            }
+        }
+        com.qrscanner.app.ui.screens.LotReviewRow(
+            rdNumber = rd,
+            accountName = account?.name,
+            accountLastPaidThrough = accountLastPaid,
+            selected = selected
+        )
+    }
+}
 
 @Composable
 private fun ScannerOverlay() {

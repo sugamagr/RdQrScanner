@@ -37,6 +37,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.ui.res.stringResource
+import com.qrscanner.app.R
 import com.qrscanner.app.ui.theme.PrimaryOrange
 import com.qrscanner.app.ui.theme.TextSecondary
 import com.qrscanner.app.ui.theme.DisabledBackground
@@ -65,7 +68,9 @@ fun MonthPickerDialog(
     initialSelection: MonthYear,
     disabledMonths: Set<MonthYear>,
     onDismiss: () -> Unit,
-    onPick: (MonthYear) -> Unit
+    onPick: (MonthYear) -> Unit,
+    allowClear: Boolean = false,
+    onClear: () -> Unit = {}
 ) {
     val today = remember { MonthYear.current() }
     val minYear = remember(initialSelection, today) {
@@ -114,6 +119,34 @@ fun MonthPickerDialog(
                         onPick(picked)
                     }
                 )
+                if (allowClear) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(44.dp)
+                            .background(DisabledBackground, RoundedCornerShape(12.dp))
+                            .clickable(onClick = onClear),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = null,
+                                tint = TextSecondary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = stringResource(R.string.account_paid_till_clear),
+                                style = MaterialTheme.typography.labelLarge.copy(
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = TextSecondary
+                                )
+                            )
+                        }
+                    }
+                }
             }
         }
     }

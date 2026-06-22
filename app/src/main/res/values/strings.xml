@@ -97,6 +97,39 @@
     <string name="banner_line_session_deleted_one">%1$s %2$s</string>
     <string name="banner_line_session_deleted_many">%1$s deleted %2$d sessions</string>
 
+    <!-- LOT review screen (replaces DefaulterAskDialog + DefaulterEditDialog) -->
+    <string name="lotreview_title">LOT %1$d review</string>
+    <string name="lotreview_subtitle_one">1 account · tap to pick month, +/- to add</string>
+    <string name="lotreview_subtitle_many">%1$d accounts · tap to pick month, +/- to add</string>
+    <string name="lotreview_no_profile">(no profile yet)</string>
+    <string name="lotreview_last_paid">Last paid: through %1$s</string>
+    <string name="lotreview_months_label">%1$d mo</string>
+    <string name="lotreview_confirm_one">Confirm 1 entry</string>
+    <string name="lotreview_confirm_many">Confirm %1$d entries</string>
+    <string name="lotreview_regression_one">%1$s before last paid (%2$s) — confirm below</string>
+    <string name="lotreview_regression_many">%1$s before last paid (%2$s) — confirm below</string>
+    <string name="lotreview_discard_title">Discard LOT review?</string>
+    <string name="lotreview_discard_body">Scanned numbers will keep their default 1-month entries.</string>
+    <string name="lotreview_discard_cancel">Keep editing</string>
+    <string name="lotreview_discard_confirm">Discard</string>
+    <string name="lotreview_regression_title">Move \'Paid till\' backward?</string>
+    <string name="lotreview_regression_body_intro">%1$d account\'s \'Paid till\' will move backward:</string>
+    <string name="lotreview_regression_body_intro_many">%1$d accounts\' \'Paid till\' will move backward:</string>
+    <string name="lotreview_regression_body_row">%1$s (%2$s): %3$s → %4$s</string>
+    <string name="lotreview_regression_body_outro">Past scans won\'t be undone. Continue?</string>
+    <string name="lotreview_regression_cancel">Cancel</string>
+    <string name="lotreview_regression_confirm">Yes, save</string>
+
+    <!-- Account paid-till editor (EditAccountDialog inline) -->
+    <string name="account_paid_till_label">Paid till</string>
+    <string name="account_paid_till_never">Never paid</string>
+    <string name="account_paid_till_pick">Pick month</string>
+    <string name="account_paid_till_clear">Clear (never paid)</string>
+    <string name="account_paid_till_backward_title">Move \'Paid till\' backward?</string>
+    <string name="account_paid_till_backward_body">Move \'Paid till\' for %1$s from %2$s back to %3$s? This won\'t undo any past scans.</string>
+    <string name="account_paid_till_clear_title">Clear \'Paid till\'?</string>
+    <string name="account_paid_till_clear_body">Clear \'Paid till\' for %1$s? The system will auto-suggest months from the next scan.</string>
+
     <!-- Generic content descriptions -->
     <string name="content_desc_back">Back</string>
     <string name="pill_a11y_description">Sync status: %1$s</string>
