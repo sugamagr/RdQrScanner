@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowDown,
@@ -369,8 +370,35 @@ function OverflowMenu({
   onMarkInactiveOrDelete: () => void;
   onReactivate: () => void;
 }) {
-  const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  // Portal-rendered + viewport-anchored so the table wrapper's overflow-x-auto
+  // doesn't clip it. CSS spec forces overflow:auto on the cross-axis whenever
+  // either axis is auto/scroll/hidden — top-full inside the scroll container
+  // got clipped on every row that wasn't the bottom one.
+  const [position, setPosition] = useState<{ top: number; right: number } | null>(null);
+
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      setPosition(null);
+      return;
+    }
+    const updatePosition = () => {
+      const rect = triggerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setPosition({
+        top: rect.bottom + 4,
+        right: window.innerWidth - rect.right,
+      });
+    };
+    updatePosition();
+    window.addEventListener('scroll', updatePosition, true);
+    window.addEventListener('resize', updatePosition);
+    return () => {
+      window.removeEventListener('scroll', updatePosition, true);
+      window.removeEventListener('resize', updatePosition);
+    };
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -381,7 +409,10 @@ function OverflowMenu({
       }
     };
     const onClickOutside = (e: MouseEvent) => {
-      if (!containerRef.current?.contains(e.target as Node)) onClose();
+      const target = e.target as Node;
+      if (triggerRef.current?.contains(target)) return;
+      if (menuRef.current?.contains(target)) return;
+      onClose();
     };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('mousedown', onClickOutside);
@@ -392,7 +423,7 @@ function OverflowMenu({
   }, [isOpen, onClose]);
 
   return (
-    <div className="relative" ref={containerRef}>
+    <>
       <button
         ref={triggerRef}
         type="button"
@@ -404,43 +435,47 @@ function OverflowMenu({
       >
         <MoreVertical className="h-4 w-4" />
       </button>
-      {isOpen && (
-        <div
-          role="menu"
-          className="absolute right-0 top-full z-10 mt-1 w-48 rounded-xl border border-surface-border bg-surface py-1 shadow-elevated"
-        >
-          {account.is_active ? (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={onMarkInactiveOrDelete}
-              className="block w-full px-3 py-2 text-left text-xs text-ink-primary transition-colors hover:bg-surface-alt focus-visible:bg-surface-alt focus-visible:outline-none"
-            >
-              Mark inactive / Delete
-            </button>
-          ) : (
-            <>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={onReactivate}
-                className="block w-full px-3 py-2 text-left text-xs font-medium text-accent-mint-ink transition-colors hover:bg-accent-mint/10 focus-visible:bg-accent-mint/10 focus-visible:outline-none"
-              >
-                Reactivate
-              </button>
+      {isOpen && position &&
+        createPortal(
+          <div
+            ref={menuRef}
+            role="menu"
+            style={{ position: 'fixed', top: position.top, right: position.right }}
+            className="z-50 w-48 rounded-xl border border-surface-border bg-surface py-1 shadow-elevated"
+          >
+            {account.is_active ? (
               <button
                 type="button"
                 role="menuitem"
                 onClick={onMarkInactiveOrDelete}
-                className="block w-full px-3 py-2 text-left text-xs text-danger transition-colors hover:bg-danger/5 focus-visible:bg-danger/5 focus-visible:outline-none"
+                className="block w-full px-3 py-2 text-left text-xs text-ink-primary transition-colors hover:bg-surface-alt focus-visible:bg-surface-alt focus-visible:outline-none"
               >
-                Delete permanently
+                Mark inactive / Delete
               </button>
-            </>
-          )}
-        </div>
-      )}
-    </div>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={onReactivate}
+                  className="block w-full px-3 py-2 text-left text-xs font-medium text-accent-mint-ink transition-colors hover:bg-accent-mint/10 focus-visible:bg-accent-mint/10 focus-visible:outline-none"
+                >
+                  Reactivate
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={onMarkInactiveOrDelete}
+                  className="block w-full px-3 py-2 text-left text-xs text-danger transition-colors hover:bg-danger/5 focus-visible:bg-danger/5 focus-visible:outline-none"
+                >
+                  Delete permanently
+                </button>
+              </>
+            )}
+          </div>,
+          document.body
+        )}
+    </>
   );
 }
 
