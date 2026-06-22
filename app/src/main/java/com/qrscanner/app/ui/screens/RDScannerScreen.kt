@@ -316,7 +316,23 @@ private fun RDCameraScreen(
         }
         val pendingLotId = lotReviewLotId
         if (pendingLotId != null && showLotReviewScreen) {
-            lotReviewBaseRows = buildLotReviewRows(app, pendingLotId, lotReviewLotTimestamp)
+            val rehydrated = buildLotReviewRows(app, pendingLotId, lotReviewLotTimestamp)
+            if (rehydrated.isEmpty()) {
+                // Stale review state — the LOT was deleted while the
+                // process was dead (FK cascade from a session delete on
+                // another device). Tear down to avoid stuck UI: clear
+                // every review flag so the scanner returns to a usable
+                // state. Don't try to finalize the parent session
+                // either — the cascade nuked it too, so there's
+                // nothing to wrap up. The next user action either
+                // starts a fresh session or pops back home.
+                showLotReviewScreen = false
+                lotReviewLotId = null
+                lotReviewEdits = emptyMap()
+                pendingPostSave = null
+            } else {
+                lotReviewBaseRows = rehydrated
+            }
         }
         isHydrated = true
     }
