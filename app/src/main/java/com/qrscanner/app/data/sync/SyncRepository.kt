@@ -430,13 +430,16 @@ class SyncRepository(
                 if (pendingNotices.size > SyncNotifier.BULK_SUMMARY_THRESHOLD) {
                     notifier.notifyBulkSessionsSynced(pendingNotices.map { it.displayNumber })
                 } else {
-                    val deviceName = deviceSettingsDao.get()?.deviceName ?: ""
+                    val settings = deviceSettingsDao.get()
+                    val actorLabel = settings?.operatorName?.takeIf { it.isNotBlank() }
+                        ?: settings?.deviceName?.takeIf { it.isNotBlank() }
+                        ?: ""
                     for (n in pendingNotices) {
                         notifier.notifySessionSynced(
                             displayNumber = n.displayNumber,
                             totalLots = n.totalLots,
                             totalRdNumbers = n.totalRdNumbers,
-                            deviceName = deviceName
+                            actorLabel = actorLabel
                         )
                     }
                 }

@@ -12,7 +12,7 @@
 
     <!-- Notification bodies (spec §15.5.2) -->
     <string name="notif_sync_success_title">Session #%1$d synced</string>
-    <string name="notif_sync_success_body">%1$d LOTs, %2$d RD numbers uploaded · %3$s</string>
+    <string name="notif_sync_success_body">%1$d LOTs, %2$d RD numbers uploaded by %3$s</string>
     <plurals name="notif_sync_bulk_title">
         <item quantity="one">%d session synced</item>
         <item quantity="other">%d sessions synced</item>
@@ -86,6 +86,25 @@
     <string name="banner_title_one">1 recent update</string>
     <string name="banner_title_many">%d recent updates</string>
     <string name="banner_dismiss">Dismiss</string>
+    <!-- Sync history bell icon + sheet -->
+    <string name="bell_a11y_description">Open sync history</string>
+    <string name="bell_a11y_description_unread">Open sync history (%1$d new)</string>
+    <string name="sync_history_title">Sync activity</string>
+    <string name="sync_history_subtitle_empty">No sync activity yet</string>
+    <string name="sync_history_subtitle">Latest %1$d updates · pull to dismiss</string>
+    <string name="sync_history_empty_title">All quiet</string>
+    <string name="sync_history_empty_body">When other phones or the portal upload new sessions or edit defaulters, you\'ll see them here.</string>
+    <string name="sync_history_close">Close</string>
+    <string name="sync_history_row_actor_portal">Portal</string>
+    <string name="sync_history_row_actor_other_phone">Another phone</string>
+    <string name="sync_history_row_session_finalized">finalized Session #%1$s</string>
+    <string name="sync_history_row_defaulter_edit">updated defaulters on Session #%1$s</string>
+    <string name="sync_history_row_session_deleted">deleted Session #%1$s</string>
+    <string name="sync_history_relative_just_now">Just now</string>
+    <string name="sync_history_relative_minutes">%1$d min ago</string>
+    <string name="sync_history_relative_hours">%1$d hr ago</string>
+    <string name="sync_history_relative_yesterday">Yesterday</string>
+    <string name="sync_history_relative_days">%1$d days ago</string>
     <!-- Banner origin labels (RecentChangesBanner.originLabel) -->
     <string name="banner_origin_portal">Portal</string>
     <string name="banner_origin_another_phone">Another phone</string>

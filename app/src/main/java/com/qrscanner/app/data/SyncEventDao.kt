@@ -31,6 +31,9 @@ interface SyncEventDao {
     @Query("SELECT COUNT(*) FROM sync_events WHERE occurredAt > :since")
     suspend fun countSince(since: Long): Int
 
+    @Query("SELECT * FROM sync_events ORDER BY occurredAt DESC LIMIT :limit")
+    fun observeRecentEvents(limit: Int = 100): Flow<List<SyncEvent>>
+
     /**
      * Bounded retention. Called by a periodic worker; keeps at most
      * [keepCount] most-recent rows AND drops anything older than

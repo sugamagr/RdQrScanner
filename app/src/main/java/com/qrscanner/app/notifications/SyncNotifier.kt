@@ -49,7 +49,7 @@ class SyncNotifier(private val context: Context) {
         displayNumber: Int,
         totalLots: Int,
         totalRdNumbers: Int,
-        deviceName: String
+        actorLabel: String
     ) {
         if (!canPostNotifications()) return
 
@@ -58,7 +58,7 @@ class SyncNotifier(private val context: Context) {
             R.string.notif_sync_success_body,
             totalLots,
             totalRdNumbers,
-            deviceName
+            actorLabel
         )
 
         val notification = NotificationCompat.Builder(context, QRScannerApp.CHANNEL_SYNC_SUCCESS)

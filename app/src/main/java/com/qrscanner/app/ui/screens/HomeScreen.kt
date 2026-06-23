@@ -57,8 +57,12 @@ import com.qrscanner.app.QRScannerApp
 import com.qrscanner.app.cloud.CloudSessionStatus
 import com.qrscanner.app.data.sync.SyncPillState
 import com.qrscanner.app.data.sync.SyncSummary
+import com.qrscanner.app.ui.components.BellIcon
 import com.qrscanner.app.ui.components.RecentChangesBanner
+import com.qrscanner.app.ui.components.SyncHistorySheet
 import com.qrscanner.app.ui.components.SyncStatusPill
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import com.qrscanner.app.ui.theme.AccentCoral
@@ -150,44 +154,45 @@ fun HomeScreen(
         ) {
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Phase 5 T5.14 (boundary adversarial #1 fix): SCHEMA_MISSING
-            // tap kicks an immediate push attempt so the user doesn't have
-            // to wait up to 5 minutes after pasting cloud/schema.sql for
-            // the next foreground-poll tick. W3 (oracle bg_1eadd75b)
-            // extends the same handler to ERROR + PENDING so users have
-            // a "do something now" affordance on every actionable state.
-            // SYNCING/SYNCED/INITIALIZING/NOT_SIGNED_IN fall through to
-            // the (future) diagnostics screen.
-            val syncScope = rememberCoroutineScope()
-            SyncStatusPill(
-                summary = displayedSummary,
-                onTap = {
-                    val s = displayedSummary.state
-                    if (s == SyncPillState.SCHEMA_MISSING ||
-                        s == SyncPillState.ERROR ||
-                        s == SyncPillState.PENDING) {
-                        syncScope.launch {
-                            try { app.syncScheduler.enqueuePush() } catch (_: Throwable) {}
-                            try { app.syncScheduler.enqueuePull() } catch (_: Throwable) {}
-                            Toast.makeText(context, "Retrying…", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                },
-                modifier = Modifier
-                    .align(Alignment.End)
-            )
-
-            // Recent-changes banner (spec §15.5.1, F1c). Reads sync_events
-            // since the last-seen watermark; on dismiss/open it bumps the
-            // watermark so the banner doesn't re-show the same set after
-            // a config change. Suppressed entirely while not signed in.
             val scope = rememberCoroutineScope()
+            val syncScope = rememberCoroutineScope()
             val deviceSettings by app.database.deviceSettingsDao().observe()
                 .collectAsStateWithLifecycle(initialValue = null)
             val bannerSeenAt = deviceSettings?.lastBannerSeenAt ?: 0L
             val recentEvents by app.database.syncEventDao()
                 .observeEventsSince(since = bannerSeenAt, limit = 20)
                 .collectAsStateWithLifecycle(initialValue = emptyList())
+            val allRecentEvents by app.database.syncEventDao()
+                .observeRecentEvents(limit = 100)
+                .collectAsStateWithLifecycle(initialValue = emptyList())
+            var showHistorySheet by remember { mutableStateOf(false) }
+
+            Row(
+                modifier = Modifier.align(Alignment.End),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                SyncStatusPill(
+                    summary = displayedSummary,
+                    onTap = {
+                        val s = displayedSummary.state
+                        if (s == SyncPillState.SCHEMA_MISSING ||
+                            s == SyncPillState.ERROR ||
+                            s == SyncPillState.PENDING) {
+                            syncScope.launch {
+                                try { app.syncScheduler.enqueuePush() } catch (_: Throwable) {}
+                                try { app.syncScheduler.enqueuePull() } catch (_: Throwable) {}
+                                Toast.makeText(context, "Retrying…", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                )
+                BellIcon(
+                    unreadCount = recentEvents.size,
+                    onTap = { showHistorySheet = true }
+                )
+            }
+
             val showBanner = displayedSummary.state != SyncPillState.NOT_SIGNED_IN &&
                 recentEvents.isNotEmpty()
             if (showBanner) {
@@ -208,6 +213,19 @@ fun HomeScreen(
                         onNavigateToHistory()
                     },
                     modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            if (showHistorySheet) {
+                SyncHistorySheet(
+                    events = allRecentEvents,
+                    onDismiss = {
+                        showHistorySheet = false
+                        scope.launch {
+                            app.database.deviceSettingsDao()
+                                .updateLastBannerSeenAt(System.currentTimeMillis())
+                        }
+                    }
                 )
             }
 

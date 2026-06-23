@@ -12,7 +12,7 @@
 
     <!-- Notification bodies -->
     <string name="notif_sync_success_title">सेशन #%1$d सिंक हो गया</string>
-    <string name="notif_sync_success_body">%1$d LOTs, %2$d RD नंबर अपलोड हुए · %3$s</string>
+    <string name="notif_sync_success_body">%3$s ने %1$d LOT, %2$d RD नंबर अपलोड किए</string>
     <plurals name="notif_sync_bulk_title">
         <item quantity="one">%d सेशन सिंक हुआ</item>
         <item quantity="other">%d सेशन सिंक हुए</item>
@@ -87,6 +87,25 @@
     <string name="banner_title_one">1 नया अपडेट</string>
     <string name="banner_title_many">%d नए अपडेट</string>
     <string name="banner_dismiss">हटाएँ</string>
+    <!-- Sync history bell icon + sheet -->
+    <string name="bell_a11y_description">सिंक हिस्ट्री खोलें</string>
+    <string name="bell_a11y_description_unread">सिंक हिस्ट्री खोलें (%1$d नए)</string>
+    <string name="sync_history_title">सिंक गतिविधि</string>
+    <string name="sync_history_subtitle_empty">अभी तक कोई गतिविधि नहीं</string>
+    <string name="sync_history_subtitle">पिछले %1$d अपडेट · खींचकर बंद करें</string>
+    <string name="sync_history_empty_title">सब शांत है</string>
+    <string name="sync_history_empty_body">जब दूसरे फ़ोन या पोर्टल नए सेशन अपलोड करेंगे या डिफ़ॉल्टर एडिट करेंगे, वे यहाँ दिखेंगे।</string>
+    <string name="sync_history_close">बंद करें</string>
+    <string name="sync_history_row_actor_portal">पोर्टल</string>
+    <string name="sync_history_row_actor_other_phone">दूसरा फ़ोन</string>
+    <string name="sync_history_row_session_finalized">ने सेशन #%1$s फ़ाइनल किया</string>
+    <string name="sync_history_row_defaulter_edit">ने सेशन #%1$s के डिफ़ॉल्टर अपडेट किए</string>
+    <string name="sync_history_row_session_deleted">ने सेशन #%1$s डिलीट किया</string>
+    <string name="sync_history_relative_just_now">अभी</string>
+    <string name="sync_history_relative_minutes">%1$d मिनट पहले</string>
+    <string name="sync_history_relative_hours">%1$d घंटे पहले</string>
+    <string name="sync_history_relative_yesterday">कल</string>
+    <string name="sync_history_relative_days">%1$d दिन पहले</string>
     <!-- Banner origin labels -->
     <string name="banner_origin_portal">पोर्टल</string>
     <string name="banner_origin_another_phone">दूसरा फ़ोन</string>
