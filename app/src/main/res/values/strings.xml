@@ -94,7 +94,6 @@
     <string name="sync_history_subtitle">Latest %1$d updates · pull to dismiss</string>
     <string name="sync_history_empty_title">All quiet</string>
     <string name="sync_history_empty_body">When other phones or the portal upload new sessions or edit defaulters, you\'ll see them here.</string>
-    <string name="sync_history_close">Close</string>
     <string name="sync_history_row_actor_portal">Portal</string>
     <string name="sync_history_row_actor_other_phone">Another phone</string>
     <string name="sync_history_row_session_finalized">finalized Session #%1$s</string>

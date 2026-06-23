@@ -1227,6 +1227,55 @@ contend for the same lock. This eliminates two race classes:
 Critical sections are bounded (~one delta page = <2s in normal
 network conditions), so the non-fair mutex doesn't risk starvation.
 
+### 15.5.11 Bell icon + sync history sheet (v8.2 amendment)
+
+User-explicit history surface added in commit `a9a53b2` so the operator can answer "who did what" without waiting for the in-app banner to surface (banner is bounded to 3 lines and only shows events since `lastBannerSeenAt`). The bell is **always visible** next to the SyncStatusPill on HomeScreen.
+
+**Visual contract — `ui/components/BellIcon.kt`:**
+- 44dp WCAG-compliant round white chip (`Color.White.copy(alpha = 0.92f)`), `CircleShape`.
+- `Icons.Default.Notifications` glyph, 22dp, `TextSecondary` tint.
+- Badge overlay (top-right, 4dp inset): `AccentCoral` rounded pill, 16dp min, 10sp white bold text.
+- Badge cap: counts > 9 render as `"9+"`.
+- Badge animation: `scaleIn` + `fadeIn` (spring `DampingRatioMediumBouncy`); exit `scaleOut` + `fadeOut`.
+- Press feedback: 92% spring scale matching SyncStatusPill so the two read as one row.
+- A11y: `contentDescription` reads `bell_a11y_description_unread` (with count) when `unreadCount > 0`, else `bell_a11y_description`.
+
+**Visual contract — `ui/components/SyncHistorySheet.kt`:**
+- Material3 `ModalBottomSheet`, `skipPartiallyExpanded = true`, `SurfaceWhite` container.
+- Custom drag handle: 36×4dp pill, `TextSecondary.copy(alpha = 0.3f)`.
+- Header: 40dp orange-tinted bell medallion + `sync_history_title` + subtitle (`sync_history_subtitle` with count or `sync_history_subtitle_empty`).
+- Empty state: 72dp peach-tinted `EventNote` circle + `sync_history_empty_title` + body explainer.
+- Per-row layout: 40dp circular actor avatar tinted by event type (mint=finalized, amber=defaulter edit, red=delete) + actor name + relative time on the right + action template below the actor.
+- Max list height: 520dp; scrolls inside `LazyColumn` with 8dp spacing.
+
+**Actor label resolution** (matches `RecentChangesBanner.originLabel` and `RemoteEditNotice.originLabel` exactly — the 3 surfaces share semantics):
+1. `originDeviceCloudId == null` → `sync_history_row_actor_portal` ("Portal")
+2. `!originOperatorName.isNullOrBlank()` → operator name
+3. `!originDeviceName.isNullOrBlank()` → device name
+4. else → `sync_history_row_actor_other_phone` ("Another phone")
+
+**Action templates** (rendered as a second line below the actor; per-locale grammar must work standalone — the actor is NOT inlined into the template at runtime):
+- `sync_history_row_session_finalized` — `"finalized Session #%1$s"` / Hindi: `"सेशन #%1$s फ़ाइनल किया"`
+- `sync_history_row_defaulter_edit` — `"updated defaulters on Session #%1$s"` / Hindi: `"सेशन #%1$s के डिफ़ॉल्टर अपडेट किए"`
+- `sync_history_row_session_deleted` — `"deleted Session #%1$s"` / Hindi: `"सेशन #%1$s डिलीट किया"`
+
+NB on Hindi: ergative "ने" deliberately omitted from the templates above. The standalone past-participle form (`फ़ाइनल किया` / `डिलीट किया` / `अपडेट किए`) reads correctly without a preceding subject because the actor is in its own `Text` composable above. An earlier draft that started the templates with `ने सेशन ...` was rejected (C11-P5 oracle HIGH finding) since the ergative marker requires the subject to be glued to the same visual unit, which our row layout doesn't provide.
+
+**Relative time formatting** (composable `formatRelativeTime(timestamp, now)`):
+| Delta from now | Format |
+|---|---|
+| < 2 min | `sync_history_relative_just_now` |
+| < 60 min | `sync_history_relative_minutes` (%1$d) |
+| < 24 hr | `sync_history_relative_hours` (%1$d) |
+| == 1 day | `sync_history_relative_yesterday` |
+| else | `sync_history_relative_days` (%1$d) |
+
+**Unread count semantic:** Bell badge count = `SyncEventDao.observeEventsSince(lastBannerSeenAt, 20).size`. The sheet renders `SyncEventDao.observeRecentEvents(100)` — the unfiltered last-100 log so the operator can scroll back even after acknowledging. Dismissing the sheet (swipe down or tap outside) bumps `DeviceSettings.lastBannerSeenAt` to `now` so the badge clears AND the in-app banner stops re-showing the same events. Sheet and banner share one watermark by design — viewing one acknowledges both.
+
+**Rotation contract:** `showHistorySheet` is `remember { mutableStateOf(false) }` (NOT `rememberSaveable`) — rotating mid-sheet closes it. Acceptable since the sheet is a transient view and the bell remains tappable to re-open.
+
+**Why this exists separate from §15.5.1 banner:** Banner is ephemeral, bounded to 3 lines, dismissable, designed for "what changed since I last looked". Sheet is the persistent receipt log with unbounded scroll-back, designed for "I want to audit who did what across the last week". Two complementary surfaces, one shared watermark.
+
 ---
 
 ## 16. Portal architecture

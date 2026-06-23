@@ -155,7 +155,6 @@ fun HomeScreen(
             Spacer(modifier = Modifier.height(12.dp))
 
             val scope = rememberCoroutineScope()
-            val syncScope = rememberCoroutineScope()
             val deviceSettings by app.database.deviceSettingsDao().observe()
                 .collectAsStateWithLifecycle(initialValue = null)
             val bannerSeenAt = deviceSettings?.lastBannerSeenAt ?: 0L
@@ -179,7 +178,7 @@ fun HomeScreen(
                         if (s == SyncPillState.SCHEMA_MISSING ||
                             s == SyncPillState.ERROR ||
                             s == SyncPillState.PENDING) {
-                            syncScope.launch {
+                            scope.launch {
                                 try { app.syncScheduler.enqueuePush() } catch (_: Throwable) {}
                                 try { app.syncScheduler.enqueuePull() } catch (_: Throwable) {}
                                 Toast.makeText(context, "Retrying…", Toast.LENGTH_SHORT).show()
