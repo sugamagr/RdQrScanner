@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -52,6 +53,8 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
@@ -69,10 +72,12 @@ import com.qrscanner.app.QRScannerApp
 import com.qrscanner.app.data.AccountSource
 import com.qrscanner.app.data.RdAccount
 import com.qrscanner.app.data.SyncStatus
+import com.qrscanner.app.ui.components.GradientTopBar
 import com.qrscanner.app.ui.theme.AccentMint
 import com.qrscanner.app.ui.theme.BackgroundWhite
 import com.qrscanner.app.ui.theme.CardBackground
 import com.qrscanner.app.ui.theme.ErrorRed
+import com.qrscanner.app.ui.theme.GradientPeach
 import com.qrscanner.app.ui.theme.PrimaryOrange
 import com.qrscanner.app.ui.theme.SurfaceWhite
 import com.qrscanner.app.ui.theme.TextPrimary
@@ -136,16 +141,19 @@ fun AddAccountsScreen(
         derivedStateOf { validRowCount >= 1 && !anyInvalid && !saving }
     }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(BackgroundWhite)
+            .background(
+                Brush.verticalGradient(listOf(GradientPeach, Color.White, GradientPeach))
+            )
     ) {
-        AddAccountsHeader(
-            countLabel = if (validRowCount == 0) "Fill in to begin"
-            else "$validRowCount ready to save",
-            onNavigateBack = onNavigateBack
-        )
+        Column(modifier = Modifier.fillMaxSize()) {
+            AddAccountsHeader(
+                countLabel = if (validRowCount == 0) "Fill in to begin"
+                else "$validRowCount ready to save",
+                onNavigateBack = onNavigateBack
+            )
 
         LazyColumn(
             modifier = Modifier
@@ -194,14 +202,15 @@ fun AddAccountsScreen(
             }
         }
 
-        SaveFooter(
-            saveEnabled = saveEnabled,
-            validRowCount = validRowCount,
-            onSave = {
-                kb?.hide()
-                saveModal = true
-            }
-        )
+            SaveFooter(
+                saveEnabled = saveEnabled,
+                validRowCount = validRowCount,
+                onSave = {
+                    kb?.hide()
+                    saveModal = true
+                }
+            )
+        }
     }
 
     if (saveModal) {
@@ -339,30 +348,34 @@ private fun AccountDraft.isFullyValid(): Boolean {
 
 @Composable
 private fun AddAccountsHeader(countLabel: String, onNavigateBack: () -> Unit) {
-    Surface(
-        color = SurfaceWhite,
-        shadowElevation = 1.dp
-    ) {
+    GradientTopBar {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 10.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onNavigateBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = TextPrimary)
+            IconButton(
+                onClick = onNavigateBack,
+                modifier = Modifier
+                    .size(44.dp)
+                    .background(Color.White.copy(alpha = 0.2f), CircleShape)
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back",
+                    tint = Color.White
+                )
             }
-            Spacer(modifier = Modifier.width(4.dp))
+            Spacer(modifier = Modifier.width(12.dp))
             Box(
                 modifier = Modifier
-                    .size(40.dp)
-                    .background(PrimaryOrange.copy(alpha = 0.14f), CircleShape),
+                    .size(44.dp)
+                    .background(Color.White.copy(alpha = 0.2f), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     Icons.Default.PersonAddAlt1,
                     contentDescription = null,
-                    tint = PrimaryOrange,
+                    tint = Color.White,
                     modifier = Modifier.size(22.dp)
                 )
             }
@@ -370,13 +383,15 @@ private fun AddAccountsHeader(countLabel: String, onNavigateBack: () -> Unit) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = "Add new accounts",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = TextPrimary
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
                 )
                 Text(
                     text = countLabel,
                     style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondary
+                    color = Color.White.copy(alpha = 0.85f)
                 )
             }
         }
@@ -578,6 +593,7 @@ private fun SaveFooter(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .navigationBarsPadding()
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.End

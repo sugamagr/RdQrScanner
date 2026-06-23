@@ -9,7 +9,12 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -133,6 +138,21 @@ fun SessionHistoryScreen(
     val defaultCountMap = remember(defaultCountsList) {
         defaultCountsList.associate { it.sessionId to it.count }
     }
+
+    // Track the first DB emission so we can render skeleton cards on
+    // first open instead of flashing the empty state for 1 frame before
+    // real data arrives. Per-process boolean — does not need to survive
+    // rotation because cached Flow re-emits the last list immediately.
+    var hasReceivedFirstEmit by remember { mutableStateOf(false) }
+    LaunchedEffect(completedSessions) {
+        if (!hasReceivedFirstEmit) hasReceivedFirstEmit = true
+    }
+
+    // Hoisted formatter — used both by the date-section headers and
+    // by every SessionCard's start/end time strings. Allocating inside
+    // SessionCard meant 1 SimpleDateFormat per visible card (~50 on a
+    // long history). Hoisting collapses to a single instance.
+    val cardTimeFormat = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
 
     // Phase 3 T3.4: opportunistic pull-on-open. Fresh data the moment the
     // user lands here. KEEP semantics in the scheduler means we don't
@@ -365,6 +385,9 @@ fun SessionHistoryScreen(
 
             // ── Content ───────────────────────────────────────────────────────
             when {
+                !hasReceivedFirstEmit && completedSessions.isEmpty() -> {
+                    SessionListSkeleton()
+                }
                 completedSessions.isEmpty() -> {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Column(
@@ -411,18 +434,27 @@ fun SessionHistoryScreen(
                 }
 
                 else -> {
+                    // Memoize the date-grouped sessions OUTSIDE the LazyColumn
+                    // body. The old version ran groupBy + 1 SimpleDateFormat
+                    // call per session on every parent recompose (search
+                    // keystroke, filter chip tap, selection toggle), turning
+                    // a 500-session list into ~15k formatter calls per typed
+                    // query. Memoizing on (filteredSessions, dateFormatter)
+                    // collapses to a single pass per actual data change.
+                    val todayStr = remember(dateFormatter) { dateFormatter.format(Date()) }
+                    val yesterdayStr = remember(dateFormatter) {
+                        dateFormatter.format(Date(System.currentTimeMillis() - 86400000))
+                    }
+                    val grouped = remember(filteredSessions, dateFormatter) {
+                        filteredSessions.groupBy { session ->
+                            dateFormatter.format(Date(session.startTime))
+                        }
+                    }
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 100.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        val todayStr = dateFormatter.format(Date())
-                        val yesterdayStr = dateFormatter.format(Date(System.currentTimeMillis() - 86400000))
-
-                        val grouped = filteredSessions.groupBy { session ->
-                            dateFormatter.format(Date(session.startTime))
-                        }
-
                         grouped.forEach { (date, sessionsForDate) ->
                             item(key = "header_$date") {
                                 val displayDate = when (date) {
@@ -475,11 +507,12 @@ fun SessionHistoryScreen(
                                         }
                                     }
                                 ) {
-                                    SessionCard(
-                                        session = session,
-                                        defaultCount = defaultCountMap[session.id] ?: 0,
-                                        isSelectionMode = isSelectionMode,
-                                        isSelected = session.id in selectedIds,
+                                SessionCard(
+                                    session = session,
+                                    defaultCount = defaultCountMap[session.id] ?: 0,
+                                    isSelectionMode = isSelectionMode,
+                                    isSelected = session.id in selectedIds,
+                                    timeFormat = cardTimeFormat,
                                         onClick = {
                                             if (isSelectionMode) {
                                                 if (session.id in selectedIds) selectedIds = selectedIds - session.id
@@ -748,25 +781,33 @@ private fun SessionCard(
     defaultCount: Int,
     isSelectionMode: Boolean,
     isSelected: Boolean,
+    timeFormat: SimpleDateFormat,
     onClick: () -> Unit,
     onLongPress: () -> Unit,
     onExport: () -> Unit,
     onDelete: () -> Unit
 ) {
-    val timeFormat = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
-    val startTime = timeFormat.format(Date(session.startTime))
-    val endTime = session.endTime?.let { timeFormat.format(Date(it)) } ?: ""
+    val startTime = remember(session.startTime, timeFormat) {
+        timeFormat.format(Date(session.startTime))
+    }
+    val endTime = remember(session.endTime, timeFormat) {
+        session.endTime?.let { timeFormat.format(Date(it)) } ?: ""
+    }
 
     val borderColor by animateColorAsState(
         targetValue = if (isSelected) PrimaryOrange else Color.Transparent,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        animationSpec = tween(durationMillis = 180),
         label = "border_color"
     )
 
+    // Do NOT wrap this Card with animateContentSize(). The action-buttons
+    // AnimatedVisibility below changes card height when isSelectionMode
+    // toggles — animateContentSize() would force every visible card to
+    // measure + animate simultaneously, stalling the frame for ~1s on
+    // long lists. The fade-only transition is intentional.
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .animateContentSize()
             .border(2.dp, borderColor, RoundedCornerShape(20.dp))
             .clip(RoundedCornerShape(20.dp))
             .combinedClickable(onClick = onClick, onLongClick = onLongPress),
@@ -920,3 +961,71 @@ private val LongSetSaver: Saver<Set<Long>, List<Long>> = Saver(
     save = { it.toList() },
     restore = { it.toSet() }
 )
+
+@Composable
+private fun SessionListSkeleton() {
+    val transition = rememberInfiniteTransition(label = "skeleton_shimmer")
+    val shimmerAlpha by transition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 0.7f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 900, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "shimmer_alpha"
+    )
+    val placeholderColor = Color.Gray.copy(alpha = 0.12f * shimmerAlpha)
+    val pillColor = Color.Gray.copy(alpha = 0.08f * shimmerAlpha)
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        repeat(4) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                color = Color.White,
+                shadowElevation = 2.dp
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(50.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(placeholderColor)
+                        )
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(0.55f)
+                                    .height(14.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(placeholderColor)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(0.35f)
+                                    .height(10.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(pillColor)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(72.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(pillColor)
+                    )
+                }
+            }
+        }
+    }
+}

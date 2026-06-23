@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -56,6 +57,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -65,12 +68,14 @@ import com.qrscanner.app.data.AccountSource
 import com.qrscanner.app.data.RdAccount
 import com.qrscanner.app.ui.components.DeleteOrInactivateDialog
 import com.qrscanner.app.ui.components.EditAccountDialog
+import com.qrscanner.app.ui.components.GradientTopBar
 import com.qrscanner.app.ui.components.IconSnackbarHost
 import com.qrscanner.app.ui.components.IconSnackbarKind
 import com.qrscanner.app.ui.components.showIconSnackbar
 import com.qrscanner.app.ui.theme.AccentMint
 import com.qrscanner.app.ui.theme.BackgroundWhite
 import com.qrscanner.app.ui.theme.CardBackground
+import com.qrscanner.app.ui.theme.GradientPeach
 import com.qrscanner.app.ui.theme.PrimaryOrange
 import com.qrscanner.app.ui.theme.SurfaceWhite
 import com.qrscanner.app.ui.theme.TextPrimary
@@ -150,11 +155,15 @@ fun AccountsScreen(onNavigateBack: () -> Unit) {
 
     Scaffold(
         snackbarHost = { IconSnackbarHost(hostState = snackbarHostState) },
-        containerColor = BackgroundWhite
+        containerColor = Color.Transparent,
+        contentWindowInsets = WindowInsets(0)
     ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(listOf(GradientPeach, Color.White, GradientPeach))
+                )
                 .padding(padding)
         ) {
             AccountsHeader(
@@ -360,56 +369,88 @@ private fun AccountsHeader(
     onEnterSelection: () -> Unit,
     onGenerateBulk: () -> Unit
 ) {
-    Surface(color = SurfaceWhite, shadowElevation = 1.dp) {
+    GradientTopBar {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 10.dp),
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(onClick = onNavigateBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = TextPrimary)
+            IconButton(
+                onClick = onNavigateBack,
+                modifier = Modifier
+                    .size(44.dp)
+                    .background(Color.White.copy(alpha = 0.2f), CircleShape)
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back",
+                    tint = Color.White
+                )
             }
-            Spacer(modifier = Modifier.width(4.dp))
+            Spacer(modifier = Modifier.width(12.dp))
             if (selectionMode) {
                 Text(
                     text = "$selectedCount selected",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = TextPrimary,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    ),
                     modifier = Modifier.weight(1f)
                 )
-                IconButton(onClick = onCancelSelection) {
-                    Icon(Icons.Default.Close, contentDescription = "Cancel", tint = TextSecondary)
+                IconButton(
+                    onClick = onCancelSelection,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .background(Color.White.copy(alpha = 0.2f), CircleShape)
+                ) {
+                    Icon(Icons.Default.Close, contentDescription = "Cancel", tint = Color.White)
                 }
+                Spacer(modifier = Modifier.width(8.dp))
                 IconButton(
                     onClick = onGenerateBulk,
-                    enabled = selectedCount > 0
+                    enabled = selectedCount > 0,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .background(
+                            Color.White.copy(alpha = if (selectedCount > 0) 0.2f else 0.08f),
+                            CircleShape
+                        )
                 ) {
                     Icon(
                         Icons.Default.QrCode2,
                         contentDescription = "Generate QR PDF",
-                        tint = if (selectedCount > 0) PrimaryOrange else TextTertiary
+                        tint = Color.White.copy(alpha = if (selectedCount > 0) 1f else 0.4f)
                     )
                 }
             } else {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "Accounts",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = TextPrimary
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
                     )
                     Text(
                         text = if (inactiveCount == 0) "$activeCount active"
                         else "$activeCount active · $inactiveCount inactive",
                         style = MaterialTheme.typography.labelSmall,
-                        color = TextSecondary
+                        color = Color.White.copy(alpha = 0.85f)
                     )
                 }
-                IconButton(onClick = onEnterSelection, enabled = activeCount > 0) {
+                IconButton(
+                    onClick = onEnterSelection,
+                    enabled = activeCount > 0,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .background(
+                            Color.White.copy(alpha = if (activeCount > 0) 0.2f else 0.08f),
+                            CircleShape
+                        )
+                ) {
                     Icon(
                         Icons.Default.QrCode2,
                         contentDescription = "Bulk QR",
-                        tint = if (activeCount > 0) PrimaryOrange else TextTertiary
+                        tint = Color.White.copy(alpha = if (activeCount > 0) 1f else 0.4f)
                     )
                 }
             }
