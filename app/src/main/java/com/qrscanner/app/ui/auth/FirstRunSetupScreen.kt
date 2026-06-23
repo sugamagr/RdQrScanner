@@ -34,6 +34,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
@@ -44,7 +46,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.qrscanner.app.R
 import com.qrscanner.app.ui.theme.BackgroundWhite
+import com.qrscanner.app.ui.theme.GradientPeach
 import com.qrscanner.app.ui.theme.PrimaryOrange
+import com.qrscanner.app.ui.theme.PrimaryOrangeLight
 import com.qrscanner.app.ui.theme.TextPrimary
 import com.qrscanner.app.ui.theme.TextSecondary
 
@@ -69,7 +73,13 @@ fun FirstRunSetupScreen(
     val keyboard = LocalSoftwareKeyboardController.current
     val canSubmit = deviceName.isNotBlank() && operatorName.isNotBlank() && !isSaving
 
-    Surface(modifier = Modifier.fillMaxSize(), color = BackgroundWhite) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(listOf(GradientPeach, Color.White, GradientPeach))
+            )
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -79,15 +89,18 @@ fun FirstRunSetupScreen(
         ) {
             Box(
                 modifier = Modifier
-                    .size(72.dp)
-                    .background(PrimaryOrange.copy(alpha = 0.12f), CircleShape),
+                    .size(96.dp)
+                    .clip(CircleShape)
+                    .background(
+                        Brush.linearGradient(listOf(PrimaryOrange, PrimaryOrangeLight))
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Default.Smartphone,
                     contentDescription = null,
-                    tint = PrimaryOrange,
-                    modifier = Modifier.size(36.dp)
+                    tint = Color.White,
+                    modifier = Modifier.size(44.dp)
                 )
             }
 
