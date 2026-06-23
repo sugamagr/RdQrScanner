@@ -1638,9 +1638,17 @@ private fun LiveLotTotalChip(total: LiveLotTotal) {
         java.text.NumberFormat.getNumberInstance(java.util.Locale.getDefault())
     }
     val rupeeText = formatter.format(total.verifiedRupees.toLong())
+    // QC C13-D LOW: white text on accent-22% alpha passed WCAG AA on
+    // dark indoor camera (16:1) but failed on bright outdoor / white
+    // camera feed (1.16-1.25:1). Layered black-30% underlay below
+    // accent-22% guarantees a darker effective background (~45% black
+    // composited) regardless of camera content. Slight darkening of
+    // the indoor chip is the acceptable trade-off for guaranteed
+    // outdoor readability.
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .background(Color.Black.copy(alpha = 0.30f), RoundedCornerShape(12.dp))
             .background(accent.copy(alpha = 0.22f), RoundedCornerShape(12.dp))
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
