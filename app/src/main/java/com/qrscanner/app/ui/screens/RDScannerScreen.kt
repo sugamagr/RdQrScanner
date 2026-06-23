@@ -1471,37 +1471,6 @@ private val PostSaveSaver: Saver<PostSave?, String> = Saver(
     }
 )
 
-/**
- * Persists the LOT review's per-row month-list deltas across config
- * change + process death. Wire format: "rowId=YYYY-MM,YYYY-MM;...".
- * Empty map encodes to empty string. Malformed segments are skipped on
- * restore (defensive — a Bundle truncation never crashes the screen).
- *
- * Bundle-size guarantee: each segment ~30 bytes for typical 1-3 month
- * selections; a 50-row LOT stays well under 2KB.
- */
-private val LotReviewEditsSaver: Saver<Map<Long, List<com.qrscanner.app.util.MonthYear>>, String> = Saver(
-    save = { deltas ->
-        if (deltas.isEmpty()) "" else deltas.entries.joinToString(";") { (id, months) ->
-            "$id=${com.qrscanner.app.util.MonthYear.encodeList(months)}"
-        }
-    },
-    restore = { token ->
-        if (token.isBlank()) emptyMap()
-        else token.split(";").mapNotNull { entry ->
-            val sep = entry.indexOf('=')
-            if (sep <= 0) return@mapNotNull null
-            val id = entry.substring(0, sep).toLongOrNull() ?: return@mapNotNull null
-            val listToken = entry.substring(sep + 1)
-            if (listToken.isBlank()) return@mapNotNull null
-            val count = listToken.count { it == ',' } + 1
-            val parsed = com.qrscanner.app.util.MonthYear.parseList(listToken, count)
-                ?: return@mapNotNull null
-            id to parsed
-        }.toMap()
-    }
-)
-
 @Composable
 private fun ScannerOverlay() {
     val infiniteTransition = rememberInfiniteTransition(label = "scanner")

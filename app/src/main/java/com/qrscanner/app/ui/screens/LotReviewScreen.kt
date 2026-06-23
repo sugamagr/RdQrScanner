@@ -1,6 +1,8 @@
 package com.qrscanner.app.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.room.withTransaction
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -88,9 +90,22 @@ data class LotReviewRow(
     val accountName: String?,
     val accountLastPaidThrough: MonthYear?,
     val accountMonthlyAmount: Int?,
-    val selected: List<MonthYear>
+    val selected: List<MonthYear>,
+    /**
+     * Baseline that `selected` is compared against to detect actual
+     * edits. Builder populates this equal to `selected` at hydration
+     * (= DB state). UI-driven [copy(selected = ...)] mutations leave
+     * `originalSelected` untouched, so [hasChanges] correctly reports
+     * "did the operator actually change anything?". This is what
+     * keeps [LotReviewOutcome.NoChanges] reachable — without it, every
+     * Confirm tap would persist every row regardless of intent.
+     */
+    val originalSelected: List<MonthYear> = selected
 ) {
     val count: Int get() = selected.size
+
+    /** True iff the operator's in-flight selection differs from the DB baseline. */
+    val hasChanges: Boolean get() = selected != originalSelected
 
     /**
      * Per-row contribution to the LOT's 20,000-rupee total cap, or
@@ -237,6 +252,16 @@ fun LotReviewScreen(
     }
     var pendingEdits by remember { mutableStateOf<List<LotReviewEdit>?>(null) }
 
+    // Android hardware/gesture back routes to the same discard-confirm
+    // gate as the top-bar back arrow so in-flight edits aren't lost
+    // when the operator hits the system back button. When a sub-dialog
+    // is showing, the Dialog composable intercepts back via its own
+    // onDismissRequest, so this BackHandler stays dormant in that
+    // state — no manual `enabled` flag needed.
+    BackHandler {
+        discardConfirmShown = true
+    }
+
     val changedCount by remember(rows) {
         derivedStateOf {
             // For now every row is "changed" because the new screen replaces
@@ -296,7 +321,14 @@ fun LotReviewScreen(
                         overLimitShown = true
                         return@ConfirmBar
                     }
-                    val edits = rows.map { it.toEdit() }
+                    // Only persist rows the operator actually changed —
+                    // unedited rows are filtered out via [hasChanges]. This
+                    // is what makes [LotReviewOutcome.NoChanges] reachable
+                    // and avoids markDirty churn on rows the push worker
+                    // doesn't need to re-send.
+                    val edits = rows.mapNotNull { row ->
+                        if (row.hasChanges) row.toEdit() else null
+                    }
                     val gapNotices = collectSkipGapNotices(rows)
                     if (gapNotices.isNotEmpty()) {
                         skipGapPayload = edits to gapNotices
@@ -364,12 +396,8 @@ fun LotReviewScreen(
     if (overLimitShown) {
         OverLimitDialog(
             lotTotal = lotTotal,
+            mode = mode,
             onCancel = { overLimitShown = false },
-            // onRescan only fires when the caller actually allows it
-            // (fresh-scan path). Recorded-edit passes null → the
-            // OverLimitDialog hides its Rescan CTA and only shows
-            // Cancel, since destroying a committed LOT from the
-            // editor would orphan downstream state.
             onRescan = onRescanLot?.let { cb ->
                 {
                     overLimitShown = false
@@ -633,8 +661,10 @@ private fun StepperButton(
     enabled: Boolean,
     onClick: () -> Unit
 ) {
-    // 44dp WCAG-compliant touch target wrapping a 36dp visible chip,
-    // matching the ChipShiftButton pattern in DefaulterDialogs.kt.
+    // 44dp WCAG-compliant outer touch target wrapping a 36dp visible
+    // chip — the standard wrap-pattern used across the app for chip-
+    // sized controls so the touch target stays compliant even when
+    // the rendered chip is intentionally smaller than the floor.
     Box(
         modifier = Modifier
             .size(44.dp)
@@ -867,9 +897,24 @@ private fun LotTotalLine(lotTotal: LotTotal) {
 @Composable
 private fun OverLimitDialog(
     lotTotal: LotTotal,
+    mode: LotReviewMode,
     onCancel: () -> Unit,
     onRescan: (() -> Unit)?
 ) {
+    // Rescan visibility is gated on BOTH the mode AND the callback
+    // being present — defense in depth. The mode is the authoritative
+    // contract (RecordedEdit must never destroy a committed LOT); the
+    // null-callback check is the belt-and-braces fallback in case a
+    // caller misconfigures FreshScan + null callback. If a careless
+    // future refactor passes RecordedEdit + non-null callback, the
+    // mode check still hides the destructive button.
+    //
+    // We derive a single nullable callback so Kotlin can smart-cast
+    // inside the `if (rescanCallback != null)` branch — avoids the
+    // 'condition is always true' lint warning that fires when you
+    // double-check `boolean && nullable != null` after a derived val.
+    val rescanCallback: (() -> Unit)? =
+        if (mode is LotReviewMode.FreshScan) onRescan else null
     Dialog(
         onDismissRequest = onCancel,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -929,7 +974,7 @@ private fun OverLimitDialog(
                     )
                 }
                 Spacer(modifier = Modifier.height(20.dp))
-                if (onRescan != null) {
+                if (rescanCallback != null) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -942,7 +987,7 @@ private fun OverLimitDialog(
                             )
                         }
                         Button(
-                            onClick = onRescan,
+                            onClick = rescanCallback,
                             modifier = Modifier.weight(1.4f),
                             colors = ButtonDefaults.buttonColors(containerColor = AccentCoral),
                             shape = RoundedCornerShape(12.dp)
@@ -1369,11 +1414,46 @@ object LotReviewBuilder {
                 accountName = account?.name,
                 accountLastPaidThrough = accountLastPaid,
                 accountMonthlyAmount = account?.monthlyAmount,
-                selected = selected
+                selected = selected,
+                originalSelected = selected
             )
         }
     }
 }
+
+/**
+ * Persists the LOT review's per-row month-list deltas across config
+ * change + process death. Wire format: "rowId=YYYY-MM,YYYY-MM;...".
+ * Empty map encodes to empty string. Malformed segments are skipped
+ * on restore (defensive — a Bundle truncation never crashes the
+ * screen). Bundle-size guarantee: each segment ~30 bytes for typical
+ * 1-3 month selections; a 50-row LOT stays well under 2KB.
+ *
+ * Lives in LotReviewScreen.kt (not the call sites) so BOTH
+ * RDScannerScreen + SessionDetailScreen use the same saver — process
+ * death restores in-flight edits identically on both editor paths.
+ */
+internal val LotReviewEditsSaver: androidx.compose.runtime.saveable.Saver<Map<Long, List<MonthYear>>, String> =
+    androidx.compose.runtime.saveable.Saver(
+        save = { deltas ->
+            if (deltas.isEmpty()) "" else deltas.entries.joinToString(";") { (id, months) ->
+                "$id=${MonthYear.encodeList(months)}"
+            }
+        },
+        restore = { token ->
+            if (token.isBlank()) emptyMap()
+            else token.split(";").mapNotNull { entry ->
+                val sep = entry.indexOf('=')
+                if (sep <= 0) return@mapNotNull null
+                val id = entry.substring(0, sep).toLongOrNull() ?: return@mapNotNull null
+                val listToken = entry.substring(sep + 1)
+                if (listToken.isBlank()) return@mapNotNull null
+                val count = listToken.count { it == ',' } + 1
+                val parsed = MonthYear.parseList(listToken, count) ?: return@mapNotNull null
+                id to parsed
+            }.toMap()
+        }
+    )
 
 /**
  * Output-side boundary of the editor. Atomically applies a confirmed
@@ -1391,7 +1471,12 @@ object LotReviewBuilder {
  *   2. Per-row writes: `rd_numbers.updateMonths` + `markDirty`. The
  *      DIRTY flip is what tells the push worker this row needs to
  *      sync; updateMonths alone leaves the row at its prior
- *      syncStatus.
+ *      syncStatus. Steps 2 and 3 run inside a single Room
+ *      transaction so a process kill mid-loop can never leave the
+ *      DB with some rows updated-but-not-DIRTY (data the operator
+ *      thinks is saved but the push worker never sees) or with N
+ *      rows persisted and M unpersisted — partial saves would
+ *      confuse the operator and produce divergent cloud state.
  *   3. `rd_accounts.lastPaidThrough` writeback, routed by
  *      [LotReviewEdit.isRegression]. Regressions use the explicit
  *      setter (no monotonic guard) because the operator has confirmed
@@ -1421,23 +1506,39 @@ object LotReviewPersister {
                 LotReviewOutcome.SessionTombstoned
             } else {
                 val now = System.currentTimeMillis()
-                edits.forEach { edit ->
-                    app.database.rdNumberDao().updateMonths(
-                        edit.rowId,
-                        edit.newCount,
-                        edit.encodedMonthsList
-                    )
-                    app.database.rdNumberDao().markDirty(edit.rowId, now)
-                    val newest = edit.newestSelected ?: return@forEach
-                    val token = newest.toToken()
-                    if (edit.isRegression) {
-                        app.database.rdAccountDao()
-                            .setLastPaidThroughExplicit(edit.rdNumber, token, now)
-                    } else {
-                        app.database.rdAccountDao()
-                            .updateLastPaidThroughMonotonic(edit.rdNumber, token, now)
+                // Single transaction across the whole edit batch: a
+                // process kill mid-loop rolls back ALL writes rather
+                // than leaving partial state. Both per-row writes
+                // (updateMonths + markDirty) and the rd_accounts
+                // writeback must be atomic — see KDoc step 2 for the
+                // rationale.
+                app.database.withTransaction {
+                    edits.forEach { edit ->
+                        app.database.rdNumberDao().updateMonths(
+                            edit.rowId,
+                            edit.newCount,
+                            edit.encodedMonthsList
+                        )
+                        app.database.rdNumberDao().markDirty(edit.rowId, now)
+                        val newest = edit.newestSelected ?: return@forEach
+                        val token = newest.toToken()
+                        if (edit.isRegression) {
+                            app.database.rdAccountDao()
+                                .setLastPaidThroughExplicit(edit.rdNumber, token, now)
+                        } else {
+                            app.database.rdAccountDao()
+                                .updateLastPaidThroughMonotonic(edit.rdNumber, token, now)
+                        }
                     }
                 }
+                // sync_event insert + push enqueue stay OUTSIDE the
+                // transaction: they're observability concerns. If the
+                // sync_event insert fails, the bell history misses
+                // this entry but the data is correctly persisted +
+                // DIRTY. If enqueuePush fails, the rows are still
+                // DIRTY so the next scheduled WorkManager tick picks
+                // them up — and the Home screen's sync_pill surfaces
+                // PENDING state to the operator regardless.
                 runCatching {
                     val settings = app.database.deviceSettingsDao().get()
                     val rowWord = if (edits.size == 1) "account" else "accounts"

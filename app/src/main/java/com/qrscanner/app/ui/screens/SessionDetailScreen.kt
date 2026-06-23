@@ -106,22 +106,49 @@ fun SessionDetailScreen(
     //   2. The editor is a session-level concern, not a card-level
     //      one — only one LOT can be edited at a time across the
     //      whole session.
-    // editorBaseRows is null while we're building rows for the lot
-    // (loading state); editorEdits accumulates per-row operator
-    // changes by rdNumber.id so re-renders preserve in-flight work.
-    var editingLot by remember { mutableStateOf<ScanLot?>(null) }
+    //
+    // Saveable state survives process death so an operator who got
+    // interrupted mid-edit (incoming call, OS kill) comes back to
+    // their in-flight changes:
+    //   - editingLotId: which LOT is open. Restored on rehydrate,
+    //     LaunchedEffect rebuilds baseRows from it.
+    //   - editorEdits: the operator's per-row month deltas, keyed by
+    //     rd_numbers.id (globally unique so cross-LOT collisions
+    //     can't happen). Uses the shared LotReviewEditsSaver.
+    //   - editorBaseRows: TRANSIENT — never saved, rebuilt from
+    //     editingLotId on every LaunchedEffect. Embedding the base
+    //     rows in the Bundle would be wasteful (DB is the source of
+    //     truth) and risk staleness vs. concurrent edits from other
+    //     devices that landed during the kill window.
+    //
+    // hasNavigatedAway guards the tombstone-mid-edit race: the
+    // sessionFlow observer and the LotReviewOutcome.SessionTombstoned
+    // handler can BOTH fire onNavigateBack(). The flag ensures only
+    // the first one runs.
+    var editingLotId by rememberSaveable { mutableStateOf<Long?>(null) }
     var editorBaseRows by remember { mutableStateOf<List<LotReviewRow>?>(null) }
-    var editorEdits by remember { mutableStateOf<Map<Long, List<MonthYear>>>(emptyMap()) }
+    var editorEdits by rememberSaveable(stateSaver = LotReviewEditsSaver) {
+        mutableStateOf<Map<Long, List<MonthYear>>>(emptyMap())
+    }
+    var hasNavigatedAway by remember { mutableStateOf(false) }
 
-    LaunchedEffect(editingLot) {
-        val lot = editingLot
-        if (lot == null) {
+    LaunchedEffect(editingLotId, lots) {
+        val targetId = editingLotId
+        if (targetId == null) {
             editorBaseRows = null
-            editorEdits = emptyMap()
         } else {
-            editorBaseRows = null
-            editorEdits = emptyMap()
-            editorBaseRows = LotReviewBuilder.build(app, lot.id, lot.timestamp)
+            val lot = lots.firstOrNull { it.id == targetId }
+            if (lot != null) {
+                editorBaseRows = null
+                editorBaseRows = LotReviewBuilder.build(app, lot.id, lot.timestamp)
+            } else {
+                // editingLotId points to a LOT that no longer exists
+                // — most likely an FK cascade from a session tombstone
+                // (the sessionFlow observer below will navigate away).
+                // Clean up local state defensively.
+                editingLotId = null
+                editorEdits = emptyMap()
+            }
         }
     }
     val totalDefaults by app.database.rdNumberDao()
@@ -146,10 +173,12 @@ fun SessionDetailScreen(
         if (next != null) {
             session = next
             sessionEverLoaded = true
-        } else if (sessionEverLoaded) {
+        } else if (sessionEverLoaded && !hasNavigatedAway) {
             // Tombstone arrived after we'd already loaded — get out
-            // cleanly. Toast first so the user understands why the
-            // screen vanished. Then navigate back.
+            // cleanly. hasNavigatedAway guards against double-pop
+            // when the persister's SessionTombstoned outcome also
+            // fires onNavigateBack from a mid-edit race.
+            hasNavigatedAway = true
             Toast.makeText(
                 context,
                 "Session deleted by another device",
@@ -242,7 +271,7 @@ fun SessionDetailScreen(
                                     expandedLotIds + lot.id
                                 }
                             },
-                            onEditLot = { editingLot = lot }
+                            onEditLot = { editingLotId = lot.id }
                         )
                     }
 
@@ -260,13 +289,24 @@ fun SessionDetailScreen(
         // mode = RecordedEdit + null onRescanLot blocks the OverLimit
         // dialog's destructive "Rescan LOT" CTA because committed LOTs
         // can't be safely thrown away from this surface.
-        val activeLot = editingLot
+        // Resolve the live ScanLot from the saveable editingLotId. The
+        // ID survives process death; the ScanLot doesn't (it gets
+        // restored from Room via the lots Flow). Using `firstOrNull`
+        // means if the LOT was deleted in the background, activeLot
+        // becomes null and the editor dismisses gracefully.
+        val activeLot = editingLotId?.let { id -> lots.firstOrNull { it.id == id } }
         val baseRows = editorBaseRows
-        if (activeLot != null && baseRows != null && baseRows.isNotEmpty()) {
-            val displayRows = baseRows.map { base ->
+        // Memoize the merged display rows so recompositions inside the
+        // editor (per-keystroke, animation ticks, etc.) don't allocate
+        // a fresh List<LotReviewRow> + per-row copies on every frame.
+        // Matches the RDScannerScreen remember-pattern for parity.
+        val displayRows = remember(baseRows, editorEdits) {
+            baseRows?.map { base ->
                 val edited = editorEdits[base.rdNumber.id]
                 if (edited != null) base.copy(selected = edited) else base
             }
+        }
+        if (activeLot != null && displayRows != null && displayRows.isNotEmpty()) {
             LotReviewScreen(
                 mode = LotReviewMode.RecordedEdit,
                 lotNumber = activeLot.lotNumber,
@@ -275,7 +315,8 @@ fun SessionDetailScreen(
                     editorEdits = editorEdits + (rowId to newSelected)
                 },
                 onConfirm = { edits ->
-                    editingLot = null
+                    editingLotId = null
+                    editorEdits = emptyMap()
                     scope.launch {
                         // Persister owns updateMonths + markDirty +
                         // lastPaidThrough writeback + LOCAL_DEFAULTER_EDIT
@@ -293,12 +334,15 @@ fun SessionDetailScreen(
                             }
                             is LotReviewOutcome.NoChanges -> Unit
                             is LotReviewOutcome.SessionTombstoned -> {
-                                Toast.makeText(
-                                    context,
-                                    "Session was deleted — edit not saved",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                                onNavigateBack()
+                                if (!hasNavigatedAway) {
+                                    hasNavigatedAway = true
+                                    Toast.makeText(
+                                        context,
+                                        "Session was deleted — edit not saved",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                    onNavigateBack()
+                                }
                             }
                             is LotReviewOutcome.Error -> {
                                 android.util.Log.e(
@@ -315,7 +359,10 @@ fun SessionDetailScreen(
                         }
                     }
                 },
-                onDiscard = { editingLot = null }
+                onDiscard = {
+                    editingLotId = null
+                    editorEdits = emptyMap()
+                }
             )
         }
     }
