@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -59,6 +60,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.qrscanner.app.R
 import com.qrscanner.app.data.RdNumber
+import com.qrscanner.app.ui.components.GradientTopBar
 import com.qrscanner.app.ui.theme.AccentCoral
 import com.qrscanner.app.ui.theme.AccentMint
 import com.qrscanner.app.ui.theme.BackgroundWhite
@@ -299,37 +301,43 @@ private fun LotReviewRow.toEdit(): LotReviewEdit {
 
 @Composable
 private fun ReviewHeader(lotNumber: Int, accountCount: Int, onBack: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(SurfaceWhite)
-            .padding(horizontal = 8.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        IconButton(onClick = onBack) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = stringResource(R.string.content_desc_back),
-                tint = TextPrimary
-            )
-        }
-        Spacer(modifier = Modifier.width(4.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = stringResource(R.string.lotreview_title, lotNumber),
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary
+    GradientTopBar {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(
+                onClick = onBack,
+                modifier = Modifier
+                    .size(44.dp)
+                    .background(Color.White.copy(alpha = 0.2f), CircleShape)
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = stringResource(R.string.content_desc_back),
+                    tint = Color.White
                 )
-            )
-            Text(
-                text = if (accountCount == 1) {
-                    stringResource(R.string.lotreview_subtitle_one)
-                } else {
-                    stringResource(R.string.lotreview_subtitle_many, accountCount)
-                },
-                style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
-            )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.lotreview_title, lotNumber),
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                )
+                Text(
+                    text = if (accountCount == 1) {
+                        stringResource(R.string.lotreview_subtitle_one)
+                    } else {
+                        stringResource(R.string.lotreview_subtitle_many, accountCount)
+                    },
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        color = Color.White.copy(alpha = 0.85f)
+                    )
+                )
+            }
         }
     }
 }
@@ -565,10 +573,6 @@ private fun MonthBar(
 ) {
     val today = remember { MonthYear.current() }
     val haptics = LocalHapticFeedback.current
-    // Anchor the rendered range to the INITIAL selection only. Re-keying
-    // on every selection change would re-scroll the bar on every tap,
-    // visually yanking the operator's view. The range stays fixed; the
-    // selected highlight moves within it.
     val initialAnchor = remember { selected.minOrNull() ?: today }
     val range = remember(initialAnchor) {
         MonthYear.range(
@@ -579,31 +583,53 @@ private fun MonthBar(
     val selectedSet = remember(selected) { selected.toSet() }
     val listState = rememberLazyListState()
 
-    LaunchedEffect(initialAnchor, range) {
-        val idx = range.indexOf(initialAnchor).coerceAtLeast(0)
-        listState.scrollToItem((idx - 2).coerceAtLeast(0))
+    // Visual midpoint of the selected block. For a single month this is the
+    // month itself; for a contiguous block it is the middle index so the
+    // block reads as centered to the operator on tap or count change.
+    val centerIdx = remember(selected, range) {
+        if (selected.isEmpty()) {
+            range.indexOf(today).coerceAtLeast(0)
+        } else {
+            val firstIdx = range.indexOf(selected.first()).coerceAtLeast(0)
+            val lastIdx = range.indexOf(selected.last()).coerceAtLeast(firstIdx)
+            (firstIdx + lastIdx) / 2
+        }
     }
 
-    LazyRow(
-        state = listState,
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        contentPadding = PaddingValues(horizontal = 2.dp)
-    ) {
-        items(range, key = { it.toToken() }) { month ->
-            val isSelected = month in selectedSet
-            val isToday = month == today
-            MonthBarCell(
-                month = month,
-                isSelected = isSelected,
-                isToday = isToday,
-                onClick = {
-                    if (!isSelected) {
-                        haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                        onAnchorPick(month)
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        // Side padding = (viewport - cell) / 2 makes the item at scroll
+        // position 0 appear visually centered in the viewport, so
+        // animateScrollToItem(centerIdx) centers the selection block.
+        val sidePadding = ((maxWidth - MONTH_BAR_CELL_APPROX_WIDTH) / 2)
+            .coerceAtLeast(2.dp)
+
+        LaunchedEffect(centerIdx) {
+            if (centerIdx in range.indices) {
+                listState.animateScrollToItem(centerIdx)
+            }
+        }
+
+        LazyRow(
+            state = listState,
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            contentPadding = PaddingValues(horizontal = sidePadding)
+        ) {
+            items(range, key = { it.toToken() }) { month ->
+                val isSelected = month in selectedSet
+                val isToday = month == today
+                MonthBarCell(
+                    month = month,
+                    isSelected = isSelected,
+                    isToday = isToday,
+                    onClick = {
+                        if (!isSelected) {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onAnchorPick(month)
+                        }
                     }
-                }
-            )
+                )
+            }
         }
     }
 }
@@ -1005,6 +1031,13 @@ private fun MonthYear.plusBy(n: Int): MonthYear {
 
 private const val MONTH_BAR_BACK = 12
 private const val MONTH_BAR_FORWARD = 12
+
+// Approximate visual width of a MonthBarCell ("MMM YYYY" label + 12dp×2
+// inner padding). Used to compute the LazyRow side padding so that
+// animateScrollToItem(idx) lands the cell at the viewport's horizontal
+// midpoint. Off-by-a-few-dp is invisible at this scale; the contract is
+// "feels centered", not "pixel exact".
+private val MONTH_BAR_CELL_APPROX_WIDTH = 72.dp
 
 /**
  * Hard limit the portal enforces on each LOT's combined rupee total
