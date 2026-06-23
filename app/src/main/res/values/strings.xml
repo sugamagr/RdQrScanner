@@ -121,7 +121,7 @@
     <string name="banner_line_session_deleted_one">%1$s %2$s</string>
     <string name="banner_line_session_deleted_many">%1$s deleted %2$d sessions</string>
 
-    <!-- LOT review screen (replaces DefaulterAskDialog + DefaulterEditDialog) -->
+    <!-- LOT review screen (one editor for both fresh-scan and recorded-session paths) -->
     <string name="lotreview_title">LOT %1$d review</string>
     <string name="lotreview_subtitle_one">1 account · tap to pick month, +/- to add</string>
     <string name="lotreview_subtitle_many">%1$d accounts · tap to pick month, +/- to add</string>
@@ -156,10 +156,15 @@
     <string name="lotreview_over_limit_unverified_note">%1$d row(s) without a profile aren\'t included in the total — the real figure may be higher.</string>
     <string name="lotreview_over_limit_cancel">Cancel</string>
     <string name="lotreview_over_limit_rescan">Rescan this LOT</string>
+    <string name="lotreview_over_limit_close">Got it</string>
+    <string name="lotreview_skipgap_title">Skipping months?</string>
+    <string name="lotreview_skipgap_body_intro_one">1 row skips months between last paid and selection:</string>
+    <string name="lotreview_skipgap_body_intro_many">%1$d rows skip months between last paid and selection:</string>
+    <string name="lotreview_skipgap_body_row">RD #%1$s: skips %2$s (last paid: %3$s)</string>
+    <string name="lotreview_skipgap_body_outro">Confirm to save with this gap, or cancel to adjust.</string>
+    <string name="lotreview_skipgap_cancel">Cancel</string>
+    <string name="lotreview_skipgap_confirm">Yes, skip and save</string>
     <!-- Defaulter post-finalize edit (SessionDetail) over-limit popup -->
-    <string name="defaulter_over_limit_title">LOT total is above ₹20,000</string>
-    <string name="defaulter_over_limit_body">This LOT adds up to ₹%1$s — ₹%2$s more than the ₹20,000 limit the portal allows.\n\nReduce some month counts to bring the total within the limit.</string>
-    <string name="defaulter_over_limit_close">Got it</string>
 
     <!-- Account paid-till editor (EditAccountDialog inline) -->
     <string name="account_paid_till_label">Paid till</string>

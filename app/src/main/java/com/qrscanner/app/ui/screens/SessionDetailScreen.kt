@@ -68,7 +68,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material3.Surface
 import androidx.compose.ui.draw.clip
-import com.qrscanner.app.ui.components.DefaulterEditDialog
 import com.qrscanner.app.ui.components.GradientTopBar
 import com.qrscanner.app.ui.theme.AccentMint
 import com.qrscanner.app.ui.theme.PrimaryOrange
@@ -92,11 +91,38 @@ fun SessionDetailScreen(
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as QRScannerApp
+    val scope = rememberCoroutineScope()
 
     val lots by app.database.scanLotDao().getLotsForSession(sessionId).collectAsStateWithLifecycle(initialValue = emptyList())
     var hasReceivedFirstEmit by remember { mutableStateOf(false) }
     LaunchedEffect(lots) {
         if (!hasReceivedFirstEmit) hasReceivedFirstEmit = true
+    }
+
+    // Editor state hoisted to SessionDetailScreen (parent of every
+    // LotCard) for two reasons:
+    //   1. LotReviewScreen is a full-screen Surface — rendering it
+    //      inside a LazyColumn item would scope-clip it to the row.
+    //   2. The editor is a session-level concern, not a card-level
+    //      one — only one LOT can be edited at a time across the
+    //      whole session.
+    // editorBaseRows is null while we're building rows for the lot
+    // (loading state); editorEdits accumulates per-row operator
+    // changes by rdNumber.id so re-renders preserve in-flight work.
+    var editingLot by remember { mutableStateOf<ScanLot?>(null) }
+    var editorBaseRows by remember { mutableStateOf<List<LotReviewRow>?>(null) }
+    var editorEdits by remember { mutableStateOf<Map<Long, List<MonthYear>>>(emptyMap()) }
+
+    LaunchedEffect(editingLot) {
+        val lot = editingLot
+        if (lot == null) {
+            editorBaseRows = null
+            editorEdits = emptyMap()
+        } else {
+            editorBaseRows = null
+            editorEdits = emptyMap()
+            editorBaseRows = LotReviewBuilder.build(app, lot.id, lot.timestamp)
+        }
     }
     val totalDefaults by app.database.rdNumberDao()
         .observeDefaultCountForSession(sessionId)
@@ -206,8 +232,6 @@ fun SessionDetailScreen(
                 ) {
                     items(lots, key = { it.id }) { lot ->
                         LotCard(
-                            sessionId = sessionId,
-                            onSessionTombstoned = onNavigateBack,
                             lot = lot,
                             sessionAnchor = sessionAnchor,
                             isExpanded = lot.id in expandedLotIds,
@@ -217,7 +241,8 @@ fun SessionDetailScreen(
                                 } else {
                                     expandedLotIds + lot.id
                                 }
-                            }
+                            },
+                            onEditLot = { editingLot = lot }
                         )
                     }
 
@@ -226,6 +251,72 @@ fun SessionDetailScreen(
                     }
                 }
             }
+        }
+
+        // Full-screen editor overlay — rendered as the outer Box's last
+        // child so it stacks above the LazyColumn / GradientTopBar. The
+        // single LotReviewScreen instance for the whole session matches
+        // the contract that exactly one LOT can be edited at a time;
+        // mode = RecordedEdit + null onRescanLot blocks the OverLimit
+        // dialog's destructive "Rescan LOT" CTA because committed LOTs
+        // can't be safely thrown away from this surface.
+        val activeLot = editingLot
+        val baseRows = editorBaseRows
+        if (activeLot != null && baseRows != null && baseRows.isNotEmpty()) {
+            val displayRows = baseRows.map { base ->
+                val edited = editorEdits[base.rdNumber.id]
+                if (edited != null) base.copy(selected = edited) else base
+            }
+            LotReviewScreen(
+                mode = LotReviewMode.RecordedEdit,
+                lotNumber = activeLot.lotNumber,
+                rows = displayRows,
+                onUpdateRow = { rowId, newSelected ->
+                    editorEdits = editorEdits + (rowId to newSelected)
+                },
+                onConfirm = { edits ->
+                    editingLot = null
+                    scope.launch {
+                        // Persister owns updateMonths + markDirty +
+                        // lastPaidThrough writeback + LOCAL_DEFAULTER_EDIT
+                        // insert + push enqueue + the tombstone guard
+                        // that used to live inline here. Exhaustive
+                        // outcome handling forces every future variant
+                        // to be addressed at this call site.
+                        when (val outcome = LotReviewPersister.persist(app, sessionId, edits)) {
+                            is LotReviewOutcome.Saved -> {
+                                Toast.makeText(
+                                    context,
+                                    "Updated ${outcome.editedCount} row${if (outcome.editedCount == 1) "" else "s"}",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                            is LotReviewOutcome.NoChanges -> Unit
+                            is LotReviewOutcome.SessionTombstoned -> {
+                                Toast.makeText(
+                                    context,
+                                    "Session was deleted — edit not saved",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                onNavigateBack()
+                            }
+                            is LotReviewOutcome.Error -> {
+                                android.util.Log.e(
+                                    "SessionDetailScreen",
+                                    "LotReview persist failed",
+                                    outcome.cause
+                                )
+                                Toast.makeText(
+                                    context,
+                                    "Save failed — try again",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }
+                    }
+                },
+                onDiscard = { editingLot = null }
+            )
         }
     }
 }
@@ -237,17 +328,15 @@ private val LongSetSaver: Saver<Set<Long>, List<Long>> = Saver(
 
 @Composable
 private fun LotCard(
-    sessionId: Long,
-    onSessionTombstoned: () -> Unit,
     lot: ScanLot,
     sessionAnchor: MonthYear,
     isExpanded: Boolean,
-    onToggleExpanded: () -> Unit
+    onToggleExpanded: () -> Unit,
+    onEditLot: () -> Unit
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as QRScannerApp
     val scope = rememberCoroutineScope()
-    var showEditDialog by remember { mutableStateOf(false) }
     val timeFormat = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
 
     val rdNumberEntities by app.database.rdNumberDao()
@@ -404,7 +493,7 @@ private fun LotCard(
                     }
 
                     IconButton(
-                        onClick = { showEditDialog = true },
+                        onClick = onEditLot,
                         enabled = rdNumberEntities.isNotEmpty(),
                         modifier = Modifier.size(44.dp)
                     ) {
@@ -492,62 +581,6 @@ private fun LotCard(
         }
     }
 
-    if (showEditDialog) {
-        DefaulterEditDialog(
-            lotNumber = lot.lotNumber,
-            numbers = rdNumberEntities,
-            anchorTimestamp = lot.timestamp,
-            accountLastPaidLookup = { rdNumber ->
-                app.database.rdAccountDao().findByRdNumber(rdNumber)
-                    ?.lastPaidThrough
-                    ?.let { com.qrscanner.app.util.MonthYear.parseToken(it) }
-            },
-            accountMonthlyAmountLookup = { rdNumber ->
-                app.database.rdAccountDao().findByRdNumber(rdNumber)?.monthlyAmount
-            },
-            onDismiss = { showEditDialog = false },
-            onSave = { changes ->
-                showEditDialog = false
-                scope.launch {
-                    // Phase 5 T5.13 (boundary adversarial #6 fix): if the
-                    // parent session got tombstoned via pull while the
-                    // user had the dialog open, bail out instead of
-                    // pushing orphan edits that would resurrect a
-                    // soft-deleted rd_number on the next cloud merge.
-                    val parent = app.database.scanSessionDao().getSessionById(sessionId)
-                    if (parent == null || parent.deletedAt != null) {
-                        Toast.makeText(
-                            context,
-                            "Session was deleted — edit not saved",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                        onSessionTombstoned()
-                        return@launch
-                    }
-                    val now = System.currentTimeMillis()
-                    changes.forEach { (id, valueAndList) ->
-                        val (months, monthsList) = valueAndList
-                        app.database.rdNumberDao().updateMonths(id, months, monthsList)
-                        // Flip back to DIRTY so the push worker picks it up — see
-                        // RDScannerScreen for the rationale (Phase 2 T2.5).
-                        app.database.rdNumberDao().markDirty(id, now)
-                    }
-                    if (changes.isNotEmpty()) {
-                        Toast.makeText(
-                            context,
-                            "Updated ${changes.size} row${if (changes.size == 1) "" else "s"}",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                        try {
-                            app.syncScheduler.enqueuePush()
-                        } catch (e: Throwable) {
-                            android.util.Log.w("SessionDetailScreen", "defaulter edit: deferred sync enqueue", e)
-                        }
-                    }
-                }
-            }
-        )
-    }
 }
 
 @Composable

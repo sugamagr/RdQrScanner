@@ -216,8 +216,9 @@ private fun RDCameraScreen(
     var resumeSummary by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var sessionPendingResume by remember { mutableStateOf<ScanSession?>(null) }
 
-    // LOT review flow state — drives the new full-screen review that
-    // replaces the old DefaulterAskDialog + DefaulterEditDialog pair.
+    // LOT review flow state — drives the full-screen review used by
+    // BOTH the fresh-scan path (here) and the recorded-session edit
+    // path (SessionDetailScreen via LotReviewBuilder + LotReviewPersister).
     // Saveable so config change mid-review keeps the screen up; the
     // row list is re-hydrated from DB on recompose via lotId.
     var showLotReviewScreen by rememberSaveable { mutableStateOf(false) }
@@ -325,7 +326,7 @@ private fun RDCameraScreen(
         }
         val pendingLotId = lotReviewLotId
         if (pendingLotId != null && showLotReviewScreen) {
-            val rehydrated = buildLotReviewRows(app, pendingLotId, lotReviewLotTimestamp)
+            val rehydrated = LotReviewBuilder.build(app, pendingLotId, lotReviewLotTimestamp)
             if (rehydrated.isEmpty()) {
                 // Stale review state — the LOT was deleted while the
                 // process was dead (FK cascade from a session delete on
@@ -662,7 +663,7 @@ private fun RDCameraScreen(
             lotReviewLotTimestamp = savedTimestamp
             pendingPostSave = if (alsoEndSession) PostSave.EndSession else PostSave.Continue
             lotReviewLoading = true
-            lotReviewBaseRows = buildLotReviewRows(app, lotId, savedTimestamp)
+            lotReviewBaseRows = LotReviewBuilder.build(app, lotId, savedTimestamp)
             lotReviewEdits = emptyMap()
             lotReviewLoading = false
             showLotReviewScreen = true
@@ -687,7 +688,7 @@ private fun RDCameraScreen(
                 lotReviewLotTimestamp = savedTimestamp
                 pendingPostSave = PostSave.EndSession
                 lotReviewLoading = true
-                lotReviewBaseRows = buildLotReviewRows(app, lotId, savedTimestamp)
+                lotReviewBaseRows = LotReviewBuilder.build(app, lotId, savedTimestamp)
                 lotReviewEdits = emptyMap()
                 lotReviewLoading = false
                 showLotReviewScreen = true
@@ -1293,6 +1294,7 @@ private fun RDCameraScreen(
 
         if (showLotReviewScreen && !lotReviewLoading && lotReviewRows.isNotEmpty()) {
             LotReviewScreen(
+                mode = LotReviewMode.FreshScan,
                 lotNumber = lotReviewLotNumber,
                 rows = lotReviewRows,
                 onUpdateRow = { rowId, newSelected ->
@@ -1302,64 +1304,53 @@ private fun RDCameraScreen(
                     showLotReviewScreen = false
                     lotReviewLotId = null
                     lotReviewEdits = emptyMap()
+                    val sessionId = currentSession?.id
                     scope.launch {
-                        val now = System.currentTimeMillis()
-                        edits.forEach { edit ->
-                            // Per-row month count + list write. updateMonths
-                            // leaves syncStatus untouched so markDirty bumps
-                            // it back to DIRTY for the push worker (Phase 2
-                            // T2.5). Selecting newest=current with count=1 is
-                            // a no-op encoding (null) but we still markDirty
-                            // since updatedAt advances.
-                            app.database.rdNumberDao().updateMonths(
-                                edit.rowId,
-                                edit.newCount,
-                                edit.encodedMonthsList
-                            )
-                            app.database.rdNumberDao().markDirty(edit.rowId, now)
-                            // Operator-driven paid-till write: regression uses
-                            // the explicit setter (no monotonic guard) per
-                            // "paper book is truth"; advances use the
-                            // monotonic setter to match auto-finalize.
-                            val newest = edit.newestSelected ?: return@forEach
-                            val token = newest.toToken()
-                            if (edit.isRegression) {
-                                app.database.rdAccountDao()
-                                    .setLastPaidThroughExplicit(edit.rdNumber, token, now)
-                            } else {
-                                app.database.rdAccountDao()
-                                    .updateLastPaidThroughMonotonic(edit.rdNumber, token, now)
-                            }
-                        }
-                        if (edits.isNotEmpty()) {
-                            Toast.makeText(
-                                context,
-                                "Saved ${edits.size} entr${if (edits.size == 1) "y" else "ies"}",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                            runCatching {
-                                val settings = app.database.deviceSettingsDao().get()
-                                val stamped = currentSession?.let { s ->
-                                    app.database.scanSessionDao().getSessionById(s.id)
+                        if (sessionId != null) {
+                            // Persister owns updateMonths + markDirty +
+                            // lastPaidThrough writeback + LOCAL_DEFAULTER_EDIT
+                            // insert + push enqueue + tombstone guard. The
+                            // outcome is exhaustively handled below so a
+                            // future variant breaks this call site at
+                            // compile time.
+                            when (val outcome = LotReviewPersister.persist(app, sessionId, edits)) {
+                                is LotReviewOutcome.Saved -> {
+                                    Toast.makeText(
+                                        context,
+                                        "Saved ${outcome.editedCount} entr${if (outcome.editedCount == 1) "y" else "ies"}",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
                                 }
-                                val rowWord = if (edits.size == 1) "account" else "accounts"
-                                app.database.syncEventDao().insert(
-                                    SyncEvent(
-                                        occurredAt = now,
-                                        type = SyncEventType.LOCAL_DEFAULTER_EDIT,
-                                        sessionCloudId = stamped?.cloudId,
-                                        originDeviceCloudId = settings?.deviceCloudId,
-                                        originDeviceName = settings?.deviceName,
-                                        originOperatorName = settings?.operatorName,
-                                        payloadSummary = "edited defaulter months for ${edits.size} $rowWord"
+                                is LotReviewOutcome.NoChanges -> {
+                                    // Operator confirmed without changes;
+                                    // skip the toast — silence is the
+                                    // appropriate UX for a no-op confirm.
+                                }
+                                is LotReviewOutcome.SessionTombstoned -> {
+                                    // Cannot happen in the fresh-scan
+                                    // path (we JUST finalized this
+                                    // session locally — no race window
+                                    // for a remote tombstone to land
+                                    // before save). Logged defensively
+                                    // so a future code path that
+                                    // shrinks the gap surfaces it.
+                                    android.util.Log.w(
+                                        "RDScannerScreen",
+                                        "fresh-scan persist returned SessionTombstoned — unexpected"
                                     )
-                                )
-                            }.onFailure {
-                                android.util.Log.w(
-                                    "RDScannerScreen",
-                                    "local sync_event insert failed",
-                                    it
-                                )
+                                }
+                                is LotReviewOutcome.Error -> {
+                                    android.util.Log.e(
+                                        "RDScannerScreen",
+                                        "LotReview persist failed",
+                                        outcome.cause
+                                    )
+                                    Toast.makeText(
+                                        context,
+                                        "Save failed — retrying in background",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
                             }
                         }
                         pendingPostSave?.let { executePostSave(it) }
@@ -1510,62 +1501,6 @@ private val LotReviewEditsSaver: Saver<Map<Long, List<com.qrscanner.app.util.Mon
         }.toMap()
     }
 )
-
-/**
- * Hydrates a [LotReviewRow] list for the given finished LOT. Reads
- * every RdNumber in the LOT, joins each to its (optional) RdAccount
- * profile, and seeds the per-row month selection from existing
- * monthsList when present or from auto-anchor at nextMonth(paidThrough)
- * otherwise. The hydrated rows feed [LotReviewScreen] directly.
- *
- * Selection convention matches LotReviewScreen.LotReviewRow: oldest-first
- * in memory (anchor = first element). The DB stores newest-first, so the
- * existing-monthsList branch reverses on read.
- */
-private suspend fun buildLotReviewRows(
-    app: com.qrscanner.app.QRScannerApp,
-    lotId: Long,
-    lotTimestamp: Long
-): List<com.qrscanner.app.ui.screens.LotReviewRow> {
-    val rdRows = app.database.rdNumberDao().getNumbersForLotSync(lotId)
-    val anchor = com.qrscanner.app.util.MonthYear.fromEpochMillis(
-        lotTimestamp.takeIf { it > 0 } ?: System.currentTimeMillis()
-    )
-    return rdRows.map { rd ->
-        val account = runCatching { app.database.rdAccountDao().findByRdNumber(rd.number) }
-            .getOrNull()
-        val accountLastPaid = account?.lastPaidThrough
-            ?.let { com.qrscanner.app.util.MonthYear.parseToken(it) }
-        val existing = com.qrscanner.app.util.MonthYear.parseList(rd.monthsList, rd.monthsPaid)
-        val selected: List<com.qrscanner.app.util.MonthYear> = if (existing != null) {
-            // Stored newest-first; flip to oldest-first for the UI.
-            existing.sorted()
-        } else {
-            // Auto-anchor: always at nextMonth(lastPaidThrough) when a
-            // paid-through baseline exists — matches the spec contract
-            // at RdAccountDao.kt:185-186 and the legacy DefaulterDialogs
-            // behavior. Falls back to LOT date (anchor) only when the
-            // account has no profile or no paid history. The earlier
-            // `if (lp >= anchor) ... else anchor` was inverted: it
-            // skipped months for defaulters (the common case).
-            val startAt = accountLastPaid?.plusOneMonth() ?: anchor
-            buildList {
-                var cursor = startAt
-                repeat(rd.monthsPaid.coerceAtLeast(1)) {
-                    add(cursor)
-                    cursor = cursor.plusOneMonth()
-                }
-            }
-        }
-        com.qrscanner.app.ui.screens.LotReviewRow(
-            rdNumber = rd,
-            accountName = account?.name,
-            accountLastPaidThrough = accountLastPaid,
-            accountMonthlyAmount = account?.monthlyAmount,
-            selected = selected
-        )
-    }
-}
 
 @Composable
 private fun ScannerOverlay() {

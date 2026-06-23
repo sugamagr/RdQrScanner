@@ -116,6 +116,64 @@ data class LotReviewRow(
 
     /** The month operator says payment is being credited for (newest). */
     val newestSelected: MonthYear? get() = selected.maxOrNull()
+
+    /** Oldest selected month — the block's start (extend-forward direction). */
+    val oldestSelected: MonthYear? get() = selected.minOrNull()
+
+    /**
+     * Months that would be skipped between `nextMonth(accountLastPaidThrough)`
+     * and the operator's chosen block start. Empty when there's no paid-till
+     * baseline, no selection, the block starts at or before the expected
+     * next month (= no skip), or this is a regression (handled by the
+     * separate regression dialog, not the skip-gap dialog). Used to surface
+     * "You're skipping Sep 2025 — is that correct?" confirmation on Save.
+     */
+    fun skipsMonthsAfterLastPaid(): List<MonthYear> {
+        val lastPaid = accountLastPaidThrough ?: return emptyList()
+        val start = oldestSelected ?: return emptyList()
+        val expectedStart = lastPaid.plusOneMonth()
+        if (start <= expectedStart) return emptyList()
+        val skipped = mutableListOf<MonthYear>()
+        var cursor = expectedStart
+        while (cursor < start) {
+            skipped += cursor
+            cursor = cursor.plusOneMonth()
+        }
+        return skipped
+    }
+}
+
+/**
+ * Discriminates the two paths that share the editor. Sealed so future
+ * variants (e.g. a read-only inspector mode) extend without modifying
+ * every call site — exhaustive `when` will surface every consumer.
+ *
+ * The mode controls a single behavioral fork: whether the OverLimit
+ * dialog offers a "rescan this LOT" CTA. Fresh-scan allows it because
+ * the operator can legitimately reshoot the just-finished LOT before
+ * persisting. Recorded-edit disallows it because the LOT has already
+ * been committed + (likely) pushed to cloud — destroying it from this
+ * surface would orphan downstream state and bypass the proper
+ * delete-session flow.
+ */
+sealed class LotReviewMode {
+    data object FreshScan : LotReviewMode()
+    data object RecordedEdit : LotReviewMode()
+}
+
+/**
+ * Result of [LotReviewPersister.persist]. Sealed so call sites are
+ * forced to acknowledge every terminal state (compile error on a new
+ * case is the feature, not the bug). Saved carries the count so the
+ * UI can render the right toast; SessionTombstoned tells the caller
+ * the parent session was deleted (likely by another device) between
+ * dialog open + Save tap, so the caller should also navigate away.
+ */
+sealed class LotReviewOutcome {
+    data class Saved(val editedCount: Int) : LotReviewOutcome()
+    data object NoChanges : LotReviewOutcome()
+    data object SessionTombstoned : LotReviewOutcome()
+    data class Error(val cause: Throwable) : LotReviewOutcome()
 }
 
 /**
@@ -140,9 +198,11 @@ data class LotReviewEdit(
 )
 
 /**
- * Mandatory full-screen review of every account in the just-finished LOT.
+ * Full-screen review of every account in a LOT. Single editor for both
+ * paths: fresh-scan (just-finished LOT, [LotReviewMode.FreshScan]) and
+ * recorded-session edit (historical LOT, [LotReviewMode.RecordedEdit]).
  *
- * Replaces the old DefaulterAskDialog (yes/no popup) + DefaulterEditDialog
+ * Replaced the legacy DefaulterAskDialog (yes/no popup) + DefaulterEditDialog
  * (per-row chip strip) with one always-visible UI per operator request.
  * Each row shows:
  *   - RD number + account name (or "(no profile yet)" subtext)
@@ -161,16 +221,20 @@ data class LotReviewEdit(
  */
 @Composable
 fun LotReviewScreen(
+    mode: LotReviewMode,
     lotNumber: Int,
     rows: List<LotReviewRow>,
     onUpdateRow: (rowId: Long, newSelected: List<MonthYear>) -> Unit,
     onConfirm: (edits: List<LotReviewEdit>) -> Unit,
     onDiscard: () -> Unit,
-    onRescanLot: () -> Unit
+    onRescanLot: (() -> Unit)? = null
 ) {
     var discardConfirmShown by remember { mutableStateOf(false) }
     var regressionConfirmShown by remember { mutableStateOf(false) }
     var overLimitShown by remember { mutableStateOf(false) }
+    var skipGapPayload by remember {
+        mutableStateOf<Pair<List<LotReviewEdit>, List<Pair<String, List<MonthYear>>>>?>(null)
+    }
     var pendingEdits by remember { mutableStateOf<List<LotReviewEdit>?>(null) }
 
     val changedCount by remember(rows) {
@@ -219,14 +283,25 @@ fun LotReviewScreen(
                 changedCount = changedCount,
                 lotTotal = lotTotal,
                 onConfirm = {
-                    // 20K cap precedes regression confirm — over-limit is a
-                    // hard rule the portal will reject, regression is a
-                    // soft warning the operator can confirm through.
+                    // Validation chain order matters:
+                    //   1. 20K cap — hard rule the portal rejects. Block save.
+                    //   2. Skip-gap — soft warning. Operator can confirm through.
+                    //   3. Regression — soft warning. Operator can confirm through.
+                    // Skip-gap precedes regression because a row can be BOTH
+                    // a skip and a regression in pathological cases; we want
+                    // the skip-gap surface to fire first since it's the more
+                    // operator-friendly framing ("you're skipping Sep 2025"
+                    // vs "you're moving paid-till backward").
                     if (lotTotal.isOver) {
                         overLimitShown = true
                         return@ConfirmBar
                     }
                     val edits = rows.map { it.toEdit() }
+                    val gapNotices = collectSkipGapNotices(rows)
+                    if (gapNotices.isNotEmpty()) {
+                        skipGapPayload = edits to gapNotices
+                        return@ConfirmBar
+                    }
                     val regressions = edits.filter { it.isRegression }
                     if (regressions.isNotEmpty()) {
                         pendingEdits = edits
@@ -245,6 +320,26 @@ fun LotReviewScreen(
             onDiscard = {
                 discardConfirmShown = false
                 onDiscard()
+            }
+        )
+    }
+
+    skipGapPayload?.let { (edits, notices) ->
+        SkipGapConfirmDialog(
+            notices = notices,
+            onCancel = { skipGapPayload = null },
+            onConfirm = {
+                skipGapPayload = null
+                // After skip-gap confirm, regression check still has to
+                // run — these are independent safeguards covering
+                // different invariants.
+                val regressions = edits.filter { it.isRegression }
+                if (regressions.isNotEmpty()) {
+                    pendingEdits = edits
+                    regressionConfirmShown = true
+                } else {
+                    onConfirm(edits)
+                }
             }
         )
     }
@@ -270,9 +365,16 @@ fun LotReviewScreen(
         OverLimitDialog(
             lotTotal = lotTotal,
             onCancel = { overLimitShown = false },
-            onRescan = {
-                overLimitShown = false
-                onRescanLot()
+            // onRescan only fires when the caller actually allows it
+            // (fresh-scan path). Recorded-edit passes null → the
+            // OverLimitDialog hides its Rescan CTA and only shows
+            // Cancel, since destroying a committed LOT from the
+            // editor would orphan downstream state.
+            onRescan = onRescanLot?.let { cb ->
+                {
+                    overLimitShown = false
+                    cb()
+                }
             }
         )
     }
@@ -766,7 +868,7 @@ private fun LotTotalLine(lotTotal: LotTotal) {
 private fun OverLimitDialog(
     lotTotal: LotTotal,
     onCancel: () -> Unit,
-    onRescan: () -> Unit
+    onRescan: (() -> Unit)?
 ) {
     Dialog(
         onDismissRequest = onCancel,
@@ -827,25 +929,152 @@ private fun OverLimitDialog(
                     )
                 }
                 Spacer(modifier = Modifier.height(20.dp))
+                if (onRescan != null) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        TextButton(onClick = onCancel, modifier = Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.lotreview_over_limit_cancel),
+                                color = TextSecondary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        Button(
+                            onClick = onRescan,
+                            modifier = Modifier.weight(1.4f),
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentCoral),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text(
+                                stringResource(R.string.lotreview_over_limit_rescan),
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                } else {
+                    Button(
+                        onClick = onCancel,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentCoral),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            stringResource(R.string.lotreview_over_limit_close),
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Walks the rows and collects per-row skip-gap notices: rd_number paired
+ * with the list of months that would be silently skipped between
+ * `nextMonth(accountLastPaidThrough)` and the operator's chosen block
+ * start. Empty when no row skips. Used as the input to
+ * [SkipGapConfirmDialog].
+ */
+private fun collectSkipGapNotices(
+    rows: List<LotReviewRow>
+): List<Pair<String, List<MonthYear>>> = rows.mapNotNull { row ->
+    val skipped = row.skipsMonthsAfterLastPaid()
+    if (skipped.isEmpty()) null
+    else row.rdNumber.number to skipped
+}
+
+/**
+ * Surfaced before save when one or more rows would skip months between
+ * their account's last-paid baseline and the chosen block start. Soft
+ * warning — operator can confirm through ("paper book is truth"); the
+ * dialog exists to catch input errors not to forbid skips. Skip-gap +
+ * regression are independent invariants and the confirm flow runs the
+ * regression check AFTER this dialog closes.
+ */
+@Composable
+private fun SkipGapConfirmDialog(
+    notices: List<Pair<String, List<MonthYear>>>,
+    onCancel: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onCancel,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .heightIn(max = 560.dp),
+            shape = RoundedCornerShape(20.dp),
+            color = SurfaceWhite,
+            tonalElevation = 6.dp
+        ) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                Text(
+                    text = stringResource(R.string.lotreview_skipgap_title),
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = if (notices.size == 1) {
+                        stringResource(R.string.lotreview_skipgap_body_intro_one)
+                    } else {
+                        stringResource(R.string.lotreview_skipgap_body_intro_many, notices.size)
+                    },
+                    style = MaterialTheme.typography.bodySmall.copy(color = TextPrimary)
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 240.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    notices.forEach { (rdNumber, skipped) ->
+                        val skippedLabel = skipped.joinToString(" + ") { it.formatShort() }
+                        val lastPaid = skipped.first().minusOneMonth().formatShort()
+                        Text(
+                            text = stringResource(
+                                R.string.lotreview_skipgap_body_row,
+                                rdNumber,
+                                skippedLabel,
+                                lastPaid
+                            ),
+                            style = MaterialTheme.typography.labelSmall.copy(color = TextSecondary),
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = stringResource(R.string.lotreview_skipgap_body_outro),
+                    style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
+                )
+                Spacer(modifier = Modifier.height(16.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     TextButton(onClick = onCancel, modifier = Modifier.weight(1f)) {
                         Text(
-                            stringResource(R.string.lotreview_over_limit_cancel),
+                            stringResource(R.string.lotreview_skipgap_cancel),
                             color = TextSecondary,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
                     Button(
-                        onClick = onRescan,
-                        modifier = Modifier.weight(1.4f),
-                        colors = ButtonDefaults.buttonColors(containerColor = AccentCoral),
+                        onClick = onConfirm,
+                        modifier = Modifier.weight(2f),
+                        colors = ButtonDefaults.buttonColors(containerColor = WarningAmber),
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Text(
-                            stringResource(R.string.lotreview_over_limit_rescan),
+                            stringResource(R.string.lotreview_skipgap_confirm),
                             fontWeight = FontWeight.SemiBold
                         )
                     }
@@ -1086,4 +1315,162 @@ fun computeLotTotal(rows: List<LotReviewRow>): LotTotal {
         unverifiedRowCount = unverified,
         totalRows = rows.size
     )
+}
+
+/**
+ * Input-side boundary of the editor. Builds [LotReviewRow] snapshots
+ * for the rows in a LOT, eagerly resolving account profiles BEFORE the
+ * screen opens so the operator never sees an async-race flip the
+ * auto-anchor mid-interaction.
+ *
+ * Used by both [RDScannerScreen] (fresh-scan after finishing a LOT) and
+ * [SessionDetailScreen] (retroactive edit on a recorded LOT). Storing
+ * this logic next to [LotReviewRow] keeps the data shape and its
+ * builder in one place — a future field added to [LotReviewRow] forces
+ * a corresponding update here.
+ *
+ * Auto-anchor contract: when an account profile carries a non-null
+ * `lastPaidThrough`, the auto-suggested block starts at
+ * `nextMonth(lastPaidThrough)`; otherwise it falls back to the LOT
+ * date. A stored monthsList on the rd_number wins over both (we honor
+ * the operator's prior decision).
+ */
+object LotReviewBuilder {
+    suspend fun build(
+        app: com.qrscanner.app.QRScannerApp,
+        lotId: Long,
+        lotTimestamp: Long
+    ): List<LotReviewRow> {
+        val rdRows = app.database.rdNumberDao().getNumbersForLotSync(lotId)
+        val anchor = MonthYear.fromEpochMillis(
+            lotTimestamp.takeIf { it > 0 } ?: System.currentTimeMillis()
+        )
+        return rdRows.map { rd ->
+            val account = runCatching {
+                app.database.rdAccountDao().findByRdNumber(rd.number)
+            }.getOrNull()
+            val accountLastPaid = account?.lastPaidThrough?.let { MonthYear.parseToken(it) }
+            val existing = MonthYear.parseList(rd.monthsList, rd.monthsPaid)
+            val selected: List<MonthYear> = if (existing != null) {
+                // Storage is newest-first; UI wants oldest-first (anchor=first).
+                existing.sorted()
+            } else {
+                val startAt = accountLastPaid?.plusOneMonth() ?: anchor
+                buildList {
+                    var cursor = startAt
+                    repeat(rd.monthsPaid.coerceAtLeast(1)) {
+                        add(cursor)
+                        cursor = cursor.plusOneMonth()
+                    }
+                }
+            }
+            LotReviewRow(
+                rdNumber = rd,
+                accountName = account?.name,
+                accountLastPaidThrough = accountLastPaid,
+                accountMonthlyAmount = account?.monthlyAmount,
+                selected = selected
+            )
+        }
+    }
+}
+
+/**
+ * Output-side boundary of the editor. Atomically applies a confirmed
+ * edit batch and returns an exhaustive [LotReviewOutcome] so the
+ * caller can branch on every terminal state at compile time (adding a
+ * new outcome breaks every consumer until handled — by design).
+ *
+ * Responsibilities collected here so future edits to the editor's
+ * persistence contract happen in exactly one place:
+ *   1. Tombstone guard — if the parent session was deleted from
+ *      another device while the editor was open, return
+ *      [LotReviewOutcome.SessionTombstoned] without touching anything
+ *      else; resurrecting orphan rd_numbers via a doomed push would
+ *      create a sync mess.
+ *   2. Per-row writes: `rd_numbers.updateMonths` + `markDirty`. The
+ *      DIRTY flip is what tells the push worker this row needs to
+ *      sync; updateMonths alone leaves the row at its prior
+ *      syncStatus.
+ *   3. `rd_accounts.lastPaidThrough` writeback, routed by
+ *      [LotReviewEdit.isRegression]. Regressions use the explicit
+ *      setter (no monotonic guard) because the operator has confirmed
+ *      a backward move through [RegressionConfirmDialog] — "paper
+ *      book is truth". Advances use the monotonic setter to match
+ *      auto-finalize semantics; concurrent newer writes from another
+ *      device won't be overwritten.
+ *   4. `LOCAL_DEFAULTER_EDIT` sync event insertion so the bell
+ *      history reflects "You edited defaulter months for N accounts".
+ *   5. `syncScheduler.enqueuePush()` to kick the push worker.
+ *
+ * Errors from step 2-3 propagate as [LotReviewOutcome.Error]; errors
+ * from step 4-5 are swallowed and logged because they're observability
+ * concerns, not data-correctness concerns (the rows are already
+ * DIRTY; the push will retry).
+ */
+object LotReviewPersister {
+    suspend fun persist(
+        app: com.qrscanner.app.QRScannerApp,
+        sessionId: Long,
+        edits: List<LotReviewEdit>
+    ): LotReviewOutcome {
+        if (edits.isEmpty()) return LotReviewOutcome.NoChanges
+        return try {
+            val parent = app.database.scanSessionDao().getSessionById(sessionId)
+            if (parent == null || parent.deletedAt != null) {
+                LotReviewOutcome.SessionTombstoned
+            } else {
+                val now = System.currentTimeMillis()
+                edits.forEach { edit ->
+                    app.database.rdNumberDao().updateMonths(
+                        edit.rowId,
+                        edit.newCount,
+                        edit.encodedMonthsList
+                    )
+                    app.database.rdNumberDao().markDirty(edit.rowId, now)
+                    val newest = edit.newestSelected ?: return@forEach
+                    val token = newest.toToken()
+                    if (edit.isRegression) {
+                        app.database.rdAccountDao()
+                            .setLastPaidThroughExplicit(edit.rdNumber, token, now)
+                    } else {
+                        app.database.rdAccountDao()
+                            .updateLastPaidThroughMonotonic(edit.rdNumber, token, now)
+                    }
+                }
+                runCatching {
+                    val settings = app.database.deviceSettingsDao().get()
+                    val rowWord = if (edits.size == 1) "account" else "accounts"
+                    app.database.syncEventDao().insert(
+                        com.qrscanner.app.data.SyncEvent(
+                            occurredAt = now,
+                            type = com.qrscanner.app.data.SyncEventType.LOCAL_DEFAULTER_EDIT,
+                            sessionCloudId = parent.cloudId,
+                            originDeviceCloudId = settings?.deviceCloudId,
+                            originDeviceName = settings?.deviceName,
+                            originOperatorName = settings?.operatorName,
+                            payloadSummary = "edited defaulter months for ${edits.size} $rowWord"
+                        )
+                    )
+                }.onFailure {
+                    android.util.Log.w(
+                        "LotReviewPersister",
+                        "local sync_event insert failed",
+                        it
+                    )
+                }
+                runCatching { app.syncScheduler.enqueuePush() }
+                    .onFailure {
+                        android.util.Log.w(
+                            "LotReviewPersister",
+                            "deferred sync enqueue failed",
+                            it
+                        )
+                    }
+                LotReviewOutcome.Saved(editedCount = edits.size)
+            }
+        } catch (t: Throwable) {
+            LotReviewOutcome.Error(cause = t)
+        }
+    }
 }

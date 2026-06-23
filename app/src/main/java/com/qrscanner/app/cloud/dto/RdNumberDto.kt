@@ -12,8 +12,8 @@ import kotlinx.serialization.Serializable
  * / `months_list` columns enforce the same invariant as local: when
  * `months_paid == 1` the list is null; when > 1 the list's token count
  * equals `months_paid`. The mapper validates on inbound and trusts on
- * outbound (the UI's [com.qrscanner.app.ui.components.DefaulterRowDraft]
- * is the gate that prevents bad writes).
+ * outbound (the UI's [com.qrscanner.app.ui.screens.LotReviewRow] is the
+ * gate that prevents bad writes).
  *
  * EncodeDefault on every defaulted field: supabase-kt's default Json
  * config drops fields whose value equals the default. On an upsert that

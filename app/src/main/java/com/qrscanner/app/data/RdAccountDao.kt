@@ -40,7 +40,8 @@ interface RdAccountDao {
      * Used by:
      *  - AddAccountsScreen duplicate flag (returns the existing row
      *    so the helper-text can render "Already used by [Name]")
-     *  - DefaulterEditDialog auto-suggest (reads lastPaidThrough)
+     *  - LotReviewBuilder.build (reads lastPaidThrough for the
+     *    prepayment-aware auto-anchor on the editor)
      *  - RDScannerScreen scan handler (auto-reactivate hook)
      */
     @Query("SELECT * FROM rd_accounts WHERE rdNumber = :rdNumber AND deletedAt IS NULL LIMIT 1")

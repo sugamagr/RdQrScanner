@@ -157,10 +157,15 @@
     <string name="lotreview_over_limit_unverified_note">%1$d अकाउंट बिना प्रोफ़ाइल कुल में शामिल नहीं — असली रकम ज़्यादा हो सकती है।</string>
     <string name="lotreview_over_limit_cancel">रद्द करें</string>
     <string name="lotreview_over_limit_rescan">दोबारा स्कैन करें</string>
+    <string name="lotreview_over_limit_close">ठीक है</string>
+    <string name="lotreview_skipgap_title">महीने छोड़ रहे हैं?</string>
+    <string name="lotreview_skipgap_body_intro_one">1 पंक्ति आखिरी पेड और चयन के बीच महीने छोड़ रही है:</string>
+    <string name="lotreview_skipgap_body_intro_many">%1$d पंक्तियाँ आखिरी पेड और चयन के बीच महीने छोड़ रही हैं:</string>
+    <string name="lotreview_skipgap_body_row">RD #%1$s: %2$s छूट रहे (आखिरी पेड: %3$s)</string>
+    <string name="lotreview_skipgap_body_outro">गैप के साथ सेव करने के लिए कन्फर्म करें, बदलने के लिए कैंसल।</string>
+    <string name="lotreview_skipgap_cancel">कैंसल</string>
+    <string name="lotreview_skipgap_confirm">हाँ, छोड़कर सेव करें</string>
     <!-- Defaulter post-finalize edit over-limit popup -->
-    <string name="defaulter_over_limit_title">LOT का कुल ₹20,000 से ऊपर है</string>
-    <string name="defaulter_over_limit_body">इस LOT का कुल ₹%1$s है — पोर्टल की ₹20,000 की लिमिट से ₹%2$s ज़्यादा।\n\nलिमिट के अंदर लाने के लिए कुछ महीने कम करें।</string>
-    <string name="defaulter_over_limit_close">ठीक है</string>
 
     <!-- Account paid-till editor -->
     <string name="account_paid_till_label">पेड टिल</string>
