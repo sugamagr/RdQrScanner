@@ -44,6 +44,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -57,6 +58,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -119,6 +121,14 @@ fun AccountsScreen(onNavigateBack: () -> Unit) {
     val allAccounts by app.database.rdAccountDao().observeAll().collectAsStateWithLifecycle(initialValue = emptyList())
     val activeCount by app.database.rdAccountDao().observeActiveCount().collectAsStateWithLifecycle(initialValue = 0)
     val inactiveCount by app.database.rdAccountDao().observeInactiveCount().collectAsStateWithLifecycle(initialValue = 0)
+
+    // Suppress the EmptyState flash that fires for 1 frame between the
+    // initial `emptyList()` seed and the Room Flow's first real emit on
+    // cold open. Skeleton placeholders shown until the Flow speaks.
+    var hasReceivedFirstEmit by remember { mutableStateOf(false) }
+    LaunchedEffect(allAccounts) {
+        if (!hasReceivedFirstEmit) hasReceivedFirstEmit = true
+    }
 
     // C2-P4 NITPICK saveable filter state: survive rotation + low-mem
     // process death. Selection state (selectionMode + selectedIds) stays
@@ -221,7 +231,9 @@ fun AccountsScreen(onNavigateBack: () -> Unit) {
                 )
             }
 
-            if (visibleAccounts.isEmpty()) {
+            if (!hasReceivedFirstEmit && allAccounts.isEmpty()) {
+                AccountListSkeleton()
+            } else if (visibleAccounts.isEmpty()) {
                 EmptyState(
                     isFiltered = searchQuery.isNotBlank() || (!showInactive && inactiveCount > 0)
                 )
@@ -693,4 +705,75 @@ private fun formatPaidTill(yyyyMm: String?): String {
     if (yyyyMm == null) return "Not started"
     val parsed = MonthYear.parseToken(yyyyMm) ?: return "—"
     return parsed.formatShort()
+}
+
+@Composable
+private fun AccountListSkeleton() {
+    val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "accounts_shimmer")
+    val shimmer by transition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 0.7f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            animation = androidx.compose.animation.core.tween(
+                durationMillis = 900,
+                easing = androidx.compose.animation.core.LinearEasing
+            ),
+            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+        ),
+        label = "shimmer_alpha"
+    )
+    val avatar = Color.Gray.copy(alpha = 0.12f * shimmer)
+    val line = Color.Gray.copy(alpha = 0.10f * shimmer)
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        repeat(6) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                color = Color.White,
+                shadowElevation = 1.dp
+            ) {
+                Row(
+                    modifier = Modifier.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(avatar)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(0.55f)
+                                .height(12.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(avatar)
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(0.35f)
+                                .height(10.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(line)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(line)
+                    )
+                }
+            }
+        }
+    }
 }

@@ -60,9 +60,20 @@ import androidx.compose.ui.unit.dp
 import com.qrscanner.app.QRScannerApp
 import com.qrscanner.app.data.ScanLot
 import com.qrscanner.app.data.ScanSession
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.Surface
+import androidx.compose.ui.draw.clip
 import com.qrscanner.app.ui.components.DefaulterEditDialog
+import com.qrscanner.app.ui.components.GradientTopBar
 import com.qrscanner.app.ui.theme.AccentMint
 import com.qrscanner.app.ui.theme.PrimaryOrange
+import com.qrscanner.app.ui.theme.PrimaryOrangeLight
 import com.qrscanner.app.ui.theme.TextSecondary
 import com.qrscanner.app.ui.theme.WarningAmber
 import com.qrscanner.app.ui.theme.GradientPeach
@@ -84,6 +95,10 @@ fun SessionDetailScreen(
     val app = context.applicationContext as QRScannerApp
 
     val lots by app.database.scanLotDao().getLotsForSession(sessionId).collectAsStateWithLifecycle(initialValue = emptyList())
+    var hasReceivedFirstEmit by remember { mutableStateOf(false) }
+    LaunchedEffect(lots) {
+        if (!hasReceivedFirstEmit) hasReceivedFirstEmit = true
+    }
     val totalDefaults by app.database.rdNumberDao()
         .observeDefaultCountForSession(sessionId)
         .collectAsStateWithLifecycle(initialValue = 0)
@@ -134,85 +149,82 @@ fun SessionDetailScreen(
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    colors = listOf(GradientPeach, Color.White)
+                    listOf(GradientPeach, Color.White, GradientPeach)
                 )
             )
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-        ) {
-            // Top Bar
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(
-                    onClick = onNavigateBack,
-                    modifier = Modifier
-                        .size(48.dp)
-                        .background(Color.Gray.copy(alpha = 0.1f), CircleShape)
+        Column(modifier = Modifier.fillMaxSize()) {
+            GradientTopBar {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back"
-                    )
-                }
-
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = "Session #$displayNumber",
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            fontWeight = FontWeight.Bold
+                    IconButton(
+                        onClick = onNavigateBack,
+                        modifier = Modifier
+                            .size(44.dp)
+                            .background(Color.White.copy(alpha = 0.2f), CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = Color.White
                         )
-                    )
-                    Text(
-                        text = buildString {
-                            append("${lots.size} LOTs • $totalRdNumbers RD Numbers")
-                            if (totalDefaults > 0) {
-                                append(" • $totalDefaults default${if (totalDefaults == 1) "" else "s"}")
-                                if (totalDefaulterMonths > 0) {
-                                    append(", $totalDefaulterMonths month${if (totalDefaulterMonths == 1) "" else "s"}")
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Session #$displayNumber",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        )
+                        Text(
+                            text = buildString {
+                                append("${lots.size} LOTs · $totalRdNumbers RD")
+                                if (totalDefaults > 0) {
+                                    append(" · $totalDefaults default${if (totalDefaults == 1) "" else "s"}")
+                                    if (totalDefaulterMonths > 0) {
+                                        append(", $totalDefaulterMonths mo")
+                                    }
                                 }
-                            }
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary
-                    )
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(alpha = 0.85f)
+                        )
+                    }
                 }
-
-                Spacer(modifier = Modifier.width(48.dp))
             }
 
-            // LOTs List
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                items(lots, key = { it.id }) { lot ->
-                    LotCard(
-                        sessionId = sessionId,
-                        onSessionTombstoned = onNavigateBack,
-                        lot = lot,
-                        sessionAnchor = sessionAnchor,
-                        isExpanded = lot.id in expandedLotIds,
-                        onToggleExpanded = {
-                            expandedLotIds = if (lot.id in expandedLotIds) {
-                                expandedLotIds - lot.id
-                            } else {
-                                expandedLotIds + lot.id
+            if (!hasReceivedFirstEmit && lots.isEmpty()) {
+                LotListSkeleton()
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(lots, key = { it.id }) { lot ->
+                        LotCard(
+                            sessionId = sessionId,
+                            onSessionTombstoned = onNavigateBack,
+                            lot = lot,
+                            sessionAnchor = sessionAnchor,
+                            isExpanded = lot.id in expandedLotIds,
+                            onToggleExpanded = {
+                                expandedLotIds = if (lot.id in expandedLotIds) {
+                                    expandedLotIds - lot.id
+                                } else {
+                                    expandedLotIds + lot.id
+                                }
                             }
-                        }
-                    )
-                }
+                        )
+                    }
 
-                item(key = "bottom_spacer") {
-                    Spacer(modifier = Modifier.navigationBarsPadding())
+                    item(key = "bottom_spacer") {
+                        Spacer(modifier = Modifier.navigationBarsPadding())
+                    }
                 }
             }
         }
@@ -533,5 +545,73 @@ private fun LotCard(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun LotListSkeleton() {
+    val transition = rememberInfiniteTransition(label = "lots_shimmer")
+    val shimmer by transition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 0.7f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 900, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "shimmer_alpha"
+    )
+    val block = Color.Gray.copy(alpha = 0.12f * shimmer)
+    val line = Color.Gray.copy(alpha = 0.08f * shimmer)
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        repeat(3) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                color = Color.White,
+                shadowElevation = 2.dp
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(block)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(0.45f)
+                                    .height(12.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(block)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(0.3f)
+                                    .height(10.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(line)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(line)
+                    )
+                }
+            }
+        }
     }
 }

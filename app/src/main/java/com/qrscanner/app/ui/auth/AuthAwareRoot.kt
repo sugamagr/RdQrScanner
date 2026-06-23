@@ -10,12 +10,28 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import com.qrscanner.app.ui.theme.GradientPeach
+import com.qrscanner.app.ui.theme.PrimaryOrange
+import com.qrscanner.app.ui.theme.PrimaryOrangeLight
+import com.qrscanner.app.ui.theme.TextSecondary
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -236,10 +252,43 @@ private fun InitializingScreen() {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(BackgroundWhite),
+            .background(
+                Brush.verticalGradient(listOf(GradientPeach, Color.White, GradientPeach))
+            ),
         contentAlignment = Alignment.Center
     ) {
-        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                modifier = Modifier
+                    .size(96.dp)
+                    .clip(CircleShape)
+                    .background(
+                        Brush.linearGradient(listOf(PrimaryOrange, PrimaryOrangeLight))
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.QrCode2,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(44.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(28.dp))
+            CircularProgressIndicator(
+                color = PrimaryOrange,
+                strokeWidth = 3.dp,
+                modifier = Modifier.size(28.dp)
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "Getting things ready…",
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    color = TextSecondary,
+                    fontWeight = FontWeight.Medium
+                )
+            )
+        }
     }
 }
 
