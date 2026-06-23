@@ -28,6 +28,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -336,6 +338,7 @@ private fun ConfirmModal(
     onCancel: () -> Unit,
     onConfirm: () -> Unit
 ) {
+    val haptics = LocalHapticFeedback.current
     Dialog(
         onDismissRequest = onCancel,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -368,7 +371,12 @@ private fun ConfirmModal(
                         Text("Cancel", color = TextSecondary, fontWeight = FontWeight.SemiBold)
                     }
                     Button(
-                        onClick = onConfirm,
+                        onClick = {
+                            if (confirmIsWarning) {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            }
+                            onConfirm()
+                        },
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = if (confirmIsWarning) WarningAmber else PrimaryOrange

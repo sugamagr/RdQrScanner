@@ -78,10 +78,22 @@ data class SyncEvent(
  * values as TEXT; older builds reading an unknown enum value will
  * crash with `IllegalArgumentException`, so any new value must ship
  * after the consuming code knows how to render it.
+ *
+ * REMOTE_* / PORTAL_* values are recorded when a pull merges a change
+ * authored elsewhere. LOCAL_* values are recorded when THIS device
+ * performs a sync-bound action (finalize a session, add accounts, edit
+ * defaulter months) so the bell history reflects the operator's own
+ * timeline alongside cross-device activity. Both categories live in
+ * the same table because the consuming UI treats them as one feed,
+ * distinguished only by the "You" vs. <name> actor label resolved at
+ * render time from [SyncEvent.originDeviceCloudId].
  */
 enum class SyncEventType {
     REMOTE_SESSION_FINALIZED,
     REMOTE_DEFAULTER_EDIT,
     PORTAL_DEFAULTER_EDIT,
-    REMOTE_SESSION_DELETED
+    REMOTE_SESSION_DELETED,
+    LOCAL_SESSION_FINALIZED,
+    LOCAL_ACCOUNTS_ADDED,
+    LOCAL_DEFAULTER_EDIT
 }

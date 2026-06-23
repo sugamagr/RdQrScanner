@@ -15,6 +15,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -46,6 +48,7 @@ fun DeleteOrInactivateDialog(
     onMarkInactive: () -> Unit,
     onDelete: () -> Unit
 ) {
+    val haptics = LocalHapticFeedback.current
     AlertDialog(
         onDismissRequest = onCancel,
         title = {
@@ -104,7 +107,10 @@ fun DeleteOrInactivateDialog(
                     TextButton(onClick = onCancel) {
                         Text("Cancel", color = TextSecondary)
                     }
-                    TextButton(onClick = onDelete) {
+                    TextButton(onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onDelete()
+                    }) {
                         Text("Delete", color = ErrorRed, fontWeight = FontWeight.SemiBold)
                     }
                 }

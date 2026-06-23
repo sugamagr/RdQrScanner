@@ -114,6 +114,8 @@ import com.qrscanner.app.R
 import com.qrscanner.app.data.RdNumber
 import com.qrscanner.app.data.ScanLot
 import com.qrscanner.app.data.ScanSession
+import com.qrscanner.app.data.SyncEvent
+import com.qrscanner.app.data.SyncEventType
 import com.qrscanner.app.util.isValidRdNumber
 import com.qrscanner.app.ui.components.ResumeSessionDialog
 import com.qrscanner.app.ui.theme.AccentCoral
@@ -583,6 +585,24 @@ private fun RDCameraScreen(
                 // regression W1).
                 android.util.Log.w("RDScannerScreen", "finalize: deferred sync enqueue", e)
             }
+            runCatching {
+                val stamped = app.database.scanSessionDao().getSessionById(session.id)
+                val settings = app.database.deviceSettingsDao().get()
+                app.database.syncEventDao().insert(
+                    SyncEvent(
+                        occurredAt = System.currentTimeMillis(),
+                        type = SyncEventType.LOCAL_SESSION_FINALIZED,
+                        sessionCloudId = stamped?.cloudId,
+                        originDeviceCloudId = settings?.deviceCloudId,
+                        originDeviceName = settings?.deviceName,
+                        originOperatorName = settings?.operatorName,
+                        payloadSummary = "finalized Session #$displayNumber " +
+                            "($totalLotsInSession LOT${if (totalLotsInSession == 1) "" else "s"})"
+                    )
+                )
+            }.onFailure {
+                android.util.Log.w("RDScannerScreen", "local sync_event insert failed", it)
+            }
             Toast.makeText(
                 context,
                 "Session #$displayNumber saved! $totalLotsInSession LOTs, ${allSessionNumbers.size} RD numbers",
@@ -985,7 +1005,13 @@ private fun RDCameraScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Undo Button
+                // Undo / Finish / End sit in a weight(1f) × 3 row; the
+                // middle button text used to wrap mid-word as "Finis-h
+                // LOT" on narrow phones. All three labels are now
+                // single-word and force maxLines=1 so the row stays
+                // crisp regardless of screen width. Disabled alphas on
+                // Undo were also raised so the button stays readable
+                // against the dimmed camera background.
                 Button(
                     onClick = { undoLastScan() },
                     enabled = currentLotNumbers.isNotEmpty(),
@@ -993,17 +1019,16 @@ private fun RDCameraScreen(
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color.White.copy(alpha = 0.15f),
                         contentColor = Color.White,
-                        disabledContainerColor = Color.White.copy(alpha = 0.05f),
-                        disabledContentColor = Color.White.copy(alpha = 0.3f)
+                        disabledContainerColor = Color.White.copy(alpha = 0.18f),
+                        disabledContentColor = Color.White.copy(alpha = 0.6f)
                     ),
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Undo")
+                    Text("Undo", maxLines = 1)
                 }
-                
-                // Finish LOT Button
+
                 Button(
                     onClick = { showFinishLotDialog = true },
                     enabled = currentLotNumbers.isNotEmpty(),
@@ -1016,10 +1041,9 @@ private fun RDCameraScreen(
                 ) {
                     Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Finish LOT")
+                    Text("Finish", maxLines = 1)
                 }
-                
-                // End Session Button
+
                 Button(
                     onClick = { showEndSessionDialog = true },
                     modifier = Modifier.weight(1f),
@@ -1030,7 +1054,7 @@ private fun RDCameraScreen(
                 ) {
                     Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("End")
+                    Text("End", maxLines = 1)
                 }
             }
         }
@@ -1313,6 +1337,30 @@ private fun RDCameraScreen(
                                 "Saved ${edits.size} entr${if (edits.size == 1) "y" else "ies"}",
                                 Toast.LENGTH_SHORT
                             ).show()
+                            runCatching {
+                                val settings = app.database.deviceSettingsDao().get()
+                                val stamped = currentSession?.let { s ->
+                                    app.database.scanSessionDao().getSessionById(s.id)
+                                }
+                                val rowWord = if (edits.size == 1) "account" else "accounts"
+                                app.database.syncEventDao().insert(
+                                    SyncEvent(
+                                        occurredAt = now,
+                                        type = SyncEventType.LOCAL_DEFAULTER_EDIT,
+                                        sessionCloudId = stamped?.cloudId,
+                                        originDeviceCloudId = settings?.deviceCloudId,
+                                        originDeviceName = settings?.deviceName,
+                                        originOperatorName = settings?.operatorName,
+                                        payloadSummary = "edited defaulter months for ${edits.size} $rowWord"
+                                    )
+                                )
+                            }.onFailure {
+                                android.util.Log.w(
+                                    "RDScannerScreen",
+                                    "local sync_event insert failed",
+                                    it
+                                )
+                            }
                         }
                         pendingPostSave?.let { executePostSave(it) }
                         pendingPostSave = null

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -51,6 +52,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.qrscanner.app.QRScannerApp
@@ -157,10 +159,23 @@ fun HomeScreen(
             val scope = rememberCoroutineScope()
             val deviceSettings by app.database.deviceSettingsDao().observe()
                 .collectAsStateWithLifecycle(initialValue = null)
+            val ownDeviceCloudId = deviceSettings?.deviceCloudId
             val bannerSeenAt = deviceSettings?.lastBannerSeenAt ?: 0L
-            val recentEvents by app.database.syncEventDao()
+            val rawRecentEvents by app.database.syncEventDao()
                 .observeEventsSince(since = bannerSeenAt, limit = 20)
                 .collectAsStateWithLifecycle(initialValue = emptyList())
+            // Banner + badge unread count exclude LOCAL_* events: the user
+            // doesn't need a notification telling them what they just did
+            // (the action's own UI already confirmed it). LOCAL_* still
+            // appears in the full bell history so the operator can scroll
+            // back through their own timeline.
+            val recentEvents = remember(rawRecentEvents) {
+                rawRecentEvents.filterNot { event ->
+                    event.type == com.qrscanner.app.data.SyncEventType.LOCAL_SESSION_FINALIZED ||
+                        event.type == com.qrscanner.app.data.SyncEventType.LOCAL_ACCOUNTS_ADDED ||
+                        event.type == com.qrscanner.app.data.SyncEventType.LOCAL_DEFAULTER_EDIT
+                }
+            }
             val allRecentEvents by app.database.syncEventDao()
                 .observeRecentEvents(limit = 100)
                 .collectAsStateWithLifecycle(initialValue = emptyList())
@@ -218,6 +233,7 @@ fun HomeScreen(
             if (showHistorySheet) {
                 SyncHistorySheet(
                     events = allRecentEvents,
+                    ownDeviceCloudId = ownDeviceCloudId,
                     onDismiss = {
                         showHistorySheet = false
                         scope.launch {
@@ -571,13 +587,22 @@ private fun SecondaryActionCard(
                 text = title,
                 style = MaterialTheme.typography.titleSmall.copy(
                     fontWeight = FontWeight.SemiBold
-                )
+                ),
+                maxLines = 1
             )
-            
+
+            // minLines=2 locks every tile to the same visual height
+            // regardless of whether its subtitle wraps. Without this,
+            // "New account" wraps to two lines on narrow phones while
+            // "Browse & QR" and "View history" don't, leaving the Add
+            // tile visibly taller than its siblings.
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.bodySmall,
-                color = TextSecondary
+                color = TextSecondary,
+                textAlign = TextAlign.Center,
+                minLines = 2,
+                maxLines = 2
             )
         }
     }
@@ -590,11 +615,28 @@ private fun TextLinkButton(
     color: Color,
     onClick: () -> Unit
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.94f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "linkScale"
+    )
+
     Row(
         modifier = Modifier
+            .scale(scale)
             .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .heightIn(min = 44.dp)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            )
+            .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(

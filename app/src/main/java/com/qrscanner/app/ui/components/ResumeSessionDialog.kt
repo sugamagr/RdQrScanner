@@ -24,13 +24,15 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.qrscanner.app.ui.theme.AccentCoral
 import com.qrscanner.app.ui.theme.PrimaryOrange
+import com.qrscanner.app.ui.theme.SurfaceWhite
 import com.qrscanner.app.ui.theme.TextSecondary
 
 /**
@@ -48,6 +50,7 @@ fun ResumeSessionDialog(
     onResume: () -> Unit,
     onDiscard: () -> Unit
 ) {
+    val haptics = LocalHapticFeedback.current
     Dialog(
         onDismissRequest = { /* non-dismissable */ },
         properties = DialogProperties(
@@ -61,7 +64,7 @@ fun ResumeSessionDialog(
                 .fillMaxWidth()
                 .padding(horizontal = 28.dp),
             shape = RoundedCornerShape(24.dp),
-            color = Color.White,
+            color = SurfaceWhite,
             tonalElevation = 8.dp
         ) {
             Column(modifier = Modifier.padding(24.dp)) {
@@ -109,7 +112,10 @@ fun ResumeSessionDialog(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Button(
-                    onClick = onDiscard,
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onDiscard()
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = AccentCoral.copy(alpha = 0.12f),
@@ -119,7 +125,7 @@ fun ResumeSessionDialog(
                 ) {
                     Icon(Icons.Default.RestartAlt, contentDescription = null, modifier = Modifier.size(20.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Discard and start fresh", fontWeight = FontWeight.SemiBold)
+                    Text("Discard and start fresh", fontWeight = FontWeight.SemiBold, maxLines = 1)
                 }
             }
         }

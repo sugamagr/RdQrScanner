@@ -61,7 +61,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -117,6 +119,7 @@ fun AccountsScreen(onNavigateBack: () -> Unit) {
     val app = context.applicationContext as QRScannerApp
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
+    val haptics = LocalHapticFeedback.current
 
     val allAccounts by app.database.rdAccountDao().observeAll().collectAsStateWithLifecycle(initialValue = emptyList())
     val activeCount by app.database.rdAccountDao().observeActiveCount().collectAsStateWithLifecycle(initialValue = 0)
@@ -342,6 +345,7 @@ fun AccountsScreen(onNavigateBack: () -> Unit) {
             onMarkInactive = {
                 val target = acc
                 deleting = null
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                 scope.launch {
                     val now = System.currentTimeMillis()
                     app.database.rdAccountDao().markInactive(target.rdNumber, now)
@@ -355,6 +359,7 @@ fun AccountsScreen(onNavigateBack: () -> Unit) {
             onDelete = {
                 val target = acc
                 deleting = null
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                 scope.launch {
                     val now = System.currentTimeMillis()
                     app.database.rdAccountDao().softDelete(target.rdNumber, now)
@@ -423,14 +428,14 @@ private fun AccountsHeader(
                     modifier = Modifier
                         .size(44.dp)
                         .background(
-                            Color.White.copy(alpha = if (selectedCount > 0) 0.2f else 0.08f),
+                            Color.White.copy(alpha = if (selectedCount > 0) 0.2f else 0.18f),
                             CircleShape
                         )
                 ) {
                     Icon(
                         Icons.Default.QrCode2,
                         contentDescription = "Generate QR PDF",
-                        tint = Color.White.copy(alpha = if (selectedCount > 0) 1f else 0.4f)
+                        tint = Color.White.copy(alpha = if (selectedCount > 0) 1f else 0.6f)
                     )
                 }
             } else {
@@ -455,14 +460,14 @@ private fun AccountsHeader(
                     modifier = Modifier
                         .size(44.dp)
                         .background(
-                            Color.White.copy(alpha = if (activeCount > 0) 0.2f else 0.08f),
+                            Color.White.copy(alpha = if (activeCount > 0) 0.2f else 0.18f),
                             CircleShape
                         )
                 ) {
                     Icon(
                         Icons.Default.QrCode2,
                         contentDescription = "Bulk QR",
-                        tint = Color.White.copy(alpha = if (activeCount > 0) 1f else 0.4f)
+                        tint = Color.White.copy(alpha = if (activeCount > 0) 1f else 0.6f)
                     )
                 }
             }
@@ -558,19 +563,30 @@ private fun AccountRow(
                     )
                 )
             } else {
+                // 44dp outer wrapper owns the click + tap area (WCAG);
+                // 40dp inner Box owns the visual circle. This is the
+                // wrap-pattern used throughout the app for chip-sized
+                // controls so the touch target stays compliant even
+                // when the rendered chip is intentionally smaller.
                 Box(
                     modifier = Modifier
-                        .size(40.dp)
-                        .background(PrimaryOrange.copy(alpha = 0.12f * mutedAlpha), CircleShape)
+                        .size(44.dp)
                         .clickable(enabled = account.isActive) { onGenerateSingleQr() },
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        Icons.Default.QrCode2,
-                        contentDescription = "Generate QR",
-                        tint = PrimaryOrange.copy(alpha = mutedAlpha),
-                        modifier = Modifier.size(22.dp)
-                    )
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .background(PrimaryOrange.copy(alpha = 0.12f * mutedAlpha), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.QrCode2,
+                            contentDescription = "Generate QR",
+                            tint = PrimaryOrange.copy(alpha = mutedAlpha),
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
                 }
             }
 
@@ -624,11 +640,15 @@ private fun AccountRow(
                 if (!selectionMode) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Row {
-                        // 40dp matches the leading QR button + meets WCAG
-                        // 44dp recommendation when combined with the 4dp
-                        // surrounding padding of an IconButton ripple.
+                        // 44dp meets WCAG touch-target minimum. Earlier
+                        // comment claimed 40dp was sufficient via the
+                        // MD3 IconButton ripple padding — that was wrong;
+                        // setting `.size(40.dp)` on IconButton forces
+                        // the touch area down to 40dp, below the WCAG
+                        // floor. Glyph stays at 18dp; only the tap area
+                        // grows.
                         if (account.source == AccountSource.CSV) {
-                            IconButton(onClick = onEditAttempt, modifier = Modifier.size(40.dp)) {
+                            IconButton(onClick = onEditAttempt, modifier = Modifier.size(44.dp)) {
                                 Icon(
                                     Icons.Default.Lock,
                                     contentDescription = "Locked — contact Sugam",
@@ -637,7 +657,7 @@ private fun AccountRow(
                                 )
                             }
                         } else {
-                            IconButton(onClick = onEditAttempt, modifier = Modifier.size(40.dp)) {
+                            IconButton(onClick = onEditAttempt, modifier = Modifier.size(44.dp)) {
                                 Icon(
                                     Icons.Default.Edit,
                                     contentDescription = "Edit",
@@ -646,7 +666,7 @@ private fun AccountRow(
                                 )
                             }
                             Box {
-                                IconButton(onClick = onOverflowOpen, modifier = Modifier.size(40.dp)) {
+                                IconButton(onClick = onOverflowOpen, modifier = Modifier.size(44.dp)) {
                                     Icon(
                                         Icons.Default.MoreVert,
                                         contentDescription = "More",

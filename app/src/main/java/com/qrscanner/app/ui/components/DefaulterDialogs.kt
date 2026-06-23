@@ -74,6 +74,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.qrscanner.app.data.RdNumber
 import com.qrscanner.app.ui.theme.PrimaryOrange
+import com.qrscanner.app.ui.theme.SurfaceWhite
 import com.qrscanner.app.ui.theme.TextSecondary
 import com.qrscanner.app.ui.theme.WarningAmber
 import com.qrscanner.app.ui.theme.DisabledBackground
@@ -244,7 +245,7 @@ fun DefaulterAskDialog(
                 .fillMaxWidth()
                 .padding(horizontal = 28.dp),
             shape = RoundedCornerShape(24.dp),
-            color = Color.White,
+            color = SurfaceWhite,
             tonalElevation = 8.dp
         ) {
             Column(modifier = Modifier.padding(24.dp)) {
@@ -389,7 +390,7 @@ fun DefaulterEditDialog(
                 .padding(horizontal = 20.dp)
                 .heightIn(max = 720.dp),
             shape = RoundedCornerShape(24.dp),
-            color = Color.White,
+            color = SurfaceWhite,
             tonalElevation = 8.dp
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
@@ -546,7 +547,7 @@ fun DefaulterEditDialog(
                     .padding(horizontal = 28.dp)
                     .heightIn(max = 560.dp),
                 shape = RoundedCornerShape(20.dp),
-                color = Color.White,
+                color = SurfaceWhite,
                 tonalElevation = 6.dp
             ) {
                 Column(modifier = Modifier.padding(20.dp)) {
@@ -625,7 +626,7 @@ private fun DefaulterOverLimitDialog(
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp),
             shape = RoundedCornerShape(20.dp),
-            color = Color.White,
+            color = SurfaceWhite,
             tonalElevation = 6.dp
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
@@ -822,6 +823,7 @@ private fun MonthChipStrip(
     Row(verticalAlignment = Alignment.CenterVertically) {
         ChipShiftButton(
             icon = Icons.Default.ChevronLeft,
+            contentDescription = "Shift months earlier",
             enabled = true,
             onClick = onShiftEarlier
         )
@@ -842,6 +844,7 @@ private fun MonthChipStrip(
         Spacer(modifier = Modifier.width(6.dp))
         ChipShiftButton(
             icon = Icons.Default.ChevronRight,
+            contentDescription = "Shift months later",
             enabled = canShiftLater,
             onClick = onShiftLater
         )
@@ -885,6 +888,7 @@ private fun MonthChip(
 @Composable
 private fun ChipShiftButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
     enabled: Boolean,
     onClick: () -> Unit
 ) {
@@ -901,14 +905,14 @@ private fun ChipShiftButton(
             modifier = Modifier
                 .size(28.dp)
                 .background(
-                    color = if (enabled) Color.White else DisabledBackground,
+                    color = if (enabled) SurfaceWhite else DisabledBackground,
                     shape = CircleShape
                 ),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = icon,
-                contentDescription = null,
+                contentDescription = contentDescription,
                 tint = if (enabled) PrimaryOrange else DisabledContent,
                 modifier = Modifier.size(16.dp)
             )
@@ -928,6 +932,7 @@ private fun MonthStepper(
     Row(verticalAlignment = Alignment.CenterVertically) {
         StepperButton(
             icon = Icons.Default.Remove,
+            contentDescription = "Decrease month count",
             enabled = canDecrease,
             onTick = {
                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -966,6 +971,7 @@ private fun MonthStepper(
 
         StepperButton(
             icon = Icons.Default.Add,
+            contentDescription = "Increase month count",
             enabled = canIncrease,
             onTick = {
                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -984,6 +990,7 @@ private fun MonthStepper(
 @Composable
 private fun StepperButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
     enabled: Boolean,
     onTick: () -> Unit
 ) {
@@ -1028,14 +1035,14 @@ private fun StepperButton(
                 .size(36.dp)
                 .scale(scale)
                 .background(
-                    color = if (enabled) Color.White else DisabledBackground,
+                    color = if (enabled) SurfaceWhite else DisabledBackground,
                     shape = CircleShape
                 ),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 imageVector = icon,
-                contentDescription = null,
+                contentDescription = contentDescription,
                 tint = if (enabled) PrimaryOrange else DisabledContent,
                 modifier = Modifier.size(18.dp)
             )

@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.ui.res.stringResource
 import com.qrscanner.app.R
 import com.qrscanner.app.ui.theme.PrimaryOrange
+import com.qrscanner.app.ui.theme.SurfaceWhite
 import com.qrscanner.app.ui.theme.TextSecondary
 import com.qrscanner.app.ui.theme.DisabledBackground
 import com.qrscanner.app.ui.theme.DisabledContent
@@ -97,7 +98,7 @@ fun MonthPickerDialog(
                 .fillMaxWidth()
                 .padding(horizontal = 28.dp),
             shape = RoundedCornerShape(24.dp),
-            color = Color.White,
+            color = SurfaceWhite,
             tonalElevation = 12.dp
         ) {
             Column(modifier = Modifier.padding(20.dp)) {

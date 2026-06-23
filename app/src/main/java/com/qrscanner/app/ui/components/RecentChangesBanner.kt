@@ -113,7 +113,8 @@ fun RecentChangesBanner(
                         style = MaterialTheme.typography.labelMedium.copy(
                             fontWeight = FontWeight.SemiBold,
                             color = TextSecondary
-                        )
+                        ),
+                        maxLines = 1
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     for ((index, line) in lines.withIndex()) {
@@ -123,7 +124,9 @@ fun RecentChangesBanner(
                             style = MaterialTheme.typography.bodySmall.copy(
                                 fontWeight = FontWeight.Medium,
                                 color = TextPrimary
-                            )
+                            ),
+                            maxLines = 2,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
                     }
                 }
@@ -194,6 +197,18 @@ private fun describe(group: List<SyncEvent>, context: Context): String {
         SyncEventType.REMOTE_SESSION_DELETED ->
             if (n == 1) context.getString(R.string.banner_line_session_deleted_one, origin, first.payloadSummary)
             else context.getString(R.string.banner_line_session_deleted_many, origin, n)
+        // LOCAL_* events are filtered out at the HomeScreen feed level
+        // (spec §15.5.1: the banner is for things that happened while
+        // you weren't looking, not for echoing your own actions back to
+        // you). These branches exist solely so this `when` stays an
+        // exhaustive expression; if a local event ever slips past the
+        // filter — e.g. via a future code path that forgets the
+        // exclusion — we render it using the pre-rendered summary
+        // rather than crashing.
+        SyncEventType.LOCAL_SESSION_FINALIZED,
+        SyncEventType.LOCAL_ACCOUNTS_ADDED,
+        SyncEventType.LOCAL_DEFAULTER_EDIT ->
+            first.payloadSummary
     }
 }
 

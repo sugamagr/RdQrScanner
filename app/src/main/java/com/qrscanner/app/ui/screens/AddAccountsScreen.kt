@@ -71,6 +71,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import com.qrscanner.app.QRScannerApp
 import com.qrscanner.app.data.AccountSource
 import com.qrscanner.app.data.RdAccount
+import com.qrscanner.app.data.SyncEvent
+import com.qrscanner.app.data.SyncEventType
 import com.qrscanner.app.data.SyncStatus
 import com.qrscanner.app.ui.components.GradientTopBar
 import com.qrscanner.app.ui.theme.AccentMint
@@ -327,6 +329,24 @@ private suspend fun persistAll(
     }
     runCatching { app.syncScheduler.enqueuePush() }
         .onFailure { android.util.Log.w("AddAccountsScreen", "push enqueue failed", it) }
+    if (out.isNotEmpty()) {
+        runCatching {
+            val settings = app.database.deviceSettingsDao().get()
+            val plural = if (out.size == 1) "account" else "accounts"
+            app.database.syncEventDao().insert(
+                SyncEvent(
+                    occurredAt = now,
+                    type = SyncEventType.LOCAL_ACCOUNTS_ADDED,
+                    originDeviceCloudId = settings?.deviceCloudId,
+                    originDeviceName = settings?.deviceName,
+                    originOperatorName = settings?.operatorName,
+                    payloadSummary = "added ${out.size} $plural"
+                )
+            )
+        }.onFailure {
+            android.util.Log.w("AddAccountsScreen", "local sync_event insert failed", it)
+        }
+    }
     return out
 }
 
@@ -603,7 +623,8 @@ private fun SaveFooter(
                 enabled = saveEnabled,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = PrimaryOrange,
-                    disabledContainerColor = TextSecondary.copy(alpha = 0.2f)
+                    disabledContainerColor = PrimaryOrange.copy(alpha = 0.5f),
+                    disabledContentColor = Color.White.copy(alpha = 0.75f)
                 ),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth()
@@ -613,7 +634,8 @@ private fun SaveFooter(
                         validRowCount == 0 -> "Save"
                         else -> "Save $validRowCount account${if (validRowCount == 1) "" else "s"}"
                     },
-                    fontWeight = FontWeight.SemiBold
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1
                 )
             }
         }
@@ -645,7 +667,7 @@ private fun SaveConfirmDialog(
             Button(
                 onClick = onSaveAndQr,
                 colors = ButtonDefaults.buttonColors(containerColor = PrimaryOrange),
-                shape = RoundedCornerShape(10.dp)
+                shape = RoundedCornerShape(12.dp)
             ) {
                 Text("Save & Generate QR", fontWeight = FontWeight.SemiBold)
             }

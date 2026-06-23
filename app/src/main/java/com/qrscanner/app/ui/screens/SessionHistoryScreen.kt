@@ -95,7 +95,9 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -787,6 +789,7 @@ private fun SessionCard(
     onExport: () -> Unit,
     onDelete: () -> Unit
 ) {
+    val haptics = LocalHapticFeedback.current
     val startTime = remember(session.startTime, timeFormat) {
         timeFormat.format(Date(session.startTime))
     }
@@ -937,7 +940,10 @@ private fun SessionCard(
                             Text("Export", fontWeight = FontWeight.SemiBold)
                         }
                         Button(
-                            onClick = onDelete,
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onDelete()
+                            },
                             modifier = Modifier.weight(1f),
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = AccentCoral.copy(alpha = 0.1f),
@@ -948,7 +954,7 @@ private fun SessionCard(
                         ) {
                             Icon(Icons.Default.Delete, null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Delete", fontWeight = FontWeight.SemiBold)
+                            Text("Delete", fontWeight = FontWeight.SemiBold, maxLines = 1)
                         }
                     }
                 }

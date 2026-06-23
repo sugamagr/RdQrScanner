@@ -490,6 +490,7 @@ private fun CountStepper(count: Int, onCountChange: (Int) -> Unit) {
     ) {
         StepperButton(
             icon = Icons.Default.Remove,
+            contentDescription = stringResource(R.string.lotreview_stepper_decrease),
             enabled = canDec,
             onClick = {
                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -513,6 +514,7 @@ private fun CountStepper(count: Int, onCountChange: (Int) -> Unit) {
         }
         StepperButton(
             icon = Icons.Default.Add,
+            contentDescription = stringResource(R.string.lotreview_stepper_increase),
             enabled = canInc,
             onClick = {
                 haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -525,6 +527,7 @@ private fun CountStepper(count: Int, onCountChange: (Int) -> Unit) {
 @Composable
 private fun StepperButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
     enabled: Boolean,
     onClick: () -> Unit
 ) {
@@ -547,7 +550,7 @@ private fun StepperButton(
         ) {
             Icon(
                 imageVector = icon,
-                contentDescription = null,
+                contentDescription = contentDescription,
                 tint = if (enabled) PrimaryOrange else DisabledContent,
                 modifier = Modifier.size(18.dp)
             )
@@ -873,6 +876,7 @@ private fun formatRupees(value: Int): String {
 
 @Composable
 private fun DiscardConfirmDialog(onCancel: () -> Unit, onDiscard: () -> Unit) {
+    val haptics = LocalHapticFeedback.current
     Dialog(
         onDismissRequest = onCancel,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -908,7 +912,10 @@ private fun DiscardConfirmDialog(onCancel: () -> Unit, onDiscard: () -> Unit) {
                         )
                     }
                     Button(
-                        onClick = onDiscard,
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onDiscard()
+                        },
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(containerColor = WarningAmber),
                         shape = RoundedCornerShape(12.dp)

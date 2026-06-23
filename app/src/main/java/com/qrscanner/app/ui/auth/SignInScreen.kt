@@ -163,7 +163,8 @@ fun SignInScreen(
                 colors = ButtonDefaults.buttonColors(
                     containerColor = PrimaryOrange,
                     contentColor = Color.White,
-                    disabledContainerColor = PrimaryOrange.copy(alpha = 0.4f)
+                    disabledContainerColor = PrimaryOrange.copy(alpha = 0.5f),
+                    disabledContentColor = Color.White.copy(alpha = 0.75f)
                 ),
                 shape = RoundedCornerShape(14.dp)
             ) {

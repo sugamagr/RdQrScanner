@@ -381,7 +381,7 @@ private fun LotCard(
                 Row {
                     IconButton(
                         onClick = { copyToClipboard() },
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier.size(44.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.ContentCopy,
@@ -393,7 +393,7 @@ private fun LotCard(
 
                     IconButton(
                         onClick = { shareViaWithImage() },
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier.size(44.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Share,
@@ -406,7 +406,7 @@ private fun LotCard(
                     IconButton(
                         onClick = { showEditDialog = true },
                         enabled = rdNumberEntities.isNotEmpty(),
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier.size(44.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.EditCalendar,

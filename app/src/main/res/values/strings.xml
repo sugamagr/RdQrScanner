@@ -96,9 +96,15 @@
     <string name="sync_history_empty_body">When other phones or the portal upload new sessions or edit defaulters, you\'ll see them here.</string>
     <string name="sync_history_row_actor_portal">Portal</string>
     <string name="sync_history_row_actor_other_phone">Another phone</string>
+    <string name="sync_history_row_actor_you">You</string>
     <string name="sync_history_row_session_finalized">finalized Session #%1$s</string>
     <string name="sync_history_row_defaulter_edit">updated defaulters on Session #%1$s</string>
     <string name="sync_history_row_session_deleted">deleted Session #%1$s</string>
+    <string name="sync_history_row_repeat_suffix">%1$s (×%2$d)</string>
+    <string name="sync_history_fallback_finalized">finalized a session</string>
+    <string name="sync_history_fallback_defaulter_edit">edited defaulter months</string>
+    <string name="sync_history_fallback_deleted">deleted a session</string>
+    <string name="sync_history_fallback_accounts_added">added accounts</string>
     <string name="sync_history_relative_just_now">Just now</string>
     <string name="sync_history_relative_minutes">%1$d min ago</string>
     <string name="sync_history_relative_hours">%1$d hr ago</string>
@@ -122,6 +128,8 @@
     <string name="lotreview_no_profile">(no profile yet)</string>
     <string name="lotreview_last_paid">Last paid: through %1$s</string>
     <string name="lotreview_months_label">%1$d mo</string>
+    <string name="lotreview_stepper_decrease">Decrease month count</string>
+    <string name="lotreview_stepper_increase">Increase month count</string>
     <string name="lotreview_confirm_one">Confirm 1 entry</string>
     <string name="lotreview_confirm_many">Confirm %1$d entries</string>
     <string name="lotreview_regression_warning">%1$s before last paid (%2$s) — confirm below</string>

@@ -139,6 +139,16 @@ class SyncNotifier(private val context: Context) {
                 context.getString(R.string.notif_remote_session_deleted_title, displayNumber),
                 context.getString(R.string.notif_remote_session_deleted_body, originLabel)
             )
+            // Tray notifications fire only for cross-device changes; the
+            // operator's own LOCAL_* actions already produced in-app
+            // feedback (Toast / sheet) and don't need a second nudge in
+            // the system tray. notifyRemoteEdit() is currently only
+            // called from SyncRepository's pull-merge path so these
+            // branches are defensive — they keep this `when` exhaustive
+            // if the call surface ever widens.
+            SyncEventType.LOCAL_SESSION_FINALIZED,
+            SyncEventType.LOCAL_ACCOUNTS_ADDED,
+            SyncEventType.LOCAL_DEFAULTER_EDIT -> return
         }
         val notificationId = NOTIF_ID_REMOTE_EDIT_BASE +
             (type.ordinal * 100_000) + (displayNumber % 100_000)
