@@ -137,6 +137,9 @@
     <string name="lotreview_regression_body_outro">पुरानी स्कैन एंट्री वैसी ही रहेंगी। आगे बढ़ें?</string>
     <string name="lotreview_regression_cancel">रद्द करें</string>
     <string name="lotreview_regression_confirm">हाँ, सेव करें</string>
+    <!-- Scanner-screen live LOT total chip -->
+    <string name="scanner_lot_total_verified">₹%1$s</string>
+    <string name="scanner_lot_total_with_unverified">₹%1$s · %2$d बिना प्रोफ़ाइल</string>
     <!-- Per-LOT ₹20,000 total cap -->
     <string name="lotreview_total_under_limit">कुल: ₹%1$s · सीमा ₹%2$s</string>
     <string name="lotreview_total_over_limit">कुल ₹%1$s ₹%2$s सीमा से ऊपर</string>

@@ -13,6 +13,8 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -67,10 +69,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -104,7 +108,9 @@ import com.google.accompanist.permissions.rememberPermissionState
 import com.google.accompanist.permissions.shouldShowRationale
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.common.InputImage
+import androidx.compose.ui.res.stringResource
 import com.qrscanner.app.QRScannerApp
+import com.qrscanner.app.R
 import com.qrscanner.app.data.RdNumber
 import com.qrscanner.app.data.ScanLot
 import com.qrscanner.app.data.ScanSession
@@ -186,6 +192,7 @@ private fun RDCameraScreen(
     var currentLotId by rememberSaveable { mutableStateOf<Long?>(null) }
     val currentLotNumbers = remember { mutableStateListOf<String>() }
     val allSessionNumbers = remember { mutableStateListOf<String>() }
+    val lotAmountCache = remember { mutableStateMapOf<String, Int?>() }
     var isHydrated by remember { mutableStateOf(false) }
 
     // Camera state — flash survives config change so users don't have to retoggle.
@@ -467,6 +474,41 @@ private fun RDCameraScreen(
     LaunchedEffect(currentLotNumbers.size) {
         if (currentLotNumbers.isNotEmpty()) {
             listState.animateScrollToItem(0)
+        }
+    }
+
+    // Resolve monthly amount for any newly-scanned RD number so the
+    // live-total chip can sum the verified accounts. Missing entries
+    // (no profile yet) are stored as null and surface as 'unverified'
+    // in the chip. Cache survives across LOTs — restarting the LOT
+    // doesn't invalidate prior lookups (they re-resolve only on next
+    // scan of the same number).
+    LaunchedEffect(currentLotNumbers.toList()) {
+        val missing = currentLotNumbers.filter { it !in lotAmountCache }
+        for (rdNumber in missing) {
+            val amount = runCatching {
+                app.database.rdAccountDao().findByRdNumber(rdNumber)?.monthlyAmount
+            }.getOrNull()
+            lotAmountCache[rdNumber] = amount
+        }
+    }
+
+    // Derived live total for the chip. monthsPaid is always 1 at scan
+    // time (defaulter counts are picked later on LotReviewScreen) so
+    // the formula here is just sum(monthlyAmount) for verified rows.
+    val liveLotTotal by remember {
+        derivedStateOf {
+            var verified = 0
+            var unverified = 0
+            currentLotNumbers.forEach { rdNumber ->
+                val amount = lotAmountCache[rdNumber]
+                if (amount != null && amount > 0) {
+                    verified += amount
+                } else {
+                    unverified++
+                }
+            }
+            LiveLotTotal(verifiedRupees = verified, unverifiedCount = unverified)
         }
     }
     
@@ -848,6 +890,17 @@ private fun RDCameraScreen(
                     label = "Total RD",
                     color = WarningAmber
                 )
+            }
+
+            AnimatedVisibility(
+                visible = liveLotTotal.hasContent,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Column {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    LiveLotTotalChip(total = liveLotTotal)
+                }
             }
         }
         
@@ -1546,6 +1599,52 @@ private fun LiveStatItem(value: String, label: String, color: Color) {
             text = label,
             style = MaterialTheme.typography.labelSmall,
             color = Color.White.copy(alpha = 0.7f)
+        )
+    }
+}
+
+internal data class LiveLotTotal(
+    val verifiedRupees: Int,
+    val unverifiedCount: Int
+) {
+    val isAllVerified: Boolean get() = unverifiedCount == 0
+    val hasContent: Boolean get() = verifiedRupees > 0 || unverifiedCount > 0
+}
+
+@Composable
+private fun LiveLotTotalChip(total: LiveLotTotal) {
+    val accent = if (total.isAllVerified) AccentMint else AccentCoral
+    val rupeeText = java.text.NumberFormat
+        .getNumberInstance(java.util.Locale.getDefault())
+        .format(total.verifiedRupees.toLong())
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(accent.copy(alpha = 0.22f), RoundedCornerShape(12.dp))
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .background(accent, CircleShape)
+        )
+        Spacer(modifier = Modifier.width(10.dp))
+        Text(
+            text = if (total.isAllVerified) {
+                stringResource(R.string.scanner_lot_total_verified, rupeeText)
+            } else {
+                stringResource(
+                    R.string.scanner_lot_total_with_unverified,
+                    rupeeText,
+                    total.unverifiedCount
+                )
+            },
+            style = MaterialTheme.typography.labelLarge.copy(
+                color = Color.White,
+                fontWeight = FontWeight.SemiBold
+            )
         )
     }
 }
