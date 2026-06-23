@@ -59,6 +59,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.qrscanner.app.R
 import com.qrscanner.app.data.RdNumber
+import com.qrscanner.app.ui.theme.AccentCoral
 import com.qrscanner.app.ui.theme.AccentMint
 import com.qrscanner.app.ui.theme.BackgroundWhite
 import com.qrscanner.app.ui.theme.DisabledBackground
@@ -84,9 +85,19 @@ data class LotReviewRow(
     val rdNumber: RdNumber,
     val accountName: String?,
     val accountLastPaidThrough: MonthYear?,
+    val accountMonthlyAmount: Int?,
     val selected: List<MonthYear>
 ) {
     val count: Int get() = selected.size
+
+    /**
+     * Per-row contribution to the LOT's 20,000-rupee total cap, or
+     * null when no [accountMonthlyAmount] is known. Null rows are
+     * skipped from the sum and surfaced as 'unverified' in the live
+     * running total + confirm warning.
+     */
+    val rupeeContribution: Int?
+        get() = accountMonthlyAmount?.takeIf { it > 0 }?.let { it * count }
 
     /**
      * True iff confirming this row would regress `lastPaidThrough`.
@@ -152,10 +163,12 @@ fun LotReviewScreen(
     rows: List<LotReviewRow>,
     onUpdateRow: (rowId: Long, newSelected: List<MonthYear>) -> Unit,
     onConfirm: (edits: List<LotReviewEdit>) -> Unit,
-    onDiscard: () -> Unit
+    onDiscard: () -> Unit,
+    onRescanLot: () -> Unit
 ) {
     var discardConfirmShown by remember { mutableStateOf(false) }
     var regressionConfirmShown by remember { mutableStateOf(false) }
+    var overLimitShown by remember { mutableStateOf(false) }
     var pendingEdits by remember { mutableStateOf<List<LotReviewEdit>?>(null) }
 
     val changedCount by remember(rows) {
@@ -165,6 +178,10 @@ fun LotReviewScreen(
             // account each LOT. Confirm count == row count.
             rows.size
         }
+    }
+
+    val lotTotal by remember(rows) {
+        derivedStateOf { computeLotTotal(rows) }
     }
 
     Surface(modifier = Modifier.fillMaxSize(), color = BackgroundWhite) {
@@ -198,7 +215,15 @@ fun LotReviewScreen(
 
             ConfirmBar(
                 changedCount = changedCount,
+                lotTotal = lotTotal,
                 onConfirm = {
+                    // 20K cap precedes regression confirm — over-limit is a
+                    // hard rule the portal will reject, regression is a
+                    // soft warning the operator can confirm through.
+                    if (lotTotal.isOver) {
+                        overLimitShown = true
+                        return@ConfirmBar
+                    }
                     val edits = rows.map { it.toEdit() }
                     val regressions = edits.filter { it.isRegression }
                     if (regressions.isNotEmpty()) {
@@ -235,6 +260,17 @@ fun LotReviewScreen(
                 regressionConfirmShown = false
                 pendingEdits = null
                 onConfirm(edits)
+            }
+        )
+    }
+
+    if (overLimitShown) {
+        OverLimitDialog(
+            lotTotal = lotTotal,
+            onCancel = { overLimitShown = false },
+            onRescan = {
+                overLimitShown = false
+                onRescanLot()
             }
         )
     }
@@ -619,14 +655,19 @@ private fun MonthBarCell(
 }
 
 @Composable
-private fun ConfirmBar(changedCount: Int, onConfirm: () -> Unit) {
-    Row(
+private fun ConfirmBar(
+    changedCount: Int,
+    lotTotal: LotTotal,
+    onConfirm: () -> Unit
+) {
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(SurfaceWhite)
-            .padding(horizontal = 20.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(horizontal = 20.dp, vertical = 12.dp)
     ) {
+        LotTotalLine(lotTotal = lotTotal)
+        Spacer(modifier = Modifier.height(10.dp))
         Button(
             onClick = onConfirm,
             modifier = Modifier
@@ -645,6 +686,154 @@ private fun ConfirmBar(changedCount: Int, onConfirm: () -> Unit) {
             )
         }
     }
+}
+
+@Composable
+private fun LotTotalLine(lotTotal: LotTotal) {
+    val isOver = lotTotal.isOver
+    val accentColor = if (isOver) AccentCoral else AccentMint
+    val totalText = formatRupees(lotTotal.verifiedRupees)
+    val limitText = formatRupees(lotTotal.limit)
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .background(accentColor, CircleShape)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = if (isOver) {
+                    stringResource(R.string.lotreview_total_over_limit, totalText, limitText)
+                } else {
+                    stringResource(R.string.lotreview_total_under_limit, totalText, limitText)
+                },
+                style = MaterialTheme.typography.labelMedium.copy(
+                    color = if (isOver) AccentCoral else TextSecondary,
+                    fontWeight = if (isOver) FontWeight.SemiBold else FontWeight.Medium,
+                    fontFamily = FontFamily.SansSerif
+                )
+            )
+        }
+        if (lotTotal.unverifiedRowCount > 0) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = stringResource(
+                    R.string.lotreview_total_unverified,
+                    lotTotal.unverifiedRowCount
+                ),
+                style = MaterialTheme.typography.labelSmall.copy(
+                    color = TextSecondary.copy(alpha = 0.75f)
+                ),
+                modifier = Modifier.padding(start = 16.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun OverLimitDialog(
+    lotTotal: LotTotal,
+    onCancel: () -> Unit,
+    onRescan: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onCancel,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp),
+            shape = RoundedCornerShape(20.dp),
+            color = SurfaceWhite,
+            tonalElevation = 6.dp
+        ) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .background(AccentCoral.copy(alpha = 0.12f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.WarningAmber,
+                            contentDescription = null,
+                            tint = AccentCoral,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = stringResource(R.string.lotreview_over_limit_title),
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                    )
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = stringResource(
+                        R.string.lotreview_over_limit_body,
+                        formatRupees(lotTotal.verifiedRupees),
+                        formatRupees(lotTotal.excess)
+                    ),
+                    style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
+                )
+                if (lotTotal.unverifiedRowCount > 0) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(
+                            R.string.lotreview_over_limit_unverified_note,
+                            lotTotal.unverifiedRowCount
+                        ),
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = AccentCoral,
+                            fontWeight = FontWeight.Medium
+                        )
+                    )
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    TextButton(onClick = onCancel, modifier = Modifier.weight(1f)) {
+                        Text(
+                            stringResource(R.string.lotreview_over_limit_cancel),
+                            color = TextSecondary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    Button(
+                        onClick = onRescan,
+                        modifier = Modifier.weight(1.4f),
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentCoral),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            stringResource(R.string.lotreview_over_limit_rescan),
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Formats a rupee integer as a locale-aware grouped string. ₹20000 →
+ * "20,000" in en-US and "20,000" in hi-IN (Indian grouping uses lakhs:
+ * 1,00,000 not 100,000). Symbol stays out of the format; callers
+ * prefix the rendered string with their own ₹.
+ */
+private fun formatRupees(value: Int): String {
+    return java.text.NumberFormat
+        .getNumberInstance(java.util.Locale.getDefault())
+        .format(value.toLong())
 }
 
 @Composable
@@ -807,3 +996,45 @@ private fun MonthYear.plusBy(n: Int): MonthYear {
 
 private const val MONTH_BAR_BACK = 12
 private const val MONTH_BAR_FORWARD = 12
+
+/**
+ * Hard limit the portal enforces on each LOT's combined rupee total
+ * (∑ monthlyAmount × monthsPaid across all rows). We surface the same
+ * cap on the phone so the operator catches over-limit LOTs before
+ * sync would reject them at the portal-edit boundary. Per-LOT, not
+ * per-session.
+ */
+const val LOT_TOTAL_LIMIT_RUPEES = 20_000
+
+/**
+ * Snapshot of a LOT's total state used by the live running total +
+ * the over-limit popup. [verifiedRupees] only sums rows with a known
+ * [LotReviewRow.accountMonthlyAmount]; rows without a profile are
+ * counted in [unverifiedRowCount] and shown to the operator so they
+ * know the verified figure is a floor, not the absolute total.
+ */
+data class LotTotal(
+    val verifiedRupees: Int,
+    val unverifiedRowCount: Int,
+    val totalRows: Int,
+    val limit: Int = LOT_TOTAL_LIMIT_RUPEES
+) {
+    val isOver: Boolean get() = verifiedRupees > limit
+    val excess: Int get() = (verifiedRupees - limit).coerceAtLeast(0)
+    val hasAnyVerified: Boolean get() = totalRows > unverifiedRowCount
+}
+
+fun computeLotTotal(rows: List<LotReviewRow>): LotTotal {
+    var sum = 0
+    var unverified = 0
+    rows.forEach { row ->
+        val contribution = row.rupeeContribution
+        if (contribution != null) sum += contribution
+        else unverified++
+    }
+    return LotTotal(
+        verifiedRupees = sum,
+        unverifiedRowCount = unverified,
+        totalRows = rows.size
+    )
+}

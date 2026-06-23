@@ -1268,6 +1268,44 @@ private fun RDCameraScreen(
                     lotReviewEdits = emptyMap()
                     pendingPostSave?.let { executePostSave(it) }
                     pendingPostSave = null
+                },
+                onRescanLot = {
+                    val lotId = lotReviewLotId
+                    val session = currentSession
+                    // Tear down the in-review LOT entirely and return the
+                    // operator to the scanner at the SAME LOT number per
+                    // locked Q3 ("re-attempt LOT N, not advance to N+1").
+                    // Prior LOTs in this session are untouched — only the
+                    // rd_numbers + scan_lots rows for THIS lotId go away.
+                    showLotReviewScreen = false
+                    lotReviewLotId = null
+                    lotReviewEdits = emptyMap()
+                    lotReviewBaseRows = emptyList()
+                    pendingPostSave = null
+                    scope.launch {
+                        if (lotId != null) {
+                            app.database.rdNumberDao().deleteForLot(lotId)
+                            // deleteIfEmpty (vs unconditional delete) guards
+                            // against the partial-delete race where another
+                            // device's realtime insert lands between the
+                            // rdNumberDao.deleteForLot call and this one.
+                            app.database.scanLotDao().deleteIfEmpty(lotId)
+                        }
+                        if (session != null) {
+                            app.database.scanSessionDao().setActiveLotId(session.id, null)
+                        }
+                        totalLotsInSession = (totalLotsInSession - 1).coerceAtLeast(0)
+                        currentLotNumber = (currentLotNumber - 1).coerceAtLeast(1)
+                        currentLotId = null
+                        currentLotNumbers.clear()
+                        scanningEnabledRef.set(true)
+                        isScanningRef.set(true)
+                        Toast.makeText(
+                            context,
+                            "LOT ${currentLotNumber} ready — rescan now",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
                 }
             )
         }
@@ -1412,6 +1450,7 @@ private suspend fun buildLotReviewRows(
             rdNumber = rd,
             accountName = account?.name,
             accountLastPaidThrough = accountLastPaid,
+            accountMonthlyAmount = account?.monthlyAmount,
             selected = selected
         )
     }

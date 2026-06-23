@@ -22,7 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.EventNote
+import androidx.compose.material.icons.automirrored.filled.EventNote
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Smartphone
@@ -165,7 +165,7 @@ private fun EmptyHistory() {
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                imageVector = Icons.Default.EventNote,
+                imageVector = Icons.AutoMirrored.Filled.EventNote,
                 contentDescription = null,
                 tint = PrimaryOrange.copy(alpha = 0.6f),
                 modifier = Modifier.size(36.dp)

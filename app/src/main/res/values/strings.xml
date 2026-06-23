@@ -136,6 +136,19 @@
     <string name="lotreview_regression_body_outro">Past scans won\'t be undone. Continue?</string>
     <string name="lotreview_regression_cancel">Cancel</string>
     <string name="lotreview_regression_confirm">Yes, save</string>
+    <!-- Per-LOT ₹20,000 total cap (mirrors portal's per-LOT limit) -->
+    <string name="lotreview_total_under_limit">Total: ₹%1$s · limit ₹%2$s</string>
+    <string name="lotreview_total_over_limit">Total ₹%1$s exceeds ₹%2$s limit</string>
+    <string name="lotreview_total_unverified">%1$d without profile not counted</string>
+    <string name="lotreview_over_limit_title">LOT total is above ₹20,000</string>
+    <string name="lotreview_over_limit_body">This LOT adds up to ₹%1$s — ₹%2$s more than the ₹20,000 limit the portal allows.\n\nFix the months on the previous screen, or rescan this LOT from scratch. The earlier LOTs in this session will stay safe either way.</string>
+    <string name="lotreview_over_limit_unverified_note">%1$d row(s) without a profile aren\'t included in the total — the real figure may be higher.</string>
+    <string name="lotreview_over_limit_cancel">Cancel</string>
+    <string name="lotreview_over_limit_rescan">Rescan this LOT</string>
+    <!-- Defaulter post-finalize edit (SessionDetail) over-limit popup -->
+    <string name="defaulter_over_limit_title">LOT total is above ₹20,000</string>
+    <string name="defaulter_over_limit_body">This LOT adds up to ₹%1$s — ₹%2$s more than the ₹20,000 limit the portal allows.\n\nReduce some month counts to bring the total within the limit.</string>
+    <string name="defaulter_over_limit_close">Got it</string>
 
     <!-- Account paid-till editor (EditAccountDialog inline) -->
     <string name="account_paid_till_label">Paid till</string>

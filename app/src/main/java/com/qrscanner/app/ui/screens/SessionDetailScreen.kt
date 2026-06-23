@@ -502,6 +502,9 @@ private fun LotCard(
                     ?.lastPaidThrough
                     ?.let { com.qrscanner.app.util.MonthYear.parseToken(it) }
             },
+            accountMonthlyAmountLookup = { rdNumber ->
+                app.database.rdAccountDao().findByRdNumber(rdNumber)?.monthlyAmount
+            },
             onDismiss = { showEditDialog = false },
             onSave = { changes ->
                 showEditDialog = false

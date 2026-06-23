@@ -137,6 +137,19 @@
     <string name="lotreview_regression_body_outro">पुरानी स्कैन एंट्री वैसी ही रहेंगी। आगे बढ़ें?</string>
     <string name="lotreview_regression_cancel">रद्द करें</string>
     <string name="lotreview_regression_confirm">हाँ, सेव करें</string>
+    <!-- Per-LOT ₹20,000 total cap -->
+    <string name="lotreview_total_under_limit">कुल: ₹%1$s · सीमा ₹%2$s</string>
+    <string name="lotreview_total_over_limit">कुल ₹%1$s ₹%2$s सीमा से ऊपर</string>
+    <string name="lotreview_total_unverified">%1$d बिना प्रोफ़ाइल वाले नहीं गिने गए</string>
+    <string name="lotreview_over_limit_title">LOT का कुल ₹20,000 से ऊपर है</string>
+    <string name="lotreview_over_limit_body">इस LOT का कुल ₹%1$s है — पोर्टल की ₹20,000 की लिमिट से ₹%2$s ज़्यादा।\n\nपिछली स्क्रीन पर महीने बदलें, या इस LOT को दोबारा स्कैन करें। इस सेशन के पिछले LOT वैसे ही सुरक्षित रहेंगे।</string>
+    <string name="lotreview_over_limit_unverified_note">%1$d पंक्तियाँ बिना प्रोफ़ाइल कुल में शामिल नहीं हैं — असली रकम ज़्यादा हो सकती है।</string>
+    <string name="lotreview_over_limit_cancel">रद्द करें</string>
+    <string name="lotreview_over_limit_rescan">दोबारा स्कैन करें</string>
+    <!-- Defaulter post-finalize edit over-limit popup -->
+    <string name="defaulter_over_limit_title">LOT का कुल ₹20,000 से ऊपर है</string>
+    <string name="defaulter_over_limit_body">इस LOT का कुल ₹%1$s है — पोर्टल की ₹20,000 की लिमिट से ₹%2$s ज़्यादा।\n\nलिमिट के अंदर लाने के लिए कुछ महीने कम करें।</string>
+    <string name="defaulter_over_limit_close">ठीक है</string>
 
     <!-- Account paid-till editor -->
     <string name="account_paid_till_label">पेड टिल</string>

@@ -1,5 +1,9 @@
 package com.qrscanner.app.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.qrscanner.app.R
+import com.qrscanner.app.ui.screens.LOT_TOTAL_LIMIT_RUPEES
+import com.qrscanner.app.ui.theme.AccentCoral
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
@@ -299,7 +303,8 @@ fun DefaulterEditDialog(
     anchorTimestamp: Long,
     onDismiss: () -> Unit,
     onSave: (changes: Map<Long, Pair<Int, String?>>) -> Unit,
-    accountLastPaidLookup: suspend (String) -> MonthYear? = { null }
+    accountLastPaidLookup: suspend (String) -> MonthYear? = { null },
+    accountMonthlyAmountLookup: suspend (String) -> Int? = { null }
 ) {
     val today = remember(anchorTimestamp) { MonthYear.fromEpochMillis(anchorTimestamp) }
 
@@ -314,6 +319,11 @@ fun DefaulterEditDialog(
     }
     val accountMonths = remember(numbers) {
         mutableStateMapOf<String, MonthYear?>().apply {
+            numbers.forEach { put(it.number, null) }
+        }
+    }
+    val accountAmounts = remember(numbers) {
+        mutableStateMapOf<String, Int?>().apply {
             numbers.forEach { put(it.number, null) }
         }
     }
@@ -333,6 +343,10 @@ fun DefaulterEditDialog(
                 .onFailure { android.util.Log.w("DefaulterEditDialog", "lookup failed for ${rd.number}", it) }
                 .getOrNull()
             accountMonths[rd.number] = last
+            val amount = runCatching { accountMonthlyAmountLookup(rd.number) }
+                .onFailure { android.util.Log.w("DefaulterEditDialog", "amount lookup failed for ${rd.number}", it) }
+                .getOrNull()
+            accountAmounts[rd.number] = amount
             if (last == null) continue
             for (row in numbers.filter { it.number == rd.number }) {
                 val current = draft[row.id] ?: continue
@@ -350,6 +364,7 @@ fun DefaulterEditDialog(
     }
     var pendingSkipGap by remember { mutableStateOf<Map<Long, Pair<Int, String?>>?>(null) }
     var skipGapMessage by remember { mutableStateOf<String?>(null) }
+    var overLimitState by remember { mutableStateOf<Triple<Int, Int, Int>?>(null) }
 
     val changedCount = numbers.count { rd ->
         val original = initial[rd.id] ?: return@count false
@@ -441,6 +456,29 @@ fun DefaulterEditDialog(
                                 if (after.count == before.count && after.months == before.months) return@mapNotNull null
                                 rd.id to (after.count to after.encodeOrNull())
                             }.toMap()
+                            // 20K cap check FIRST. Computes ∑(monthly ×
+                            // current draft count) across ALL rows (not
+                            // just changed ones) because the cap is per-
+                            // LOT total, not per-edit. Unverified rows
+                            // (no monthlyAmount) are summed as 0 but
+                            // counted separately so the operator knows
+                            // the figure is a floor.
+                            var totalRupees = 0
+                            var unverifiedCount = 0
+                            numbers.forEach { rd ->
+                                val count = draft[rd.id]?.count ?: rd.monthsPaid
+                                val amount = accountAmounts[rd.number]
+                                if (amount != null && amount > 0) {
+                                    totalRupees += amount * count
+                                } else {
+                                    unverifiedCount++
+                                }
+                            }
+                            if (totalRupees > LOT_TOTAL_LIMIT_RUPEES) {
+                                val excess = totalRupees - LOT_TOTAL_LIMIT_RUPEES
+                                overLimitState = Triple(totalRupees, excess, unverifiedCount)
+                                return@Button
+                            }
                             // Skip-gap detection per user spec: if any
                             // changed row has block_start > nextMonth(
                             // lastPaidThrough), surface a confirm modal
@@ -560,7 +598,86 @@ fun DefaulterEditDialog(
             }
         }
     }
+
+    overLimitState?.let { (totalRupees, excess, unverifiedCount) ->
+        DefaulterOverLimitDialog(
+            totalRupees = totalRupees,
+            excess = excess,
+            unverifiedCount = unverifiedCount,
+            onClose = { overLimitState = null }
+        )
+    }
 }
+
+@Composable
+private fun DefaulterOverLimitDialog(
+    totalRupees: Int,
+    excess: Int,
+    unverifiedCount: Int,
+    onClose: () -> Unit
+) {
+    Dialog(
+        onDismissRequest = onClose,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp),
+            shape = RoundedCornerShape(20.dp),
+            color = Color.White,
+            tonalElevation = 6.dp
+        ) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                Text(
+                    text = stringResource(R.string.defaulter_over_limit_title),
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontWeight = FontWeight.Bold
+                    )
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = stringResource(
+                        R.string.defaulter_over_limit_body,
+                        formatRupeesForDialog(totalRupees),
+                        formatRupeesForDialog(excess)
+                    ),
+                    style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
+                )
+                if (unverifiedCount > 0) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(
+                            R.string.lotreview_over_limit_unverified_note,
+                            unverifiedCount
+                        ),
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = AccentCoral,
+                            fontWeight = FontWeight.Medium
+                        )
+                    )
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+                Button(
+                    onClick = onClose,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentCoral),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        stringResource(R.string.defaulter_over_limit_close),
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun formatRupeesForDialog(value: Int): String =
+    java.text.NumberFormat
+        .getNumberInstance(java.util.Locale.getDefault())
+        .format(value.toLong())
 
 /**
  * Renders the skip-gap warning body. For 1 row with a single gap month:
