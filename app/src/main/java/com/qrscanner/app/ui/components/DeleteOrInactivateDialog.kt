@@ -92,7 +92,10 @@ fun DeleteOrInactivateDialog(
         confirmButton = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Button(
-                    onClick = onMarkInactive,
+                    onClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onMarkInactive()
+                    },
                     colors = ButtonDefaults.buttonColors(containerColor = PrimaryOrange),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth()

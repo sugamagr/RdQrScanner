@@ -37,6 +37,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
@@ -238,20 +241,50 @@ private fun HistoryRow(
     ownDeviceCloudId: String?
 ) {
     val event = group.first()
-    val isOwn = event.originDeviceCloudId != null &&
-        event.originDeviceCloudId == ownDeviceCloudId
+    // LOCAL_* rows are inserted only by this device at the moment of the
+    // action, so they are always "yours" by construction — independent
+    // of whether ownDeviceCloudId / event.originDeviceCloudId are still
+    // null (fresh install pre-sign-in, race between insert and DeviceSettings
+    // hydration, or a future code path that forgets to denormalize the
+    // device id). Falling back to the cloudId match for REMOTE_* /
+    // PORTAL_* rows where the type alone can't tell us.
+    val isLocalAction = event.type == SyncEventType.LOCAL_SESSION_FINALIZED ||
+        event.type == SyncEventType.LOCAL_ACCOUNTS_ADDED ||
+        event.type == SyncEventType.LOCAL_DEFAULTER_EDIT
+    val isOwn = isLocalAction ||
+        (event.originDeviceCloudId != null &&
+            event.originDeviceCloudId == ownDeviceCloudId)
     val actorLabel = resolveActorLabel(event, isOwn)
     val actorTint = actorTintFor(event)
     val actorIcon = actorIconFor(event, isOwn)
     val actionText = describeAction(event, group.size)
     val timestampLabel = formatRelativeTime(event.occurredAt, nowMillis)
 
+    // 3dp leading accent strip on own-action rows so the operator can
+    // scan-read "mine vs theirs" at a glance without parsing each actor
+    // label. Strip is painted via drawBehind (over the SurfaceWhite
+    // background, under the row content) and the leading padding is
+    // ALWAYS 15dp regardless of isOwn so tile widths stay layout-stable
+    // — only the strip appearance differs between own and remote rows.
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .background(SurfaceWhite)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .then(
+                if (isOwn) {
+                    Modifier.drawBehind {
+                        drawRect(
+                            color = PrimaryOrange,
+                            topLeft = Offset.Zero,
+                            size = Size(3.dp.toPx(), size.height)
+                        )
+                    }
+                } else {
+                    Modifier
+                }
+            )
+            .padding(start = 15.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(

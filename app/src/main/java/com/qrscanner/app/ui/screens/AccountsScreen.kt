@@ -61,9 +61,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -119,7 +117,6 @@ fun AccountsScreen(onNavigateBack: () -> Unit) {
     val app = context.applicationContext as QRScannerApp
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
-    val haptics = LocalHapticFeedback.current
 
     val allAccounts by app.database.rdAccountDao().observeAll().collectAsStateWithLifecycle(initialValue = emptyList())
     val activeCount by app.database.rdAccountDao().observeActiveCount().collectAsStateWithLifecycle(initialValue = 0)
@@ -345,7 +342,6 @@ fun AccountsScreen(onNavigateBack: () -> Unit) {
             onMarkInactive = {
                 val target = acc
                 deleting = null
-                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                 scope.launch {
                     val now = System.currentTimeMillis()
                     app.database.rdAccountDao().markInactive(target.rdNumber, now)
@@ -359,7 +355,6 @@ fun AccountsScreen(onNavigateBack: () -> Unit) {
             onDelete = {
                 val target = acc
                 deleting = null
-                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                 scope.launch {
                     val now = System.currentTimeMillis()
                     app.database.rdAccountDao().softDelete(target.rdNumber, now)

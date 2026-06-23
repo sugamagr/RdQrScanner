@@ -617,11 +617,17 @@ private fun TextLinkButton(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
+    // Tertiary-action motion: a 16dp text link wants crisp acknowledgement,
+    // not the playful spring used on primary cards. StiffnessHigh + no
+    // bounce keeps the press feel precise so the smallest tap targets
+    // don't out-animate the loudest ones (inverted motion hierarchy is
+    // the cardinal sin of taste — primary actions should be the most
+    // expressive, not tertiary links).
     val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.94f else 1f,
+        targetValue = if (isPressed) 0.97f else 1f,
         animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMedium
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessHigh
         ),
         label = "linkScale"
     )

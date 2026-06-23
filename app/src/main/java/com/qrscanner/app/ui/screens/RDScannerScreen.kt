@@ -1019,8 +1019,8 @@ private fun RDCameraScreen(
                     colors = ButtonDefaults.buttonColors(
                         containerColor = Color.White.copy(alpha = 0.15f),
                         contentColor = Color.White,
-                        disabledContainerColor = Color.White.copy(alpha = 0.18f),
-                        disabledContentColor = Color.White.copy(alpha = 0.6f)
+                        disabledContainerColor = Color.White.copy(alpha = 0.22f),
+                        disabledContentColor = Color.White.copy(alpha = 0.78f)
                     ),
                     shape = RoundedCornerShape(12.dp)
                 ) {
@@ -1041,7 +1041,7 @@ private fun RDCameraScreen(
                 ) {
                     Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Finish", maxLines = 1)
+                    Text("Save", maxLines = 1)
                 }
 
                 Button(
@@ -1078,7 +1078,7 @@ private fun RDCameraScreen(
                     ) {
                         // Title
                         Text(
-                            text = "Finish LOT $currentLotNumber",
+                            text = "Save LOT $currentLotNumber",
                             style = MaterialTheme.typography.titleLarge.copy(
                                 fontWeight = FontWeight.Bold
                             )
