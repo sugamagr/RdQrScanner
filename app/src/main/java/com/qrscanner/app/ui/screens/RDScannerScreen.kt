@@ -478,12 +478,15 @@ private fun RDCameraScreen(
     }
 
     // Resolve monthly amount for any newly-scanned RD number so the
-    // live-total chip can sum the verified accounts. Missing entries
-    // (no profile yet) are stored as null and surface as 'unverified'
-    // in the chip. Cache survives across LOTs — restarting the LOT
-    // doesn't invalidate prior lookups (they re-resolve only on next
-    // scan of the same number).
-    LaunchedEffect(currentLotNumbers.toList()) {
+    // live-total chip can sum the verified accounts. Keyed on .size
+    // not .toList() — .toList() allocates a fresh list every
+    // recompose so Compose sees the key as 'changed' every frame and
+    // re-launches the effect. Since the LOT mutation flow is append-
+    // only (scans add, finishing/rescanning empties), .size is a
+    // sufficient + stable proxy for 'list changed in a way that
+    // matters'. Removals via undo also bump .size down (see swipe-
+    // delete in the Recently Scanned list).
+    LaunchedEffect(currentLotNumbers.size) {
         val missing = currentLotNumbers.filter { it !in lotAmountCache }
         for (rdNumber in missing) {
             val amount = runCatching {
@@ -1350,7 +1353,14 @@ private fun RDCameraScreen(
                         totalLotsInSession = (totalLotsInSession - 1).coerceAtLeast(0)
                         currentLotNumber = (currentLotNumber - 1).coerceAtLeast(1)
                         currentLotId = null
+                        // Capture BEFORE clearing so we can also remove these
+                        // numbers from the session-level dedup set. Without
+                        // this, the next scan of the same RD fires the
+                        // "already scanned in this session" duplicate guard
+                        // at line ~388 and the operator cannot rescan at all.
+                        val deletedNumbers = currentLotNumbers.toList()
                         currentLotNumbers.clear()
+                        allSessionNumbers.removeAll(deletedNumbers.toSet())
                         scanningEnabledRef.set(true)
                         isScanningRef.set(true)
                         Toast.makeText(
@@ -1608,15 +1618,26 @@ internal data class LiveLotTotal(
     val unverifiedCount: Int
 ) {
     val isAllVerified: Boolean get() = unverifiedCount == 0
+    val isOverLimit: Boolean get() = verifiedRupees > LOT_TOTAL_LIMIT_RUPEES
     val hasContent: Boolean get() = verifiedRupees > 0 || unverifiedCount > 0
 }
 
 @Composable
 private fun LiveLotTotalChip(total: LiveLotTotal) {
-    val accent = if (total.isAllVerified) AccentMint else AccentCoral
-    val rupeeText = java.text.NumberFormat
-        .getNumberInstance(java.util.Locale.getDefault())
-        .format(total.verifiedRupees.toLong())
+    // Coral when either condition fails — unverified rows OR verified
+    // total over cap. QC-H HIGH (Flow 3): operator scanning 5 × ₹5,000
+    // verified accounts previously saw green even though verified =
+    // ₹25,000 > limit. Now the chip flips to coral as soon as either
+    // signal fires.
+    val accent = if (total.isAllVerified && !total.isOverLimit) AccentMint else AccentCoral
+    // Hoist NumberFormat to a remembered instance (was allocated per
+    // recompose — QC-F HIGH). Locale.getDefault() at remember time is
+    // fine for this app: locale changes trigger a configuration change
+    // which recreates the activity + composition.
+    val formatter = remember {
+        java.text.NumberFormat.getNumberInstance(java.util.Locale.getDefault())
+    }
+    val rupeeText = formatter.format(total.verifiedRupees.toLong())
     Row(
         modifier = Modifier
             .fillMaxWidth()

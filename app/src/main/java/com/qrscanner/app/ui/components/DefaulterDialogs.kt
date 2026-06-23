@@ -674,10 +674,13 @@ private fun DefaulterOverLimitDialog(
     }
 }
 
-private fun formatRupeesForDialog(value: Int): String =
-    java.text.NumberFormat
-        .getNumberInstance(java.util.Locale.getDefault())
-        .format(value.toLong())
+@Composable
+private fun formatRupeesForDialog(value: Int): String {
+    val formatter = remember {
+        java.text.NumberFormat.getNumberInstance(java.util.Locale.getDefault())
+    }
+    return formatter.format(value.toLong())
+}
 
 /**
  * Renders the skip-gap warning body. For 1 row with a single gap month:
@@ -1004,14 +1007,14 @@ private fun StepperButton(
         }
     }
 
+    // QC-D LOW: 44dp WCAG-compliant outer touch target wrapping the
+    // 36dp visible chip. Matches the ChipShiftButton + LotReviewScreen
+    // StepperButton pattern. clickable lives on the outer Box so the
+    // entire 44dp area is tappable (the 36dp inner Box is the visual
+    // affordance only).
     Box(
         modifier = Modifier
-            .size(36.dp)
-            .scale(scale)
-            .background(
-                color = if (enabled) Color.White else DisabledBackground,
-                shape = CircleShape
-            )
+            .size(44.dp)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
@@ -1020,11 +1023,22 @@ private fun StepperButton(
             ),
         contentAlignment = Alignment.Center
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = if (enabled) PrimaryOrange else DisabledContent,
-            modifier = Modifier.size(18.dp)
-        )
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .scale(scale)
+                .background(
+                    color = if (enabled) Color.White else DisabledBackground,
+                    shape = CircleShape
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (enabled) PrimaryOrange else DisabledContent,
+                modifier = Modifier.size(18.dp)
+            )
+        }
     }
 }

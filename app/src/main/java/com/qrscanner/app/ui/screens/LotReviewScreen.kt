@@ -372,7 +372,9 @@ private fun ReviewRow(row: LotReviewRow, onUpdateSelected: (List<MonthYear>) -> 
                     style = MaterialTheme.typography.bodySmall.copy(
                         color = if (row.accountName.isNullOrBlank()) TextSecondary else TextPrimary,
                         fontWeight = if (row.accountName.isNullOrBlank()) FontWeight.Normal else FontWeight.Medium
-                    )
+                    ),
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
             }
             Spacer(modifier = Modifier.width(8.dp))
@@ -829,11 +831,18 @@ private fun OverLimitDialog(
  * "20,000" in en-US and "20,000" in hi-IN (Indian grouping uses lakhs:
  * 1,00,000 not 100,000). Symbol stays out of the format; callers
  * prefix the rendered string with their own ₹.
+ *
+ * Composable + remember caches the NumberFormat instance per
+ * composition (QC-F HIGH fix). Locale.getDefault() at remember time
+ * is fine: locale change triggers a config-change → composition
+ * recreate → new formatter.
  */
+@Composable
 private fun formatRupees(value: Int): String {
-    return java.text.NumberFormat
-        .getNumberInstance(java.util.Locale.getDefault())
-        .format(value.toLong())
+    val formatter = remember {
+        java.text.NumberFormat.getNumberInstance(java.util.Locale.getDefault())
+    }
+    return formatter.format(value.toLong())
 }
 
 @Composable

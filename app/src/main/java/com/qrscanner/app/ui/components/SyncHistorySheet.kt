@@ -227,7 +227,9 @@ private fun HistoryRow(event: SyncEvent, nowMillis: Long) {
                         fontWeight = FontWeight.SemiBold,
                         color = TextPrimary
                     ),
-                    modifier = Modifier.weight(1f, fill = false)
+                    modifier = Modifier.weight(1f, fill = false),
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(

@@ -1035,7 +1035,7 @@ Three triggers ship in v1, all selected by owner. Each is a distinct channel for
 **Channel A — `sync_success` (NotificationManager.IMPORTANCE_LOW):**
 - Fires when **this phone's** push succeeds for a finalized session.
 - Title: `"Session #47 synced"`.
-- Body: `"12 LOTs, 247 RD numbers uploaded · Counter Phone"`.
+- Body: `"12 LOTs, 247 RD numbers uploaded by Ravi"` — `%3$s` is the actor label (operator name preferred, device name fallback, blank if neither). Format updated in a9a53b2 from `· Counter Phone` (device name only) to `by Ravi` (operator-prefer chain matching `RemoteEditNotice.originLabel`).
 - Tap → opens app to that session's detail.
 - Silent (no sound), no vibration.
 - Auto-cancel on tap.
@@ -1050,15 +1050,18 @@ Three triggers ship in v1, all selected by owner. Each is a distinct channel for
 - Re-fires every additional 6 failures (not every retry) to avoid spam.
 
 **Channel C — `remote_edit` (NotificationManager.IMPORTANCE_LOW):**
-- Fires when a portal-side defaulter edit lands on this phone via pull/realtime.
-- Title: `"Owner edited a session"`.
-- Body: `"Session #42 · 3 defaulter months updated"`.
-- Tap → opens app to that session's detail.
+- Fires when a remote-originated edit lands on this phone via pull/realtime. Three event types are supported (`SyncEventType.REMOTE_SESSION_FINALIZED`, `REMOTE_DEFAULTER_EDIT` / `PORTAL_DEFAULTER_EDIT`, `REMOTE_SESSION_DELETED`).
+- Titles differ per type — see `notif_remote_session_finalized_title`, `notif_remote_defaulter_edit_title`, `notif_remote_session_deleted_title`.
+- Bodies use the operator-prefer originLabel:
+  - Finalized: `"Ravi finished a session on another phone."` (`notif_remote_session_finalized_body`)
+  - Defaulter edit: `"Ravi edited defaulter months."` (`notif_remote_defaulter_edit_body`)
+  - Deleted: `"Removed by Ravi."` (`notif_remote_session_deleted_body`)
+- Tap → opens app.
 - Silent, no vibration.
 - Auto-cancel on tap.
-- Multi-edit aggregation: edits to same session within 30s collapse to a single notification with updated count.
+- Notification id is deterministic from `(type.ordinal, displayNumber % 100_000)` so successive edits to the same (type, session) tuple collapse rather than stack.
 
-**Cross-device session-finalized notifications** (the one you decided NOT to ship): NOT in v1. Phone A finalizing a session shows up only in Phone B's in-app banner, not in its system tray. Defensible because finalizations are frequent and the banner is enough surface area. Reconsider in v2 if you ever say "I missed that Phone B uploaded".
+**Reversal of the v1 "no cross-device session-finalized" decision** (a9a53b2): Phone A finalizing a session DOES now push a Channel C notification to Phone B (`REMOTE_SESSION_FINALIZED`). The original "banner is enough" stance turned out to under-surface critical handoffs in 2-phone shops. The banner remains the primary in-app affordance; the tray notification is the persistent record. Multi-edit aggregation to the same session within 30s still applies.
 
 ### 15.5.3 Permission flow
 
@@ -1084,15 +1087,17 @@ For API < 33: skip the screen entirely. Notifications work without runtime permi
 All strings live in `res/values/strings.xml` (English) and `res/values-hi/strings.xml` (Hindi). Pattern:
 
 ```xml
-<string name="notif_sync_success_title">Session #%d synced</string>
-<string name="notif_sync_success_body">%1$d LOTs, %2$d RD numbers uploaded · %3$s</string>
+<string name="notif_sync_success_title">Session #%1$d synced</string>
+<string name="notif_sync_success_body">%1$d LOTs, %2$d RD numbers uploaded by %3$s</string>
 ```
 
 ```xml
 <!-- values-hi -->
-<string name="notif_sync_success_title">सेशन #%d सिंक हो गया</string>
-<string name="notif_sync_success_body">%1$d LOTs, %2$d RD numbers अपलोड किए गए · %3$s</string>
+<string name="notif_sync_success_title">सेशन #%1$d सिंक हो गया</string>
+<string name="notif_sync_success_body">%3$s ने %1$d LOT, %2$d RD नंबर अपलोड किए</string>
 ```
+
+The Hindi body uses positional reordering (`%3$s` before `%1$d`) so the ergative "ने" particle attaches to the actor name correctly — verified by C11-P5 native-speaker review and reinforced by the §15.5.11 design rule.
 
 `NotificationCompat.Builder` reads from string resources via `context.getString(R.string.xxx, args...)`. Locale is auto-resolved from device settings; no manual locale handling needed.
 
@@ -1275,6 +1280,71 @@ NB on Hindi: ergative "ने" deliberately omitted from the templates above. Th
 **Rotation contract:** `showHistorySheet` is `remember { mutableStateOf(false) }` (NOT `rememberSaveable`) — rotating mid-sheet closes it. Acceptable since the sheet is a transient view and the bell remains tappable to re-open.
 
 **Why this exists separate from §15.5.1 banner:** Banner is ephemeral, bounded to 3 lines, dismissable, designed for "what changed since I last looked". Sheet is the persistent receipt log with unbounded scroll-back, designed for "I want to audit who did what across the last week". Two complementary surfaces, one shared watermark.
+
+### 15.5.12 Per-LOT ₹20,000 cap enforcement (v8.2 amendment, 253819c)
+
+Mirrors the portal's per-LOT total limit on the phone so over-limit LOTs are caught BEFORE sync would reject them. Per-LOT, **not** per-session.
+
+**Cap rule:** `Σ (RdAccount.monthlyAmount × monthsPaid)` across every row in a LOT must not exceed ₹20,000. The sum is enforced on the **verified** total only — rows whose `RdAccount.monthlyAmount` is null or zero (no profile yet) are excluded from the sum but counted separately.
+
+**Enforcement surfaces:**
+1. `LotReviewScreen.OverLimitDialog` (in-flight LOT, post-scan, pre-finalize). Fires on **Confirm** tap before the regression-confirm flow. Two actions:
+   - **Cancel** → return to review screen so operator can reduce month counts.
+   - **Rescan this LOT** → tear down + return to scanner at the same LOT number (see *Rescan semantic* below).
+2. `DefaulterEditDialog.DefaulterOverLimitDialog` (post-finalize edit from `SessionDetailScreen`). Fires on **Save** tap before the existing skip-gap-confirm flow. Single action:
+   - **Got it** → dismiss + return to dialog so operator can reduce counts. No rescan because the session is already finalized.
+
+**Live signal on `LotReviewScreen`:** `LotTotalLine` above the Confirm button shows `Total: ₹X · limit ₹20,000` (mint when under) or `Total ₹X exceeds ₹20,000 limit` (coral when over) plus a `N without profile not counted` line when unverified rows exist. Operator self-corrects before tapping Confirm.
+
+**Rescan semantic** (locked Q3 decision, 253819c):
+- The deleted LOT keeps its number (operator re-attempts LOT N, doesn't advance to N+1).
+- `rdNumberDao.deleteForLot(lotId)` (hard delete on local-only rows — the LOT was never finalized so it has no cloudId), then `scanLotDao.deleteIfEmpty(lotId)` (race-safe variant in case another device's realtime push lands an insert mid-deletion).
+- `scanSessionDao.setActiveLotId(session.id, null)` releases the parent session's active-LOT pin.
+- `totalLotsInSession--` + `currentLotNumber--` both `coerceAtLeast` their floor (0 and 1 respectively).
+- `currentLotNumbers.clear()` AND `allSessionNumbers.removeAll(deletedNumbers)` — both must run, otherwise the next rescan of the same RD number trips the session-level dedup guard and the rescan is dead-locked (QC-H CRITICAL caught this gap).
+- **Prior LOTs in the session stay intact.** This is a user-facing contract operators rely on.
+
+**Locked product decisions** (5 from 253819c product Q&A):
+- Q1 unverified rows = warn-but-skip (count only profile rows in the cap check).
+- Q2 live running total in confirm bar = yes.
+- Q3 after Rescan = same LOT number (re-attempt, don't advance).
+- Q4 popup breakdown = total + excess only (no per-row breakdown, no top-3).
+- Q5 same check on SessionDetail edit = yes.
+
+**Client-side enforcement only in v1.** A modified APK could bypass by writing directly to the cloud DTO upsert path. Acceptable for the single-owner trusted-employee threat model per spec §5; revisit in v2 with a Postgres CHECK constraint or Supabase Edge Function if untrusted devices become a concern (QC-E LOW finding).
+
+### 15.5.13 Live LOT total chip on scanner (v8.2 amendment, 40dbdf5)
+
+Running rupee total of the current LOT displayed below the existing 4-stat row (`Current LOT / In LOT / Saved LOTs / Total RD`) at the top of the scanner viewport.
+
+**Visual contract:**
+- Full-width chip, `RoundedCornerShape(12.dp)`, dark-overlay background (`accent.copy(alpha = 0.22f)`).
+- **Mint** (`AccentMint`) when ALL of these hold: every scanned account has a profile with positive `monthlyAmount` AND `verifiedRupees <= LOT_TOTAL_LIMIT_RUPEES`. Chip reads `₹X`.
+- **Coral** (`AccentCoral`) when EITHER condition fails: any row is unverified OR verified total is over the cap. Chip reads `₹X` (verified) or `₹X · N unverified` (when unverified > 0).
+- 8dp accent dot prefix + locale-aware grouped rupee text (`NumberFormat.getNumberInstance(Locale.getDefault())` — Indian grouping renders `20,000` correctly).
+- `AnimatedVisibility(fadeIn() + expandVertically())` / `(fadeOut() + shrinkVertically())` on `LiveLotTotal.hasContent` transitions.
+- Hidden when `currentLotNumbers.isEmpty()` — clean pre-scan view.
+
+**Compute** (`liveLotTotal: derivedStateOf`):
+```kotlin
+val verified = currentLotNumbers.sumOf { rdNumber ->
+    val amount = lotAmountCache[rdNumber]
+    if (amount != null && amount > 0) amount else 0
+}
+val unverified = currentLotNumbers.count { rdNumber ->
+    lotAmountCache[rdNumber].let { it == null || it <= 0 }
+}
+```
+
+`monthsPaid` is always 1 at scan time (defaulter counts are picked later on `LotReviewScreen`), so the scan-time formula reduces to `Σ monthlyAmount` for verified rows.
+
+**Cache** (`lotAmountCache: SnapshotStateMap<String, Int?>`):
+- Populated by `LaunchedEffect(currentLotNumbers.size)` (NOT `.toList()` — `.toList()` allocates a new instance every recompose and would re-fire the effect on every frame; QC-F CRITICAL caught this).
+- Each new scan triggers a `rdAccountDao.findByRdNumber(rdNumber)?.monthlyAmount` lookup; missing entries stored as null and surface as 'unverified'.
+- Cache survives across LOTs in the same session (re-scanning a known customer hits the cache immediately, no red-flash).
+- **Known limitation:** cache is not invalidated on `Lifecycle.onResume` after the operator navigates to `AddAccountsScreen` to add a profile and returns. The chip continues to show the row as unverified until LOT is finished/rescanned. `LotReviewScreen` re-resolves fresh on entry. Tracked as low-priority follow-up.
+
+**Why same line as the existing 4-stat row + AnimatedVisibility:** Compact during empty LOTs (4 stats only, no chip clutter), but instantly informative the moment the operator scans the first RD. Per locked Q2 ("live running total = yes") + the user spec ("show the total live in a top while scanning of current lot only").
 
 ---
 
