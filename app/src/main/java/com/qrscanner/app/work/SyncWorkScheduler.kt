@@ -1,6 +1,7 @@
 package com.qrscanner.app.work
 
 import android.content.Context
+import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
@@ -53,6 +54,22 @@ class SyncWorkScheduler(context: Context) {
     fun cancelAll() {
         workManager.cancelUniqueWork(SyncPushWorker.UNIQUE_WORK_NAME)
         workManager.cancelUniqueWork(SyncPullWorker.UNIQUE_WORK_NAME)
+    }
+
+    /**
+     * Schedule the daily [SyncEventPruneWorker] to enforce the sync_events
+     * table's 100-row / 7-day retention cap. Idempotent: KEEP policy
+     * means subsequent calls are no-ops, so it's safe to invoke on every
+     * app launch from MainActivity. Without this scheduling call the
+     * table grows unbounded — the DAO's pruneOldEvents query is defined
+     * but never executed.
+     */
+    fun scheduleEventPruning() {
+        workManager.enqueueUniquePeriodicWork(
+            SyncEventPruneWorker.UNIQUE_WORK_NAME,
+            ExistingPeriodicWorkPolicy.KEEP,
+            SyncEventPruneWorker.buildRequest()
+        )
     }
 
     /**

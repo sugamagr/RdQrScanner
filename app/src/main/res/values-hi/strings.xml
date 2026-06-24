@@ -24,6 +24,10 @@
         <item quantity="one">%d सेशन अटका है · रिट्राई के लिए टैप करें</item>
         <item quantity="other">%d सेशन अटके हैं · रिट्राई के लिए टैप करें</item>
     </plurals>
+    <plurals name="lotreview_months_label">
+        <item quantity="one">%d महीना</item>
+        <item quantity="other">%d महीने</item>
+    </plurals>
     <string name="notif_remote_session_finalized_title">सेशन #%1$d सिंक हुआ</string>
     <string name="notif_remote_session_finalized_body">%1$s ने दूसरे फ़ोन पर सेशन पूरा किया।</string>
     <string name="notif_remote_defaulter_edit_title">सेशन #%1$d अपडेट हुआ</string>
@@ -98,9 +102,6 @@
     <string name="sync_history_row_actor_portal">पोर्टल</string>
     <string name="sync_history_row_actor_other_phone">दूसरा फ़ोन</string>
     <string name="sync_history_row_actor_you">आप</string>
-    <string name="sync_history_row_session_finalized">सेशन #%1$s फ़ाइनल किया</string>
-    <string name="sync_history_row_defaulter_edit">सेशन #%1$s के डिफ़ॉल्टर अपडेट किए</string>
-    <string name="sync_history_row_session_deleted">सेशन #%1$s डिलीट किया</string>
     <string name="sync_history_row_repeat_suffix">%1$s (×%2$d)</string>
     <string name="sync_history_fallback_finalized">सेशन फ़ाइनल किया</string>
     <string name="sync_history_fallback_defaulter_edit">डिफ़ॉल्टर महीने एडिट किए</string>
@@ -128,7 +129,7 @@
     <string name="lotreview_subtitle_many">%1$d अकाउंट · महीना चुनें, +/- से और जोड़ें</string>
     <string name="lotreview_no_profile">(अभी प्रोफ़ाइल नहीं)</string>
     <string name="lotreview_last_paid">आखिरी पेड: %1$s तक</string>
-    <string name="lotreview_months_label">%1$d महीने</string>
+
     <string name="lotreview_stepper_decrease">महीने की संख्या घटाएँ</string>
     <string name="lotreview_stepper_increase">महीने की संख्या बढ़ाएँ</string>
     <string name="lotreview_confirm_one">1 एंट्री कन्फर्म करें</string>

@@ -19,13 +19,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.automirrored.filled.EventNote
 import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Smartphone
+import androidx.compose.material.icons.filled.PersonAddAlt1
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -33,7 +32,11 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,6 +46,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -83,7 +88,18 @@ fun SyncHistorySheet(
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val nowMillis = remember { System.currentTimeMillis() }
+    // Periodically refresh nowMillis so relative-time labels ("2 min
+    // ago") don't freeze when the operator leaves the sheet open. A
+    // 30-second cadence catches the minute-rollover boundary within
+    // 30s — finer than humans can notice on labels rounded to whole
+    // minutes anyway.
+    var nowMillis by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(timeMillis = 30_000L)
+            nowMillis = System.currentTimeMillis()
+        }
+    }
     val grouped = remember(events) { groupForDisplay(events) }
 
     ModalBottomSheet(
@@ -256,7 +272,7 @@ private fun HistoryRow(
             event.originDeviceCloudId == ownDeviceCloudId)
     val actorLabel = resolveActorLabel(event, isOwn)
     val actorTint = actorTintFor(event)
-    val actorIcon = actorIconFor(event, isOwn)
+    val typeIcon = typeIconFor(event)
     val actionText = describeAction(event, group.size)
     val timestampLabel = formatRelativeTime(event.occurredAt, nowMillis)
 
@@ -266,6 +282,11 @@ private fun HistoryRow(
     // background, under the row content) and the leading padding is
     // ALWAYS 15dp regardless of isOwn so tile widths stay layout-stable
     // — only the strip appearance differs between own and remote rows.
+    //
+    // semantics(mergeDescendants = true) groups all three child Texts
+    // into one TalkBack announcement so the screen reader speaks
+    // "You finalized Session #7, just now" as a single item instead
+    // of three separate fragments.
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -284,9 +305,16 @@ private fun HistoryRow(
                     Modifier
                 }
             )
-            .padding(start = 15.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
+            .padding(start = 15.dp, end = 12.dp, top = 10.dp, bottom = 10.dp)
+            .semantics(mergeDescendants = true) {
+                contentDescription = "$actorLabel, $actionText, $timestampLabel"
+            },
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // Type-specific icon (CheckCircle / Edit / Delete / PersonAdd)
+        // is the color-blind backup for actorTint — Protanopia users
+        // (~8% of males) can't distinguish mint vs amber, so we rely
+        // on icon SHAPE instead of just hue to communicate event type.
         Box(
             modifier = Modifier
                 .size(40.dp)
@@ -295,7 +323,7 @@ private fun HistoryRow(
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                imageVector = actorIcon,
+                imageVector = typeIcon,
                 contentDescription = null,
                 tint = actorTint,
                 modifier = Modifier.size(20.dp)
@@ -378,11 +406,22 @@ private fun describeAction(event: SyncEvent, repeatCount: Int): String {
     }
 }
 
-private fun actorIconFor(event: SyncEvent, isOwn: Boolean): ImageVector = when {
-    isOwn -> Icons.Default.Person
-    event.originDeviceCloudId == null -> Icons.Default.Computer
-    !event.originOperatorName.isNullOrBlank() -> Icons.Default.Person
-    else -> Icons.Default.Smartphone
+/**
+ * Maps an event to a type-distinct icon so color-blind users have a
+ * shape-based backup signal in addition to [actorTintFor]. Each event
+ * type gets a glyph that semantically matches the action (CheckCircle
+ * for finalized, Edit for defaulter edits, DeleteOutline for deletes,
+ * PersonAdd for accounts added). The actor "who" info still lives in
+ * the actorLabel text, so the icon is free to communicate "what".
+ */
+private fun typeIconFor(event: SyncEvent): ImageVector = when (event.type) {
+    SyncEventType.REMOTE_SESSION_FINALIZED,
+    SyncEventType.LOCAL_SESSION_FINALIZED -> Icons.Default.CheckCircle
+    SyncEventType.REMOTE_DEFAULTER_EDIT,
+    SyncEventType.PORTAL_DEFAULTER_EDIT,
+    SyncEventType.LOCAL_DEFAULTER_EDIT -> Icons.Default.Edit
+    SyncEventType.REMOTE_SESSION_DELETED -> Icons.Default.DeleteOutline
+    SyncEventType.LOCAL_ACCOUNTS_ADDED -> Icons.Default.PersonAddAlt1
 }
 
 private fun actorTintFor(event: SyncEvent): Color = when (event.type) {

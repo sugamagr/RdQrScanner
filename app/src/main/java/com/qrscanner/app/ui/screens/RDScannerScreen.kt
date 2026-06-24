@@ -1400,6 +1400,12 @@ private fun RDCameraScreen(
                         val deletedNumbers = currentLotNumbers.toList()
                         currentLotNumbers.clear()
                         allSessionNumbers.removeAll(deletedNumbers.toSet())
+                        // Also drop cached monthlyAmount entries for
+                        // the discarded LOT so a future rescan re-
+                        // resolves from rd_accounts (catches any
+                        // amount edits that landed between the
+                        // original scan + the rescan).
+                        lotAmountCache.keys.removeAll(deletedNumbers.toSet())
                         scanningEnabledRef.set(true)
                         isScanningRef.set(true)
                         Toast.makeText(
@@ -1590,18 +1596,20 @@ private fun LiveLotTotalChip(total: LiveLotTotal) {
         java.text.NumberFormat.getNumberInstance(java.util.Locale.getDefault())
     }
     val rupeeText = formatter.format(total.verifiedRupees.toLong())
-    // QC C13-D LOW: white text on accent-22% alpha passed WCAG AA on
-    // dark indoor camera (16:1) but failed on bright outdoor / white
-    // camera feed (1.16-1.25:1). Layered black-30% underlay below
-    // accent-22% guarantees a darker effective background (~45% black
-    // composited) regardless of camera content. Slight darkening of
-    // the indoor chip is the acceptable trade-off for guaranteed
-    // outdoor readability.
+    // Single solid-dark background (Black @ 0.85f) so white text
+    // stays legible against any camera content — bright outdoor (white
+    // walls, sky), dim indoor, or shifting reflections. The previous
+    // layered Black@0.30 + accent@0.22 combo composited to ~0.46
+    // luminance over a white camera feed (~1.4:1 white-text contrast
+    // = unreadable, WCAG BLOCKER). Solid 0.85 composites to ~0.15
+    // luminance worst-case (5.25:1) and ~0.06 best-case (9.5:1) —
+    // both pass AA. Accent now lives only in the indicator dot
+    // (line below), so the operator still gets color-coded state
+    // signaling without relying on the chip background.
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color.Black.copy(alpha = 0.30f), RoundedCornerShape(12.dp))
-            .background(accent.copy(alpha = 0.22f), RoundedCornerShape(12.dp))
+            .background(Color.Black.copy(alpha = 0.85f), RoundedCornerShape(12.dp))
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center

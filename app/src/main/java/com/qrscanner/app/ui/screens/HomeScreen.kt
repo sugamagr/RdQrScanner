@@ -160,7 +160,16 @@ fun HomeScreen(
             val deviceSettings by app.database.deviceSettingsDao().observe()
                 .collectAsStateWithLifecycle(initialValue = null)
             val ownDeviceCloudId = deviceSettings?.deviceCloudId
-            val bannerSeenAt = deviceSettings?.lastBannerSeenAt ?: 0L
+            // Clock-skew guard: if device clock was ahead and NTP
+            // corrected backward, lastBannerSeenAt could be in the
+            // future. observeEventsSince(future) would return zero
+            // even when real events exist, stranding the bell badge
+            // at 0. Clamp to current wall-clock so the watermark is
+            // always reachable by events.
+            val storedBannerSeenAt = deviceSettings?.lastBannerSeenAt ?: 0L
+            val bannerSeenAt = remember(storedBannerSeenAt) {
+                storedBannerSeenAt.coerceAtMost(System.currentTimeMillis())
+            }
             val rawRecentEvents by app.database.syncEventDao()
                 .observeEventsSince(since = bannerSeenAt, limit = 20)
                 .collectAsStateWithLifecycle(initialValue = emptyList())

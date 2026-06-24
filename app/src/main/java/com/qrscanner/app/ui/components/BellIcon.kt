@@ -40,7 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.qrscanner.app.R
-import com.qrscanner.app.ui.theme.AccentCoral
+import com.qrscanner.app.ui.theme.AccentCoralDark
 import com.qrscanner.app.ui.theme.TextSecondary
 
 /**
@@ -119,7 +119,7 @@ private fun BellBadge(count: Int) {
     Box(
         modifier = Modifier
             .sizeIn(minWidth = 16.dp, minHeight = 16.dp)
-            .background(AccentCoral, RoundedCornerShape(8.dp))
+            .background(AccentCoralDark, RoundedCornerShape(8.dp))
             .padding(horizontal = 4.dp),
         contentAlignment = Alignment.Center
     ) {

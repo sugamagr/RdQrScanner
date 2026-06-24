@@ -26,6 +26,12 @@ class MainActivity : ComponentActivity() {
 
         val app = application as QRScannerApp
 
+        // Schedule the daily sync_events pruning worker. Idempotent
+        // (KEEP policy) so calling on every launch is safe. Without
+        // this, the sync_events DAO's pruneOldEvents query is defined
+        // but never executed and the table grows unbounded.
+        app.syncScheduler.scheduleEventPruning()
+
         // Phase 3 T3.4: realtime subscription + lifecycle-scoped 5-min poll.
         // repeatOnLifecycle(STARTED) means both children cancel when the
         // activity goes to STOPPED and restart when STARTED again — no

@@ -14,6 +14,14 @@ val PrimaryBlueDark = PrimaryOrangeDark
 
 // Accent Colors
 val AccentCoral = Color(0xFFFF6B6B)
+
+// Darker coral used specifically for the bell unread badge so
+// white 10sp text passes WCAG AA (4.5:1 small text). #DC2626
+// (red-600) has luminance ~0.133, giving 5.43:1 white contrast.
+// Kept separate from AccentCoral so non-badge usages preserve the
+// brand's friendlier coral tone.
+val AccentCoralDark = Color(0xFFDC2626)
+
 val AccentMint = Color(0xFF4ECDC4)
 val AccentGold = Color(0xFFFFD93D)
 

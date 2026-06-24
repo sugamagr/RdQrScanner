@@ -32,8 +32,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -111,6 +113,13 @@ fun SyncStatusPill(
             .semantics {
                 role = Role.Button
                 contentDescription = a11yDescription
+                // Polite live region so TalkBack announces sync state
+                // transitions (PENDING → SYNCING → SYNCED, ERROR
+                // appearance) without the operator having to re-focus
+                // the pill. Polite (vs Assertive) waits for the
+                // current speech to finish, avoiding interruptions
+                // mid-action.
+                liveRegion = LiveRegionMode.Polite
             }
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {

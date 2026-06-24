@@ -140,7 +140,16 @@ fun SessionDetailScreen(
             val lot = lots.firstOrNull { it.id == targetId }
             if (lot != null) {
                 editorBaseRows = null
-                editorBaseRows = LotReviewBuilder.build(app, lot.id, lot.timestamp)
+                val built = LotReviewBuilder.build(app, lot.id, lot.timestamp)
+                // Discard stale results from a rapid LOT switch. Compose
+                // cancels the previous LaunchedEffect coroutine on key
+                // change, but Room's suspend DAO calls are NOT
+                // cooperative with cancellation — they run to completion
+                // and CAN return a result for an editingLotId that has
+                // since changed. Re-check before publishing to state.
+                if (editingLotId == targetId) {
+                    editorBaseRows = built
+                }
             } else {
                 // editingLotId points to a LOT that no longer exists
                 // — most likely an FK cascade from a session tombstone

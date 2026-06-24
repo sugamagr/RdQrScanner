@@ -54,6 +54,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -275,7 +277,17 @@ fun LotReviewScreen(
         derivedStateOf { computeLotTotal(rows) }
     }
 
-    Surface(modifier = Modifier.fillMaxSize(), color = BackgroundWhite) {
+    // paneTitle tells TalkBack this is a new screen pane so focus
+    // moves into it on appearance instead of remaining on the
+    // parent (RDScannerScreen or SessionDetailScreen). The screen
+    // reader announces "LOT #N review" when the overlay opens.
+    val paneTitleText = stringResource(R.string.lotreview_title, lotNumber)
+    Surface(
+        modifier = Modifier
+            .fillMaxSize()
+            .semantics { paneTitle = paneTitleText },
+        color = BackgroundWhite
+    ) {
         Column(modifier = Modifier.fillMaxSize()) {
             ReviewHeader(
                 lotNumber = lotNumber,
@@ -634,7 +646,9 @@ private fun CountStepper(count: Int, onCountChange: (Int) -> Unit) {
             contentAlignment = Alignment.Center
         ) {
             Text(
-                text = stringResource(R.string.lotreview_months_label, count),
+                text = androidx.compose.ui.res.pluralStringResource(
+                    R.plurals.lotreview_months_label, count, count
+                ),
                 style = MaterialTheme.typography.titleSmall.copy(
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
@@ -1342,7 +1356,14 @@ data class LotTotal(
     val totalRows: Int,
     val limit: Int = LOT_TOTAL_LIMIT_RUPEES
 ) {
-    val isOver: Boolean get() = verifiedRupees > limit
+    // Cap is inclusive: exactly the limit value triggers the
+    // OverLimit dialog. The portal's policy rejects when total >=
+    // limit, so the phone must do the same — using `>` strictly
+    // greater would allow exactly ₹20,000 LOTs through phone
+    // validation only to have the portal reject them at sync. A
+    // future product call to allow exactly-the-limit lots can
+    // change this to `>` and align the portal in lockstep.
+    val isOver: Boolean get() = verifiedRupees >= limit
     val excess: Int get() = (verifiedRupees - limit).coerceAtLeast(0)
     val hasAnyVerified: Boolean get() = totalRows > unverifiedRowCount
 }
@@ -1415,7 +1436,14 @@ object LotReviewBuilder {
                 accountLastPaidThrough = accountLastPaid,
                 accountMonthlyAmount = account?.monthlyAmount,
                 selected = selected,
-                originalSelected = selected
+                // originalSelected reflects the DB's ACTUAL stored
+                // state, not the UI's auto-suggested default. For
+                // rows with no stored monthsList (just-scanned RDs),
+                // baseline is empty — so confirming the auto-anchor
+                // counts as a real edit and advances lastPaidThrough.
+                // Using `selected` here was the regression that
+                // silently dropped the scan-and-confirm advance.
+                originalSelected = existing?.sorted() ?: emptyList()
             )
         }
     }

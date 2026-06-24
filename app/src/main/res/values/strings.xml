@@ -24,6 +24,10 @@
         <item quantity="one">%d session waiting · tap to retry</item>
         <item quantity="other">%d sessions waiting · tap to retry</item>
     </plurals>
+    <plurals name="lotreview_months_label">
+        <item quantity="one">%d mo</item>
+        <item quantity="other">%d mo</item>
+    </plurals>
     <string name="notif_remote_session_finalized_title">Session #%1$d synced</string>
     <string name="notif_remote_session_finalized_body">%1$s finished a session on another phone.</string>
     <string name="notif_remote_defaulter_edit_title">Session #%1$d updated</string>
@@ -97,9 +101,6 @@
     <string name="sync_history_row_actor_portal">Portal</string>
     <string name="sync_history_row_actor_other_phone">Another phone</string>
     <string name="sync_history_row_actor_you">You</string>
-    <string name="sync_history_row_session_finalized">finalized Session #%1$s</string>
-    <string name="sync_history_row_defaulter_edit">updated defaulters on Session #%1$s</string>
-    <string name="sync_history_row_session_deleted">deleted Session #%1$s</string>
     <string name="sync_history_row_repeat_suffix">%1$s (×%2$d)</string>
     <string name="sync_history_fallback_finalized">finalized a session</string>
     <string name="sync_history_fallback_defaulter_edit">edited defaulter months</string>
@@ -127,7 +128,7 @@
     <string name="lotreview_subtitle_many">%1$d accounts · tap to pick month, +/- to add</string>
     <string name="lotreview_no_profile">(no profile yet)</string>
     <string name="lotreview_last_paid">Last paid: through %1$s</string>
-    <string name="lotreview_months_label">%1$d mo</string>
+
     <string name="lotreview_stepper_decrease">Decrease month count</string>
     <string name="lotreview_stepper_increase">Increase month count</string>
     <string name="lotreview_confirm_one">Confirm 1 entry</string>
