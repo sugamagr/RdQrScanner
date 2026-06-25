@@ -1356,14 +1356,17 @@ data class LotTotal(
     val totalRows: Int,
     val limit: Int = LOT_TOTAL_LIMIT_RUPEES
 ) {
-    // Cap is inclusive: exactly the limit value triggers the
-    // OverLimit dialog. The portal's policy rejects when total >=
-    // limit, so the phone must do the same — using `>` strictly
-    // greater would allow exactly ₹20,000 LOTs through phone
-    // validation only to have the portal reject them at sync. A
-    // future product call to allow exactly-the-limit lots can
-    // change this to `>` and align the portal in lockstep.
-    val isOver: Boolean get() = verifiedRupees >= limit
+    // Cap is EXCLUSIVE — portal contract per spec D24 / §15.5.12
+    // is `Σ <= 20,000`, so exactly ₹20,000 IS allowed by the
+    // portal and the phone must mirror that. Using `>=` here was
+    // a regression I shipped in commit 9824fed that wrongly
+    // rejected exactly-the-limit LOTs the portal would have
+    // accepted. The matching live-total chip at
+    // RDScannerScreen.kt:1579 already uses `>`, so this also
+    // restores phone/chip consistency. If the portal contract
+    // ever changes to `<` (strict), both phone surfaces flip
+    // together via this single const.
+    val isOver: Boolean get() = verifiedRupees > limit
     val excess: Int get() = (verifiedRupees - limit).coerceAtLeast(0)
     val hasAnyVerified: Boolean get() = totalRows > unverifiedRowCount
 }
