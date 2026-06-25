@@ -144,7 +144,7 @@ Every architectural choice that an outsider would reasonably question. If you fi
 | D21 | **`last_paid_through` is monotonic-only on push** (v8) | Defends against out-of-order replay overwriting a more recent payment with a stale one. Enforced client-side at `RdAccountDao.updateLastPaidThroughMonotonic` with `WHERE lastPaidThrough IS NULL OR lastPaidThrough < :newMonth` — only strictly-greater values reach the cloud upsert at all. Cloud-side `SET last_paid_through = GREATEST(...)` trigger was considered but rejected: client-side prevents the write entirely rather than silently discarding it (safer pattern for a single-owner deployment + makes the regression attempt observable via DAO no-op rowsAffected = 0). See §17. | Allow regression (rejected — violates payment history integrity). Cloud-side GREATEST trigger (rejected — silent discard is less debuggable than client-side block). Server-side Edge Function validation (deferred per Q9). |
 | D22 | **Portal NEVER edits `last_paid_through`** (v8) | The field is a phone-derived signal only — it's the receipt of payment, which only happens at scan time. Letting the portal edit it would create a "who's authoritative?" ambiguity with no clear winner and zero operator benefit. The edit dialog form has no field for it; the `updateAccount` query payload never includes it. See §17. | Portal can edit (rejected — creates conflict surface with no clear winner). |
 | D23 | **Operator-explicit `last_paid_through` regression IS allowed via confirm UX** (v8.1) | User contract: *"paper book is truth"* — when last month's record was wrong, the operator must be able to correct backward. D21's strict-monotonic guard silently dropped past-month corrections, violating that contract. Now: (1) `RdAccountDao.setLastPaidThroughExplicit()` writes any value without the `WHERE < :newMonth` guard; (2) `RdAccountDao.clearLastPaidThrough()` resets to NULL ("never paid"); (3) both the LOT review (RDScannerScreen) and the Accounts edit dialog detect regressions via `LotReviewRow.isRegression` / `PaidTillEdit.SetTo.isRegression` and surface a confirm modal before writing. **D21's monotonic rule now applies only to auto-scan-driven advances via `updateLastPaidThroughMonotonic`; operator-explicit edits bypass it after confirmation.** D22 still holds — portal stays read-only on this field. | Silent regression (rejected — operator must confirm). Block all regression (rejected — violates "paper book is truth"). Cloud-side LWW with portal-edit allowed (rejected — would re-open the D22 conflict surface). |
-| D24 | **Per-LOT ₹20,000 total cap enforced client-side only** (v8.2) | Mirrors the portal's per-LOT total limit on the phone so over-limit LOTs are caught before sync would reject them at the portal-edit boundary. Cap rule: `Σ (RdAccount.monthlyAmount × monthsPaid) <= 20,000` across every row in a LOT, summing the *verified* total only — rows without a profile are counted separately and surfaced to the operator with a "real figure may be higher" hint. Enforced on `LotReviewScreen` (in-flight Confirm → Cancel or Rescan-this-LOT actions, same LOT number preserved on rescan) and on `DefaulterEditDialog` for post-finalize edits (close-only popup since the session is already finalized). Client-side only in v1 — a modified APK could in theory bypass by direct cloud upsert. Acceptable for the single-owner trusted-employee threat model per §5; revisit in v2 with a Postgres CHECK constraint or Edge Function if untrusted devices become a concern. See §15.5.12 + §15.5.13 (live total chip) for the visual + semantic contracts. | Server-side CHECK constraint (deferred to v2 if untrusted devices become a concern). Supabase Edge Function validation (deferred — same v2 trigger). Cloud-side soft cap with warning-only (rejected — phone catching this pre-sync is the right UX, not after-the-fact rejection). |
+| D24 | **Per-LOT ₹20,000 total cap enforced client-side only** (v8.2) | Mirrors the portal's per-LOT total limit on the phone so over-limit LOTs are caught before sync would reject them at the portal-edit boundary. Cap rule: `Σ (RdAccount.monthlyAmount × monthsPaid) <= 20,000` (strict `>` boundary — exactly ₹20,000 is allowed) across every row in a LOT, summing the *verified* total only — rows without a profile are counted separately and surfaced to the operator with a "real figure may be higher" hint. Enforced on `LotReviewScreen` with `LotReviewMode.FreshScan` (in-flight Confirm → Cancel or Rescan-this-LOT actions, same LOT number preserved on rescan) and on `LotReviewScreen` with `LotReviewMode.RecordedEdit` for post-finalize edits (close-only popup since the session is already finalized). The two paths were unified into a single screen in commit 8821852, replacing the prior `DefaulterEditDialog`. Client-side only in v1 — a modified APK could in theory bypass by direct cloud upsert. Acceptable for the single-owner trusted-employee threat model per §5; revisit in v2 with a Postgres CHECK constraint or Edge Function if untrusted devices become a concern. See §15.5.12 + §15.5.13 (live total chip) + §15.5.14 (unified editor architecture) for the visual + semantic contracts. | Server-side CHECK constraint (deferred to v2 if untrusted devices become a concern). Supabase Edge Function validation (deferred — same v2 trigger). Cloud-side soft cap with warning-only (rejected — phone catching this pre-sync is the right UX, not after-the-fact rejection). |
 
 ---
 
@@ -340,11 +340,12 @@ Same 5 sync-metadata columns added to both:
 
 ```kotlin
 enum class SyncStatus {
-    LOCAL_ONLY,    // Never been pushed. Active session state.
-    DIRTY,         // Has local changes that need pushing. Includes "I just got modified" and "I'm new and ready to push."
-    SYNCING,       // Currently being pushed by a WorkManager job.
-    SYNCED,        // In sync with cloud at last check.
-    SYNC_ERROR     // Last push failed; will be retried.
+    LOCAL_ONLY,      // Never been pushed. Active session state.
+    DIRTY,           // Has local changes that need pushing. Includes "I just got modified" and "I'm new and ready to push."
+    SYNCING,         // Currently being pushed by a WorkManager job.
+    SYNCED,          // In sync with cloud at last check.
+    SYNC_ERROR,      // Last push failed; will be retried.
+    SYNC_ABANDONED   // Circuit-breaker terminal state — see retryCount + PUSH_ABANDON_THRESHOLD below.
 }
 ```
 
@@ -354,10 +355,24 @@ State transitions:
 - Active session finalized: all its rows flip `LOCAL_ONLY → DIRTY`.
 - Push starts: `DIRTY → SYNCING`.
 - Push succeeds: `SYNCING → SYNCED`, `syncedAt = now()`.
-- Push fails: `SYNCING → SYNC_ERROR`, `lastSyncError = msg`. Will be retried.
-- Subsequent local edit of a synced row: `SYNCED → DIRTY`.
+- Push fails: `SYNCING → SYNC_ERROR`, `lastSyncError = msg`, `retryCount += 1`. Will be retried.
+- Subsequent local edit of a synced row: `SYNCED → DIRTY`, `retryCount = 0` (fresh circuit-breaker window).
+- After `retryCount >= PUSH_ABANDON_THRESHOLD` (default 8): `SYNC_ERROR → SYNC_ABANDONED`. The row stops counting toward the pill's pending count, stops being re-promoted, and stops being retried until a user-initiated reset clears it. This protects against structurally-unpushable rows (cloud schema drift, FK constraints we can't satisfy, etc.) silently burning battery on infinite retry.
 - Remote pulled row that doesn't exist locally: created as `SYNCED`.
 - Remote pulled row that differs from local synced: see §11 (conflict resolution).
+
+**Sync metadata fields shared by every syncable entity** (ScanSession, ScanLot, RdNumber, RdAccount):
+
+| Field | Purpose |
+|---|---|
+| `cloudId: String?` | UUID assigned at row creation, the cloud-side PK. Null only on rows created before v6. |
+| `syncStatus: SyncStatus` | Per-row lifecycle (see above). |
+| `updatedAt: Long` | Epoch millis of most recent local mutation; LWW tiebreaker (§11). |
+| `syncedAt: Long?` | Epoch millis of last successful push. |
+| `lastSyncError: String?` | Short error string from the last failed push. |
+| `deletedAt: Long?` | Tombstone marker. Null while alive. |
+| `retryCount: Int` | Consecutive-failure counter for the circuit breaker. Reset to 0 on `SYNCED`, on local edits, and after a `mergeFromCloud` write — each gives the row a fresh circuit-breaker window. |
+| `lastEditorDeviceId: String?` | Cloud `devices.id` of whoever last wrote this row. Stamped by phones on push; null for portal writes so the merge attribution code can render "edited by Portal" badges. Added in v9 for RdNumber + RdAccount; ScanSession + ScanLot have it from v6. |
 
 ### New entity: `RdAccount` (v8)
 
@@ -403,14 +418,15 @@ A single-row table holding per-phone settings:
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | INTEGER PRIMARY KEY | Always = 1 (enforced via CHECK). |
+| `id` | INTEGER PRIMARY KEY | Always = 1 (enforced via CHECK on upgraded DBs; not on fresh installs because Room's entity-generated CREATE TABLE doesn't emit CHECK constraints — DAO surface enforces id = 1 in every query so the divergence is invisible at runtime). |
 | `deviceCloudId` | TEXT | Our row in the cloud `devices` table. Null until first sync. |
 | `deviceName` | TEXT | "Counter Phone" |
 | `operatorName` | TEXT | "Ravi" — current operator |
 | `ownerId` | TEXT | auth.users.id of the signed-in account |
-| `lastPulledAt` | INTEGER | Epoch millis of last successful pull cursor |
+| `lastPulledAt` | INTEGER | Epoch millis of last successful pull cursor. Reset to 0 on sign-out (via `DeviceSettingsDao.clearOwner`) so a different owner signing in on the same device doesn't inherit the prior cursor and silently miss historical rows. |
 | `lastPullErrorAt` | INTEGER | NULL if last pull succeeded |
 | `lastPullError` | TEXT | NULL if last pull succeeded |
+| `lastBannerSeenAt` | INTEGER | Epoch millis the in-app recent-changes banner was last dismissed/acknowledged. The banner composer reads `SyncEvent` rows since this watermark to decide whether to render. Reset to 0 on sign-out. Read with a `coerceAtMost(System.currentTimeMillis())` clamp so a clock skew (NTP correction backward after a phone with a fast clock) doesn't permanently freeze the unread badge. |
 
 ### New DAO methods (sketched, full list in the impl phase)
 
@@ -1111,7 +1127,7 @@ New Room table `sync_events`:
 data class SyncEvent(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val occurredAt: Long,                  // epoch ms, server-side updated_at preferred
-    val type: SyncEventType,               // enum
+    val type: SyncEventType,               // enum (REMOTE_*, PORTAL_*, LOCAL_*)
     val sessionCloudId: String?,           // FK by cloud id; nullable for device events
     val rdNumberCloudId: String?,
     val originDeviceCloudId: String?,      // who caused it; null for portal
@@ -1121,14 +1137,29 @@ data class SyncEvent(
 )
 
 enum class SyncEventType {
+    // Remote-originated — landed via pull / realtime
     REMOTE_SESSION_FINALIZED,
     REMOTE_DEFAULTER_EDIT,
     PORTAL_DEFAULTER_EDIT,
-    REMOTE_SESSION_DELETED
+    REMOTE_SESSION_DELETED,
+
+    // Locally-originated — this device performed the action. These events
+    // exist only on this phone's bell history (never pushed to cloud) so
+    // the operator can review their own timeline alongside remote events.
+    // Filtered out of the banner + unread badge (the action's own UI
+    // already confirmed it; a banner saying "you finalized this session"
+    // is noise) but visible in the full SyncHistorySheet for context.
+    LOCAL_SESSION_FINALIZED,
+    LOCAL_ACCOUNTS_ADDED,
+    LOCAL_DEFAULTER_EDIT
 }
 ```
 
-Populated by `SyncRepository.handleRemoteChange()` after a pull/realtime payload is merged. Bounded by two independent rules applied as an `OR` in the prune query: **keep at most the 100 most-recent rows** AND **drop anything older than 7 days regardless of count**. Whichever rule cuts more aggressively wins on any given prune pass. The periodic worker that runs the prune lands in Phase 5; until then `sync_events` is append-only.
+REMOTE_* and PORTAL_* events are populated by `SyncRepository.handleRemoteChange()` after a pull/realtime payload is merged. LOCAL_* events are inserted by the UI code that performed the action (`RDScannerScreen.finalizeSession`, `LotReviewPersister.persist`, `AddAccountsScreen.persistAll`) — they never go through the sync pipeline because they have no cloud-side counterpart.
+
+Bounded by **two independent rules applied as AND** in the prune query: **keep at most the 100 most-recent rows** AND **drop anything older than 7 days regardless of count**. Both must hold for deletion, which is the more conservative semantics (preserves more rows than an OR would). The `SyncEventPruneWorker` runs this query on a daily periodic schedule with `KEEP` policy (subsequent enqueues are no-ops) and a `setRequiresBatteryNotLow` constraint so background cleanup doesn't compete with foreground sync for battery.
+
+`payloadSummary` is pre-rendered in English at insert time (e.g. `"finalized Session #47 (12 LOTs)"`). i18n is deferred — half-localizing at insert time would mix locales unpredictably in the bell history; the proper fix is a typed payload schema with template lookup at render time. Tracked as an open question (§24).
 
 **Origin attribution rule (Phase 5 T5.6 amendment, F9 finding):** the
 `originDeviceCloudId` field is derived from the *row's own*
@@ -1286,14 +1317,16 @@ NB on Hindi: ergative "ने" deliberately omitted from the templates above. Th
 
 Mirrors the portal's per-LOT total limit on the phone so over-limit LOTs are caught BEFORE sync would reject them. Per-LOT, **not** per-session.
 
-**Cap rule:** `Σ (RdAccount.monthlyAmount × monthsPaid)` across every row in a LOT must not exceed ₹20,000. The sum is enforced on the **verified** total only — rows whose `RdAccount.monthlyAmount` is null or zero (no profile yet) are excluded from the sum but counted separately.
+**Cap rule:** `Σ (RdAccount.monthlyAmount × monthsPaid)` across every row in a LOT must be `<= 20,000`. **Exactly ₹20,000 is allowed** — boundary check is strict greater-than (`LotTotal.isOver = verifiedRupees > LOT_TOTAL_LIMIT_RUPEES`), not `>=`. The sum is enforced on the **verified** total only — rows whose `RdAccount.monthlyAmount` is null or zero (no profile yet) are excluded from the sum but counted separately.
 
 **Enforcement surfaces:**
-1. `LotReviewScreen.OverLimitDialog` (in-flight LOT, post-scan, pre-finalize). Fires on **Confirm** tap before the regression-confirm flow. Two actions:
+1. `LotReviewScreen` in `LotReviewMode.FreshScan` (in-flight LOT, post-scan, pre-finalize). Fires on **Confirm** tap before the regression-confirm flow. Two actions:
    - **Cancel** → return to review screen so operator can reduce month counts.
    - **Rescan this LOT** → tear down + return to scanner at the same LOT number (see *Rescan semantic* below).
-2. `DefaulterEditDialog.DefaulterOverLimitDialog` (post-finalize edit from `SessionDetailScreen`). Fires on **Save** tap before the existing skip-gap-confirm flow. Single action:
-   - **Got it** → dismiss + return to dialog so operator can reduce counts. No rescan because the session is already finalized.
+2. `LotReviewScreen` in `LotReviewMode.RecordedEdit` (post-finalize edit from `SessionDetailScreen`). Fires on **Save** tap before the existing skip-gap-confirm flow. Single action:
+   - **Got it** → dismiss + return to editor so operator can reduce counts. No rescan because the session is already finalized.
+
+Prior to commit 8821852 the post-finalize editor lived in a separate `DefaulterEditDialog`. The two paths were unified into `LotReviewScreen` with a `LotReviewMode` discriminator (FreshScan / RecordedEdit) so the cap logic, regression confirm, and row hydration code stay in one place.
 
 **Live signal on `LotReviewScreen`:** `LotTotalLine` above the Confirm button shows `Total: ₹X · limit ₹20,000` (mint when under) or `Total ₹X exceeds ₹20,000 limit` (coral when over) plus a `N without profile not counted` line when unverified rows exist. Operator self-corrects before tapping Confirm.
 
@@ -1314,7 +1347,81 @@ Mirrors the portal's per-LOT total limit on the phone so over-limit LOTs are cau
 
 **Client-side enforcement only in v1.** A modified APK could bypass by writing directly to the cloud DTO upsert path. Acceptable for the single-owner trusted-employee threat model per spec §5; revisit in v2 with a Postgres CHECK constraint or Supabase Edge Function if untrusted devices become a concern (QC-E LOW finding).
 
-### 15.5.13 Live LOT total chip on scanner (v8.2 amendment, 40dbdf5)
+### 15.5.13.1 Cache + dedup performance contract
+
+The `lotAmountCache` is resolved at the scan site (single DAO call per append) rather than in a size-keyed `LaunchedEffect` that re-filtered the whole list. The cache is cleared per-LOT in `finishCurrentLot`, `endSession`, `undoLastScan`, and rescan paths so a re-scanned RD number after a mid-session amount edit doesn't reuse a stale value. Rehydration paths (`adoptSession`, `rehydrateAfterConfigChange`) prime the cache via a `sessionId`-keyed effect that fires once per session boot.
+
+Duplicate detection within the current LOT and across the session uses parallel `HashSet<String>` mirrors of the visible `mutableStateListOf<String>` collections. Every add/remove on the visible list MUST also mutate the matching set or the dedup guard silently breaks. Set lookups are O(1) and avoid the cumulative ~250ms scanner jank that List.contains incurred at 500 scans/session.
+
+### 15.5.14 LotReviewScreen architecture (unified editor)
+
+The fresh-scan post-LOT review screen and the post-finalize "edit defaulters" surface are the same Compose screen with a `LotReviewMode` discriminator. The architecture has three pure I/O boundaries that callers stitch together; the screen itself is a thin renderer over the resulting `List<LotReviewRow>`.
+
+```kotlin
+sealed interface LotReviewMode {
+    data class FreshScan(val lotId: Long, val lotNumber: Int, val lotTimestamp: Long) : LotReviewMode
+    data class RecordedEdit(val lotId: Long, val lotNumber: Int, val lotTimestamp: Long) : LotReviewMode
+}
+
+object LotReviewBuilder {
+    /**
+     * Hydrates [LotReviewRow] list from the DB. For each rd_number in the
+     * LOT, reads the optional [RdAccount] profile (name + monthlyAmount +
+     * lastPaidThrough) via a single batched [findByRdNumbers] call, then
+     * computes the auto-anchored month-list selection.
+     *
+     * originalSelected MUST reflect the DB's actual stored monthsList,
+     * NOT the auto-suggested default — so confirming the auto-anchor for
+     * a row that had no stored list counts as a real edit and advances
+     * lastPaidThrough. Using the auto-suggested value here was the H1
+     * regression that silently dropped scan-and-confirm advances.
+     */
+    suspend fun build(app: QRScannerApp, lotId: Long, lotTimestamp: Long): List<LotReviewRow>
+}
+
+sealed interface LotReviewOutcome {
+    data class Success(val rowsPersisted: Int) : LotReviewOutcome
+    data object SessionTombstoned : LotReviewOutcome  // parent deleted mid-edit
+    data class Error(val cause: Throwable) : LotReviewOutcome
+}
+
+object LotReviewPersister {
+    /**
+     * Writes edits atomically across rd_numbers + rd_accounts inside a
+     * single Room transaction:
+     *   1. Update rd_numbers.monthsList + monthsPaid for each changed row
+     *   2. Advance rd_accounts.lastPaidThrough monotonically per row
+     *      (uses [updateLastPaidThroughMonotonic] for auto-anchor advance;
+     *      uses [setLastPaidThroughExplicit] when the operator explicitly
+     *      regresses the value via the confirm dialog — see D23)
+     *   3. Mark dirty + enqueue push
+     *
+     * Returns SessionTombstoned if the parent session was deleted
+     * (from another device's pull) between hydration and persist.
+     */
+    suspend fun persist(
+        app: QRScannerApp,
+        baseRows: List<LotReviewRow>,
+        edits: Map<Long, List<MonthYear>>
+    ): LotReviewOutcome
+}
+
+data class LotReviewRow(
+    val rdNumber: RdNumber,
+    val accountName: String?,
+    val accountLastPaidThrough: MonthYear?,
+    val accountMonthlyAmount: Int?,
+    val selected: List<MonthYear>,
+    /** DB baseline — used by [hasChanges] to filter no-op edits from the persist batch. */
+    val originalSelected: List<MonthYear>
+) {
+    val hasChanges: Boolean get() = selected != originalSelected
+}
+```
+
+**Why split into Builder + Persister:** the screen's main coroutine stays I/O-free; both boundaries are pure suspend functions that can be tested without spinning up Compose. The unification (commit 8821852) replaced the previous `DefaulterEditDialog` + `DefaulterAskDialog` pair, removing ~600 lines of duplicated month-bar / regression-confirm code.
+
+**Edit persistence across config change + process death:** `LotReviewEditsSaver` encodes the in-progress `Map<Long, List<MonthYear>>` as a compact `rowId=YYYY-MM,YYYY-MM;...` string (~30 bytes per row; 50-row LOT stays under 2KB so Bundle truncation is impossible). Malformed segments are silently skipped on restore — a Bundle corruption never crashes the editor.
 
 Running rupee total of the current LOT displayed below the existing 4-stat row (`Current LOT / In LOT / Saved LOTs / Total RD`) at the top of the scanner viewport.
 
