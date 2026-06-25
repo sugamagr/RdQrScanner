@@ -725,6 +725,18 @@ if remote.deleted_at is not null:
 
 For a 2-phone shop where each operator works one phone at a time, two writers editing the same defaulter row within a sub-second of each other is functionally impossible. The cost of building merge UI for an event that won't happen in practice is not justified in v1.
 
+### Clock-skew clamp on inbound `updated_at` (round 5 hardening)
+
+A phone with a wrong clock — manually set forward, broken NTP, restored from an old backup with stale system time — would push rows whose `updated_at` is months or years in the future. Strict LWW would then make those rows win every subsequent merge forever, including correct portal edits with the server clock.
+
+The `clamp_updated_at()` trigger on `BEFORE INSERT` of every syncable table (`devices`, `scan_sessions`, `scan_lots`, `rd_numbers`, `rd_accounts`) clamps inbound `updated_at` to `LEAST(NEW.updated_at, now() + interval '1 hour')`. The 1-hour grace window allows for legitimate NTP drift and timezone math but rejects gross skew and pins it to `now()`. The clamp event is logged via `RAISE NOTICE` so Supabase Studio logs preserve a breadcrumb when this fires — a corrupted clock becomes visible during routine ops rather than discovered after data corruption.
+
+The existing `set_updated_at()` trigger on `BEFORE UPDATE` already unconditionally overwrites with `now()`, so the clamp only matters for fresh INSERTs from the phone push path.
+
+### Soft-delete propagation requires `ON DELETE RESTRICT` (round 5 hardening)
+
+`scan_lots.session_id` and `rd_numbers.lot_id` are `ON DELETE RESTRICT`, not `CASCADE`. A cascade on hard-delete would silently drop child rows without producing tombstones, so phones that hadn't pulled yet would never learn the rows were deleted. Soft-delete (`deleted_at`) is the only supported deletion path — RESTRICT enforces that contract at the FK boundary so even a maintainer running raw SQL in Studio can't accidentally break it.
+
 ### What we MUST log
 
 Every silent loss must produce an Android Log line at WARN level:
@@ -1157,6 +1169,14 @@ enum class SyncEventType {
 
 REMOTE_* and PORTAL_* events are populated by `SyncRepository.handleRemoteChange()` after a pull/realtime payload is merged. LOCAL_* events are inserted by the UI code that performed the action (`RDScannerScreen.finalizeSession`, `LotReviewPersister.persist`, `AddAccountsScreen.persistAll`) — they never go through the sync pipeline because they have no cloud-side counterpart.
 
+**Release-build breadcrumb logs (round 5):** the sync pipeline emits three INFO-level breadcrumbs on every cycle so production support cases ("portal edit didn't reach phone B", "phone is stuck on stale data") can be debugged from `adb logcat` alone:
+
+- `pull start: sinceCursor=<ms> ownerId=<uuid>` — emitted at the top of every `runPull` so the cursor is in the log trail
+- `push start: sessions=N accounts=M` — emitted once per `runPush` after the dirty-row sweep so "how many rows are pending?" has an answer
+- `realtime <event> on <table> cloudId=<uuid>` — emitted at INFO level, rate-limited to one entry per 5-second window per table so bulk CSV imports (100+ events in seconds) don't spam logcat. DEBUG builds still log every realtime payload via the adjacent `Log.d` for dev-time tracing
+
+These complement the existing silent-overwrite WARN logs (spec §11 line 626 contract) so every LWW loser produces a structured breadcrumb with full before/after state.
+
 Bounded by **two independent rules applied as AND** in the prune query: **keep at most the 100 most-recent rows** AND **drop anything older than 7 days regardless of count**. Both must hold for deletion, which is the more conservative semantics (preserves more rows than an OR would). The `SyncEventPruneWorker` runs this query on a daily periodic schedule with `KEEP` policy (subsequent enqueues are no-ops) and a `setRequiresBatteryNotLow` constraint so background cleanup doesn't compete with foreground sync for battery.
 
 `payloadSummary` is pre-rendered in English at insert time (e.g. `"finalized Session #47 (12 LOTs)"`). i18n is deferred — half-localizing at insert time would mix locales unpredictably in the bell history; the proper fix is a typed payload schema with template lookup at render time. Tracked as an open question (§24).
@@ -1457,6 +1477,22 @@ val unverified = currentLotNumbers.count { rdNumber ->
 ---
 
 ## 16. Portal architecture
+
+### Cross-system business-rule mirror (round 5)
+
+The portal's edit surfaces MUST mirror every business rule the phone enforces, because a portal write that bypasses a rule lands a row that the phone then refuses to edit (the phone's UI blocks Confirm whenever the row would violate the rule, regardless of which direction the operator pushes). Three rules are mirrored as of round 5:
+
+1. **Per-LOT ₹20,000 cap** — `EditDefaulterDialog` reads `fetchLotTotalsExcluding(lotId, excludeRdId)` on mount + `fetchAccountForRdNumber(rdNumber)` for this row's `monthly_amount`, then live-computes `pendingVerifiedRupees = restOfLotVerified + ownMonthlyAmount × monthsPaid`. Save disables when `pendingVerifiedRupees > 20000`. Live total chip + unverified-rows hint matches the phone's `LiveLotTotal` semantic so the owner sees the same "real total may be higher" floor when unverified rows exist. Spec §15.5.12 + D24.
+
+2. **`last_paid_through` is phone-derived only** — Portal's `updateAccount` never includes `last_paid_through` in the update payload (D22). The field is monotonic-advanced by the phone via `updateLastPaidThroughMonotonic` and explicitly-set via `setLastPaidThroughExplicit` (D23). Portal touching it would race the phone's monotonic invariant.
+
+3. **`last_editor_device_id = null` on every portal write** — Phone's `mergeRdNumbers` interprets `null` as "Portal" for attribution badges. Portal writes explicitly set this field to NULL, never inheriting the row's prior `last_editor_device_id`.
+
+### Realtime subscription server-side filter (round 5)
+
+Portal's `useRealtimeSync` subscribes to each table with `filter: \`owner_id=eq.${userId}\`` so Supabase filters BEFORE delivery. Without the filter, the server would broadcast to every connected portal and RLS would filter client-side AFTER the row crossed the wire — bandwidth waste + realtime quota burn proportional to concurrent-owner count. Spec §14 mandates server-side filtering on phone-side; portal must mirror.
+
+Reconnect handling: supabase-js auto-reconnects the WebSocket on laptop wake / network back, but `postgres_changes` has no backfill for events that fired during the disconnect window. Portal listens to `window.online` + `document.visibilitychange` and invalidates every query on reconnect; phones that pushed during the gap are caught on the very next pull.
 
 ### Tech stack
 

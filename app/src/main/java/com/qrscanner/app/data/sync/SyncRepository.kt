@@ -338,6 +338,15 @@ class SyncRepository(
 
         val dirtySessions = sessionDao.getDirtyForPush()
         val dirtyAccounts = rdAccountDao.getDirtyForPush()
+        // Release-build breadcrumb: a stuck-PENDING session is the
+        // single hardest support case ("how many rows? which ones?")
+        // and the answer used to live only in adb-attached logs. One
+        // INFO line per push cycle costs us nothing and tells a
+        // future support session exactly what was on the wire.
+        android.util.Log.i(
+            "SyncRepository",
+            "push start: sessions=${dirtySessions.size} accounts=${dirtyAccounts.size}"
+        )
         if (dirtySessions.isEmpty() && dirtyAccounts.isEmpty()) {
             updateSummary { it.copy(state = SyncPillState.SYNCED, pendingCount = 0) }
             return Result.success(Unit)
@@ -856,6 +865,14 @@ class SyncRepository(
         val allNotices = mutableListOf<RemoteEditNotice>()
         var sinceCursor = settings.lastPulledAt
         var pages = 0
+        // Release-build breadcrumb for "phone is stuck on stale data"
+        // support cases: log the cursor the pull is starting from.
+        // Single line per runPull invocation; bounded so it stays
+        // grep-able in adb logcat without spamming.
+        android.util.Log.i(
+            "SyncRepository",
+            "pull start: sinceCursor=$sinceCursor ownerId=$ownerId"
+        )
         while (true) {
             pages++
             // Surface progress only after the first page completes —
@@ -1298,6 +1315,29 @@ class SyncRepository(
      * Phase 3 T3.4. Spec §14.
      */
     suspend fun handleRealtimeChange(payload: com.qrscanner.app.cloud.CloudRealtimePayload) {
+        // Rate-limited INFO log: emit at most one realtime breadcrumb
+        // per 5s window per table so release builds carry a debug trail
+        // for "portal edit didn't reach phone" support cases WITHOUT
+        // spamming logcat during bulk pushes (CSV import can fire 100+
+        // events in seconds). DEBUG builds still log every event via the
+        // adjacent Log.d so dev-time tracing stays unchanged.
+        val now = System.currentTimeMillis()
+        val tableKey: String = payload.table.name
+        val shouldLogInfo = synchronized(realtimeLogLastEmittedAt) {
+            val last = realtimeLogLastEmittedAt[tableKey] ?: 0L
+            if (now - last >= REALTIME_LOG_INTERVAL_MS) {
+                realtimeLogLastEmittedAt[tableKey] = now
+                true
+            } else {
+                false
+            }
+        }
+        if (shouldLogInfo) {
+            android.util.Log.i(
+                "SyncRepository",
+                "realtime ${payload.event} on ${payload.table} cloudId=${payload.cloudId}"
+            )
+        }
         if (com.qrscanner.app.BuildConfig.DEBUG) {
             android.util.Log.d(
                 "SyncRepository",
@@ -1306,6 +1346,8 @@ class SyncRepository(
         }
         runPull()
     }
+
+    private val realtimeLogLastEmittedAt: MutableMap<String, Long> = mutableMapOf()
 
     private fun updateSummary(transform: (SyncSummary) -> SyncSummary) {
         mutableSummary.update(transform)
@@ -1370,6 +1412,15 @@ class SyncRepository(
         // exceeds any realistic shop's data set. If a runaway cursor ever
         // hit this we'd want to log + bail out rather than spin.
         private const val MAX_DRAIN_PAGES = 20
+
+        /**
+         * Realtime payload INFO-log rate-limit window per table. Bulk
+         * pushes (CSV import) can fire dozens of events in a second;
+         * one INFO line per 5s window keeps the release-build log
+         * trail useful without spamming logcat or filling crash-
+         * reporter breadcrumbs.
+         */
+        private const val REALTIME_LOG_INTERVAL_MS = 5_000L
 
         /**
          * Oracle bg_0ea195ce R3 / I6 — after this many consecutive push
