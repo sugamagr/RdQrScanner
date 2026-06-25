@@ -1426,6 +1426,18 @@ object LotReviewBuilder {
                 app.database.rdAccountDao()
                     .findByRdNumbers(rdRows.map { it.number })
                     .associateBy { it.rdNumber }
+            }.onFailure {
+                // Diagnostic trail for a DB error here is critical: a
+                // silent empty map causes every LOT review row to lose
+                // its name/monthlyAmount/lastPaidThrough hint, and the
+                // operator picks wrong months. Without the log,
+                // intermittent DB corruption masquerades as "the data
+                // just isn't there yet" and the bug never gets filed.
+                android.util.Log.w(
+                    "LotReviewBuilder",
+                    "batched account lookup failed for lotId=$lotId; rows will render without account hints",
+                    it
+                )
             }.getOrDefault(emptyMap())
         }
         return rdRows.map { rd ->

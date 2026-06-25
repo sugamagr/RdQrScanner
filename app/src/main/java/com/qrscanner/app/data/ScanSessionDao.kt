@@ -34,8 +34,15 @@ interface ScanSessionDao {
     fun observeSessionById(id: Long): Flow<ScanSession?>
 
     
-    // Get the next sequential display number
-    @Query("SELECT COALESCE(MAX(displayNumber), 0) + 1 FROM scan_sessions WHERE isActive = 0 AND totalLots > 0")
+    /**
+     * Next sequential display number. Excludes soft-deleted sessions
+     * so display numbers stay monotonic across the lifetime of the
+     * device: without the deletedAt filter, deleting Session #47
+     * could let the next finalized session re-claim #47, producing
+     * a portal-vs-phone collision and confusing the operator who
+     * sees two "Session #47" entries in cross-device history.
+     */
+    @Query("SELECT COALESCE(MAX(displayNumber), 0) + 1 FROM scan_sessions WHERE isActive = 0 AND totalLots > 0 AND deletedAt IS NULL")
     suspend fun getNextDisplayNumber(): Int
     
     @Insert
@@ -64,11 +71,22 @@ interface ScanSessionDao {
     @Query("UPDATE scan_sessions SET activeLotId = :lotId WHERE id = :sessionId")
     suspend fun setActiveLotId(sessionId: Long, lotId: Long?)
 
+    /**
+     * Defaulter counts grouped by session. Filters out soft-deleted
+     * rows at all three levels (rd_numbers, scan_lots, scan_sessions)
+     * so the history screen never shows a defaulter badge for a
+     * session the operator has already deleted — that badge would
+     * look like a stuck UI bug.
+     */
     @Query("""
         SELECT sl.sessionId AS sessionId, COUNT(rn.id) AS count
         FROM rd_numbers rn
         INNER JOIN scan_lots sl ON rn.lotId = sl.id
-        WHERE rn.monthsPaid > 1 AND rn.deletedAt IS NULL
+        INNER JOIN scan_sessions ss ON sl.sessionId = ss.id
+        WHERE rn.monthsPaid > 1
+          AND rn.deletedAt IS NULL
+          AND sl.deletedAt IS NULL
+          AND ss.deletedAt IS NULL
         GROUP BY sl.sessionId
     """)
     fun getDefaultCountsBySession(): Flow<List<SessionDefaultCount>>

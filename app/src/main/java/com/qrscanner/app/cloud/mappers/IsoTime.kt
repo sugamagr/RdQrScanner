@@ -18,6 +18,13 @@ internal object IsoTime {
         return try {
             Instant.parse(iso).toEpochMilli()
         } catch (e: Exception) {
+            // Diagnostic trail: a malformed timestamptz from cloud is a
+            // server-side schema or trigger bug, not a phone bug. Log
+            // it so the next sync diagnostics dump captures the
+            // offending string — without this trail, the 0L fallback
+            // silently lies about row freshness and corrupts LWW merge
+            // ordering with no breadcrumb a developer can follow.
+            android.util.Log.w("IsoTime", "malformed timestamp '$iso' → 0L", e)
             0L
         }
     }
@@ -27,6 +34,7 @@ internal object IsoTime {
         return try {
             Instant.parse(iso).toEpochMilli()
         } catch (e: Exception) {
+            android.util.Log.w("IsoTime", "malformed timestamp '$iso' → null", e)
             null
         }
     }

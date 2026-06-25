@@ -62,12 +62,20 @@ interface DeviceSettingsDao {
 
     /**
      * Clears the entire device identity block (owner + cloudId + name +
-     * operator). Called by SettingsScreen sign-out. Critical that this
-     * clears all four fields, not just ownerId — otherwise the next
-     * sign-in on a DIFFERENT owner account would inherit the previous
-     * owner's deviceCloudId and skip first-run setup, breaking RLS
-     * assumptions and producing cross-account device row pollution
-     * (oracle round 6 BLOCKER #10).
+     * operator) AND resets the pull cursor + banner watermark. Called
+     * by SettingsScreen sign-out. Critical that this clears all four
+     * identity fields, not just ownerId — otherwise the next sign-in
+     * on a DIFFERENT owner account would inherit the previous owner's
+     * deviceCloudId and skip first-run setup, breaking RLS assumptions
+     * and producing cross-account device row pollution.
+     *
+     * Resetting lastPulledAt = 0 is equally load-bearing: without it,
+     * signing out and signing in as a new owner would query
+     * `updated_at > <previous-owner's high water mark>` and silently
+     * miss every cloud row predating that cursor — the new owner's
+     * historical data would never arrive. Resetting lastBannerSeenAt
+     * similarly prevents the unread badge from inheriting state from
+     * the prior identity.
      */
     @Query(
         """
@@ -75,7 +83,9 @@ interface DeviceSettingsDao {
         SET ownerId = NULL,
             deviceCloudId = NULL,
             deviceName = NULL,
-            operatorName = NULL
+            operatorName = NULL,
+            lastPulledAt = 0,
+            lastBannerSeenAt = 0
         WHERE id = 1
         """
     )

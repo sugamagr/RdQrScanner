@@ -235,16 +235,30 @@ private fun SettingsRoute(onNavigateBack: () -> Unit) {
                         "affected; you can sign back in to restore everything."
                 )
             },
-            confirmButton = {
+                confirmButton = {
                 TextButton(
                     enabled = !isSigningOut,
                     onClick = {
                         isSigningOut = true
                         scope.launch {
-                            runCatching { app.syncScheduler.cancelAll() }
-                            runCatching { app.cloudClient.signOut() }
-                            runCatching { app.database.wipeAllUserData() }
-                            runCatching { app.database.deviceSettingsDao().clearOwner() }
+                            // Whole sign-out sequence runs under
+                            // SyncRepository.syncMutex so an in-flight
+                            // runPush / runPull cannot race the wipe.
+                            // Without this serialization a mid-push
+                            // sign-out could (a) push rows to the prior
+                            // owner's cloud account while the wipe
+                            // clears them locally, (b) write to deleted
+                            // rows from inside the merge transaction
+                            // (NPE on null DAO results), or (c) leave
+                            // device_settings.ownerId cleared while a
+                            // still-running pull writes to lastPulledAt
+                            // for the OLD owner's data.
+                            app.syncRepository.withSyncLock {
+                                runCatching { app.syncScheduler.cancelAll() }
+                                runCatching { app.cloudClient.signOut() }
+                                runCatching { app.database.wipeAllUserData() }
+                                runCatching { app.database.deviceSettingsDao().clearOwner() }
+                            }
                             showConfirmDialog = false
                         }
                     }

@@ -613,7 +613,8 @@ fun SessionHistoryScreen(
                                             } else {
                                                 Toast.makeText(context, "Failed to export", Toast.LENGTH_SHORT).show()
                                             }
-                                        } catch (_: Exception) {
+                                        } catch (e: Exception) {
+                                            android.util.Log.w("SessionHistoryScreen", "xlsx export failed", e)
                                             Toast.makeText(context, "Export failed", Toast.LENGTH_SHORT).show()
                                         }
                                     }
@@ -650,7 +651,8 @@ fun SessionHistoryScreen(
                                             } else {
                                                 Toast.makeText(context, "Failed to export", Toast.LENGTH_SHORT).show()
                                             }
-                                        } catch (_: Exception) {
+                                        } catch (e: Exception) {
+                                            android.util.Log.w("SessionHistoryScreen", "txt export failed", e)
                                             Toast.makeText(context, "Export failed", Toast.LENGTH_SHORT).show()
                                         }
                                     }
@@ -691,7 +693,8 @@ fun SessionHistoryScreen(
                                 app.syncRepository.softDeleteSession(session.id)
                                 try { app.syncScheduler.enqueuePush() } catch (_: Throwable) {}
                                 Toast.makeText(context, "Session deleted", Toast.LENGTH_SHORT).show()
-                            } catch (_: Exception) {
+                            } catch (e: Exception) {
+                                android.util.Log.w("SessionHistoryScreen", "soft-delete session ${session.id} failed", e)
                                 Toast.makeText(context, "Delete failed", Toast.LENGTH_SHORT).show()
                             }
                         }
@@ -725,7 +728,8 @@ fun SessionHistoryScreen(
                                 app.syncRepository.softDeleteSessions(toDelete)
                                 try { app.syncScheduler.enqueuePush() } catch (_: Throwable) {}
                                 Toast.makeText(context, "Deleted $count session${if (count > 1) "s" else ""}", Toast.LENGTH_SHORT).show()
-                            } catch (_: Exception) {
+                            } catch (e: Exception) {
+                                android.util.Log.w("SessionHistoryScreen", "bulk soft-delete (size=${toDelete.size}) failed", e)
                                 Toast.makeText(context, "Delete failed", Toast.LENGTH_SHORT).show()
                             }
                         }
@@ -759,7 +763,8 @@ fun SessionHistoryScreen(
                                 app.syncRepository.softDeleteSessions(completedSessions.map { it.id })
                                 try { app.syncScheduler.enqueuePush() } catch (_: Throwable) {}
                                 Toast.makeText(context, "All sessions cleared", Toast.LENGTH_SHORT).show()
-                            } catch (_: Exception) {
+                            } catch (e: Exception) {
+                                android.util.Log.w("SessionHistoryScreen", "clear-all soft-delete failed", e)
                                 Toast.makeText(context, "Failed to clear sessions", Toast.LENGTH_SHORT).show()
                             }
                         }

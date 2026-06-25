@@ -62,7 +62,7 @@ object XlsxExporter {
             }
             file
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.e("XlsxExporter", "xlsx export failed", e)
             null
         }
     }
@@ -242,7 +242,7 @@ object XlsxExporter {
 
             file
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.e("XlsxExporter", "txt export failed", e)
             null
         }
     }

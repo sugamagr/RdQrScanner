@@ -351,6 +351,30 @@ abstract class AppDatabase : RoomDatabase() {
          * upload + cloud pull. accountOpenedDate / accountClosingDate
          * columns added schema-only this round (no UI yet).
          */
+        /**
+         * v8 → v9: Adds [RdNumber.lastEditorDeviceId] so pulls can
+         * persist the per-row "edited by Portal / edited by another
+         * phone" attribution that previously existed only on the
+         * wire (RdNumberDto) and the cloud schema. Pre-v9 pulls
+         * accepted the field over the network but had nowhere to
+         * store it, so the attribution badge stayed blank after the
+         * next process restart.
+         *
+         * Defensive registration (Q3=B was destructive while pre-
+         * release, but the explicit migration becomes data-preserving
+         * the moment Q3=B ends and the destructive fallback is
+         * removed). Column is nullable so existing rows backfill to
+         * NULL — which is exactly the "unknown editor" attribution
+         * we want for historical rows that never carried the field.
+         */
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `rd_numbers` ADD COLUMN `lastEditorDeviceId` TEXT DEFAULT NULL"
+                )
+            }
+        }
+
         private val MIGRATION_7_8 = object : Migration(7, 8) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
@@ -396,8 +420,26 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "rd_scanner_database"
                 )
-                .fallbackToDestructiveMigration(dropAllTables = true)
-                .build()
+                    // All migrations MUST be registered. Without this
+                    // call, fallbackToDestructiveMigration fires on
+                    // every version bump and silently drops every
+                    // table — a data-loss bomb the moment Q3=B
+                    // pre-release ends. The destructive fallback
+                    // stays as last resort for corrupt or unknown
+                    // version paths but should never run in a
+                    // healthy upgrade.
+                    .addMigrations(
+                        MIGRATION_1_2,
+                        MIGRATION_2_3,
+                        MIGRATION_3_4,
+                        MIGRATION_4_5,
+                        MIGRATION_5_6,
+                        MIGRATION_6_7,
+                        MIGRATION_7_8,
+                        MIGRATION_8_9
+                    )
+                    .fallbackToDestructiveMigration(dropAllTables = true)
+                    .build()
                 INSTANCE = instance
                 instance
             }

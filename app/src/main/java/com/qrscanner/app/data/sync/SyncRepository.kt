@@ -34,7 +34,8 @@ import java.util.UUID
 class SyncRepository(
     private val database: AppDatabase,
     private val cloudClient: CloudClient,
-    private val notifier: SyncNotifier
+    private val notifier: SyncNotifier,
+    private val syncPrefs: android.content.SharedPreferences? = null
 ) {
 
     private val sessionDao = database.scanSessionDao()
@@ -48,7 +49,50 @@ class SyncRepository(
     // sync_error notification on the 3rd consecutive failure and re-fires
     // every additional 6 failures so the notification stays sticky without
     // spamming on every flaky-network retry tick.
-    private var consecutiveFailures: Int = 0
+    //
+    // Persisted via SharedPreferences (NOT Room) so app-restart doesn't
+    // reset the counter and defeat the threshold — without persistence,
+    // a force-kill between two failure cycles drops the counter to 0
+    // and the user never sees the "Sync paused" notification even
+    // though sync has been failing for hours. Prefs avoid a v9→v10
+    // schema bump for a notifier-state counter (the value is purely
+    // observability, never user data, so the schema is unaffected).
+    // syncPrefs is nullable for the legacy constructor signature used
+    // by older instantiation paths; when null we fall back to the
+    // in-memory counter (no persistence, but the runtime behavior of
+    // the rest of the sync flow is unchanged).
+    private val consecutiveFailuresMutex = Mutex()
+
+    private suspend fun readConsecutiveFailures(): Int = consecutiveFailuresMutex.withLock {
+        syncPrefs?.getInt(KEY_CONSECUTIVE_FAILURES, 0) ?: inMemoryFailures
+    }
+
+    private suspend fun writeConsecutiveFailures(value: Int) = consecutiveFailuresMutex.withLock {
+        val prefs = syncPrefs
+        if (prefs != null) {
+            prefs.edit().putInt(KEY_CONSECUTIVE_FAILURES, value).apply()
+        } else {
+            inMemoryFailures = value
+        }
+    }
+
+    @Volatile
+    private var inMemoryFailures: Int = 0
+
+    /**
+     * Serializes sign-out against in-flight runPush / runPull so the
+     * three operations form a coherent total order. Without this, a
+     * mid-push sign-out would call wipeAllUserData() while runPush is
+     * still iterating dirty rows, producing crashes (deleted rows
+     * being marked SYNCED) or owner-cross-contamination (rows pushed
+     * to owner A after the user signed in as owner B).
+     *
+     * Uses the same syncMutex as runPush/runPull so push/pull/sign-out
+     * are mutually exclusive at the repository level. The caller passes
+     * the entire sign-out sequence (cancelAll + signOut + wipe + clearOwner)
+     * inside the block so the lock spans the whole transition.
+     */
+    suspend fun <T> withSyncLock(block: suspend () -> T): T = syncMutex.withLock { block() }
 
     // Phase 5 T5.2 (F3 finding): serialize runPush + runPull so realtime
     // (which calls runPull directly from handleRealtimeChange) cannot
@@ -481,7 +525,8 @@ class SyncRepository(
                     lastErrorMessage = firstError.message ?: firstError.toString()
                 )
             }
-            consecutiveFailures += 1
+            val failures = readConsecutiveFailures() + 1
+            writeConsecutiveFailures(failures)
             // Spec §15.5.2: surface the error notification on the 3rd
             // consecutive failure and re-fire every additional 6 so the
             // user isn't spammed on every retry tick but the badge stays
@@ -492,9 +537,9 @@ class SyncRepository(
             val shouldNotify = !isSchemaMissing &&
                 !anyProgress &&
                 (
-                    consecutiveFailures == ERROR_NOTIFY_THRESHOLD ||
-                    (consecutiveFailures > ERROR_NOTIFY_THRESHOLD &&
-                        (consecutiveFailures - ERROR_NOTIFY_THRESHOLD) % ERROR_NOTIFY_REFIRE_EVERY == 0)
+                    failures == ERROR_NOTIFY_THRESHOLD ||
+                    (failures > ERROR_NOTIFY_THRESHOLD &&
+                        (failures - ERROR_NOTIFY_THRESHOLD) % ERROR_NOTIFY_REFIRE_EVERY == 0)
                 )
             if (shouldNotify) {
                 runCatching { notifier.notifySyncError(remaining) }
@@ -517,7 +562,7 @@ class SyncRepository(
                     lastErrorMessage = null
                 )
             }
-            consecutiveFailures = 0
+            writeConsecutiveFailures(0)
             runCatching { notifier.clearSyncError() }
             Result.success(Unit)
         }
@@ -535,18 +580,28 @@ class SyncRepository(
         val operatorName = settings.operatorName
         val orphans = sessionDao.getOrphanFinalizedSessions()
         val now = System.currentTimeMillis()
+        // Per-orphan transaction: a process kill between stampFinalizeMetadata
+        // and markRdNumbersDirtyForSession would leave the cloudId stamped
+        // on the session while children stay LOCAL_ONLY — the session
+        // would then never push children because the orphan sweep only
+        // matches sessions WITHOUT cloudId. Wrapping each orphan in its
+        // own transaction (not the whole loop) means a partial failure
+        // on orphan N still leaves orphans 0..N-1 fully promoted and
+        // the next push cycle resumes from orphan N.
         for (orphan in orphans) {
             val cloudId = orphan.cloudId ?: UUID.randomUUID().toString()
-            sessionDao.stampFinalizeMetadata(
-                sessionId = orphan.id,
-                cloudId = cloudId,
-                deviceCloudId = deviceCloudId,
-                operatorName = operatorName,
-                updatedAt = now
-            )
-            sessionDao.markSessionDirty(orphan.id, now)
-            lotDao.markLotsDirtyForSession(orphan.id, now)
-            rdNumberDao.markRdNumbersDirtyForSession(orphan.id, now)
+            database.withTransaction {
+                sessionDao.stampFinalizeMetadata(
+                    sessionId = orphan.id,
+                    cloudId = cloudId,
+                    deviceCloudId = deviceCloudId,
+                    operatorName = operatorName,
+                    updatedAt = now
+                )
+                sessionDao.markSessionDirty(orphan.id, now)
+                lotDao.markLotsDirtyForSession(orphan.id, now)
+                rdNumberDao.markRdNumbersDirtyForSession(orphan.id, now)
+            }
         }
     }
 
@@ -846,10 +901,26 @@ class SyncRepository(
                 if (delta.highWaterMark > priorCursor) {
                     deviceSettingsDao.updateLastPulledAt(delta.highWaterMark)
                 }
-                for (notice in emitted) {
-                    syncEventDao.insert(notice.toEvent())
-                }
                 emitted.toList()
+            }
+            // SyncEvent inserts are intentionally OUTSIDE the merge
+            // transaction. A malformed SyncEvent (e.g. a future enum
+            // value that fails type conversion) would otherwise roll
+            // back the entire merge, losing every row that was just
+            // successfully written, and the next pull would re-process
+            // identical data and hit the same failure. The bell
+            // history is observability, not data — best-effort is
+            // the right durability tier. Each insert is independent
+            // so a single bad notice doesn't block the others.
+            for (notice in notices) {
+                runCatching { syncEventDao.insert(notice.toEvent()) }
+                    .onFailure {
+                        android.util.Log.w(
+                            "SyncRepository",
+                            "sync_event insert failed (notice=${notice::class.simpleName}); merge data was saved",
+                            it
+                        )
+                    }
             }
             allNotices += notices
             sinceCursor = delta.highWaterMark
@@ -1228,6 +1299,12 @@ class SyncRepository(
          * banner lights up well before any row gets circuit-broken.
          */
         private const val ERROR_NOTIFY_THRESHOLD = 3
+
+        /** SharedPreferences key for the persisted consecutive-failures counter. */
+        const val KEY_CONSECUTIVE_FAILURES = "consecutivePushFailures"
+
+        /** SharedPreferences file name. */
+        const val PREFS_FILE = "sync_repository_state"
 
         /**
          * After the threshold fires, re-fire the notification every

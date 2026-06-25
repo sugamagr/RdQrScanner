@@ -110,7 +110,7 @@ object LotImageGenerator {
             }
             file
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.e("LotImageGenerator", "image generation failed", e)
             null
         } finally {
             // P5γ LOW: recycle in finally so an exception during compress()

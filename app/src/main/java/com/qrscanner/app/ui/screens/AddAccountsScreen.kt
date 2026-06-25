@@ -283,6 +283,11 @@ private suspend fun persistAll(
     val now = System.currentTimeMillis()
     val out = mutableListOf<RdAccount>()
     val dao = app.database.rdAccountDao()
+    // Read ownerId once per batch instead of per row so a mid-batch
+    // signOut can't end up with some rows stamped and others not — the
+    // worst case is all rows skip ownerId together, which the next
+    // pushSession backfills uniformly.
+    val ownerId = app.database.deviceSettingsDao().get()?.ownerId
     for (d in drafts) {
         if (!d.isFullyValid()) continue
         val rdNumber = d.rdNumber.trim()
@@ -315,6 +320,13 @@ private suspend fun persistAll(
             monthlyAmount = amount,
             source = AccountSource.MANUAL,
             isActive = true,
+            // ownerId stamped at insert so the row carries authoritative
+            // RLS context before the first push attempt. Without it the
+            // row sits at NULL until pushSession echoes back, and a
+            // realtime pull racing the first push could pick up the row
+            // with no owner_id and either drop it (RLS rejects) or
+            // route it through merge logic that assumes ownership.
+            ownerId = ownerId,
             cloudId = UUID.randomUUID().toString(),
             syncStatus = SyncStatus.DIRTY,
             updatedAt = now

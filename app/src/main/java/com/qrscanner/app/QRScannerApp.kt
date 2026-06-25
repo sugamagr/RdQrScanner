@@ -62,7 +62,12 @@ class QRScannerApp : Application(), Configuration.Provider {
     }
 
     val syncRepository: SyncRepository by lazy {
-        SyncRepository(database, cloudClient, syncNotifier)
+        SyncRepository(
+            database = database,
+            cloudClient = cloudClient,
+            notifier = syncNotifier,
+            syncPrefs = getSharedPreferences(SyncRepository.PREFS_FILE, MODE_PRIVATE)
+        )
     }
 
     val syncScheduler: SyncWorkScheduler by lazy {

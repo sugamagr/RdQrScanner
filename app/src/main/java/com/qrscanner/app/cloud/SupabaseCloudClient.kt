@@ -161,7 +161,15 @@ class SupabaseCloudClient(
             function = "next_display_number",
             parameters = buildJsonObject { put("p_owner_id", ownerId) }
         ).data.trim().trim('"')
-        raw.toIntOrNull() ?: error("next_display_number returned non-int: '$raw'")
+        // Throw CloudException, not error(): a malformed RPC response is
+        // a server-side schema/trigger bug, not a phone bug. Routing
+        // through CloudException lets the existing classify() logic in
+        // SyncPushWorker treat it as a transient server fault (retry)
+        // instead of an uncaught crash that surfaces to the user.
+        raw.toIntOrNull() ?: throw CloudException.Server(
+            status = 0,
+            body = "next_display_number returned non-int: '$raw'"
+        )
     }
 
     override suspend fun upsertSession(session: ScanSessionDto): ScanSessionDto = runCloud {
@@ -469,8 +477,13 @@ class SupabaseCloudClient(
 
     private fun UserSession.toCloud(): CloudSession {
         val user = this.user
+        // A session without user.id means the Supabase SDK gave us a
+        // malformed/expired credential. Surfacing as AuthExpired routes
+        // through the existing sign-in re-prompt UX instead of crashing
+        // the process — same treatment as the explicit 401 path.
+        val ownerId = user?.id ?: throw CloudException.AuthExpired()
         return CloudSession(
-            ownerId = user?.id ?: error("UserSession.user.id missing"),
+            ownerId = ownerId,
             email = user.email ?: "",
             accessToken = accessToken,
             refreshToken = refreshToken,

@@ -632,9 +632,20 @@ private fun RDCameraScreen(
                 app.syncScheduler.enqueuePush()
             } catch (e: Exception) {
                 // Narrowed from Throwable so Errors (OOM etc.) propagate
-                // cleanly instead of being silently swallowed (oracle
-                // regression W1).
+                // cleanly instead of being silently swallowed.
                 android.util.Log.w("RDScannerScreen", "finalize: deferred sync enqueue", e)
+                // User-facing surface: a silent log here leaves the
+                // operator believing sync is fine while the session
+                // sits LOCAL_ONLY forever — the most common cause is
+                // an interrupted first-run setup, which the operator
+                // can resolve from Settings. Toast tells them the
+                // data is safe locally and points at the recovery
+                // path without alarming them about data loss.
+                Toast.makeText(
+                    context,
+                    "Saved locally. Sync paused — complete sign-in to upload.",
+                    Toast.LENGTH_LONG
+                ).show()
             }
             runCatching {
                 val stamped = app.database.scanSessionDao().getSessionById(session.id)
@@ -856,7 +867,7 @@ private fun RDCameraScreen(
                 imageAnalysis
             )
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.e("RDScannerScreen", "camera binding failed", e)
         }
     }
 
