@@ -322,7 +322,14 @@ private suspend fun persistAll(
         runCatching { dao.insert(account) }
             .onFailure {
                 if (com.qrscanner.app.BuildConfig.DEBUG) {
-                    android.util.Log.w("AddAccountsScreen", "duplicate ${account.rdNumber}", it)
+                    // PII redaction: rd_number is a sensitive financial
+                    // identifier — never log it verbatim. Log only the
+                    // tail-4 + length so a developer can still
+                    // distinguish duplicates without exposing the full
+                    // account number to logcat, crash reports, or
+                    // device backups.
+                    val rdNumberMasked = "***${account.rdNumber.takeLast(4)} (len=${account.rdNumber.length})"
+                    android.util.Log.w("AddAccountsScreen", "duplicate $rdNumberMasked", it)
                 }
             }
         out += account

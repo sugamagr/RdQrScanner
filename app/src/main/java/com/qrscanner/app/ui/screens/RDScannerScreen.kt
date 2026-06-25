@@ -81,6 +81,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -126,8 +127,11 @@ import com.qrscanner.app.ui.theme.SuccessGreen
 import com.qrscanner.app.ui.theme.TextSecondary
 import com.qrscanner.app.ui.theme.WarningAmber
 import com.qrscanner.app.ui.theme.CardBackground
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -195,6 +199,17 @@ private fun RDCameraScreen(
     val currentLotNumbers = remember { mutableStateListOf<String>() }
     val allSessionNumbers = remember { mutableStateListOf<String>() }
     val lotAmountCache = remember { mutableStateMapOf<String, Int?>() }
+    // O(1) duplicate-check mirrors. The visible lists must keep
+    // insertion order for the Recently-Scanned UI and the live total,
+    // but List.contains is O(N) — at 500 scans/session that's 250k
+    // string compares per session (~250ms cumulative jank). A plain
+    // HashSet gives O(1) contains without changing the visible UX.
+    // These are intentionally NOT Compose snapshot state — they're
+    // only read inside non-Composable scan logic, never observed for
+    // recomposition. Every add/remove on the visible lists MUST also
+    // mutate the matching set or the dedup check silently breaks.
+    val currentLotNumbersSet = remember { HashSet<String>() }
+    val allSessionNumbersSet = remember { HashSet<String>() }
     var isHydrated by remember { mutableStateOf(false) }
 
     // Camera state — flash survives config change so users don't have to retoggle.
@@ -270,10 +285,16 @@ private fun RDCameraScreen(
 
         currentSession = session
         currentSessionId = session.id
+        val allRowNumbers = allRows.map { it.number }
+        val pinnedRowNumbers = pinnedRows.sortedByDescending { it.position }.map { it.number }
         allSessionNumbers.clear()
-        allSessionNumbers.addAll(allRows.map { it.number })
+        allSessionNumbers.addAll(allRowNumbers)
+        allSessionNumbersSet.clear()
+        allSessionNumbersSet.addAll(allRowNumbers)
         currentLotNumbers.clear()
-        currentLotNumbers.addAll(pinnedRows.sortedByDescending { it.position }.map { it.number })
+        currentLotNumbers.addAll(pinnedRowNumbers)
+        currentLotNumbersSet.clear()
+        currentLotNumbersSet.addAll(pinnedRowNumbers)
 
         if (pinnedLot != null) {
             currentLotId = pinnedLot.id
@@ -300,7 +321,9 @@ private fun RDCameraScreen(
         totalLotsInSession = 0
         currentLotId = null
         currentLotNumbers.clear()
+        currentLotNumbersSet.clear()
         allSessionNumbers.clear()
+        allSessionNumbersSet.clear()
         isHydrated = true
     }
 
@@ -318,11 +341,16 @@ private fun RDCameraScreen(
         val allRows = app.database.rdNumberDao().getAllNumbersInSession(sessionId)
         allSessionNumbers.clear()
         allSessionNumbers.addAll(allRows)
+        allSessionNumbersSet.clear()
+        allSessionNumbersSet.addAll(allRows)
         val lotId = currentLotId
         if (lotId != null) {
             val rows = app.database.rdNumberDao().getNumbersForLotSync(lotId)
+            val rowNumbers = rows.sortedByDescending { it.position }.map { it.number }
             currentLotNumbers.clear()
-            currentLotNumbers.addAll(rows.sortedByDescending { it.position }.map { it.number })
+            currentLotNumbers.addAll(rowNumbers)
+            currentLotNumbersSet.clear()
+            currentLotNumbersSet.addAll(rowNumbers)
         }
         val pendingLotId = lotReviewLotId
         if (pendingLotId != null && showLotReviewScreen) {
@@ -394,7 +422,7 @@ private fun RDCameraScreen(
                             vibrator?.vibrate(VibrationEffect.createOneShot(100, VibrationEffect.DEFAULT_AMPLITUDE))
                         } catch (e: Exception) { /* ignore */ }
                     }
-                    currentLotNumbers.contains(cleanValue) -> {
+                    currentLotNumbersSet.contains(cleanValue) -> {
                         lastScanFeedback = ScanFeedback.Duplicate("Already in current LOT")
                         try {
                             toneGenerator?.startTone(ToneGenerator.TONE_PROP_NACK, 200)
@@ -402,7 +430,7 @@ private fun RDCameraScreen(
                             vibrator?.vibrate(VibrationEffect.createOneShot(100, VibrationEffect.DEFAULT_AMPLITUDE))
                         } catch (e: Exception) { /* ignore */ }
                     }
-                    allSessionNumbers.contains(cleanValue) -> {
+                    allSessionNumbersSet.contains(cleanValue) -> {
                         lastScanFeedback = ScanFeedback.Duplicate("Already scanned in this session")
                         try {
                             toneGenerator?.startTone(ToneGenerator.TONE_PROP_NACK, 200)
@@ -458,7 +486,21 @@ private fun RDCameraScreen(
                             )
                         }
                         currentLotNumbers.add(0, cleanValue)
+                        currentLotNumbersSet.add(cleanValue)
                         allSessionNumbers.add(cleanValue)
+                        allSessionNumbersSet.add(cleanValue)
+                        // Resolve monthlyAmount at the scan site so the
+                        // live-total chip stays O(1) per scan. A size-keyed
+                        // LaunchedEffect would re-filter the whole list on
+                        // every append (O(N) cache probes per scan, ~6,400
+                        // probes per 80-row LOT). Rehydration paths prime
+                        // the cache via the session-keyed effect below.
+                        if (cleanValue !in lotAmountCache) {
+                            val amount = runCatching {
+                                app.database.rdAccountDao().findByRdNumber(cleanValue)?.monthlyAmount
+                            }.getOrNull()
+                            lotAmountCache[cleanValue] = amount
+                        }
                         lastScanFeedback = ScanFeedback.Success(cleanValue)
                         try {
                             toneGenerator?.startTone(ToneGenerator.TONE_PROP_ACK, 150)
@@ -480,16 +522,13 @@ private fun RDCameraScreen(
         }
     }
 
-    // Resolve monthly amount for any newly-scanned RD number so the
-    // live-total chip can sum the verified accounts. Keyed on .size
-    // not .toList() — .toList() allocates a fresh list every
-    // recompose so Compose sees the key as 'changed' every frame and
-    // re-launches the effect. Since the LOT mutation flow is append-
-    // only (scans add, finishing/rescanning empties), .size is a
-    // sufficient + stable proxy for 'list changed in a way that
-    // matters'. Removals via undo also bump .size down (see swipe-
-    // delete in the Recently Scanned list).
-    LaunchedEffect(currentLotNumbers.size) {
+    // Cache-prime path for rehydration only (adoptSession /
+    // rehydrateAfterConfigChange restore currentLotNumbers from disk).
+    // Keyed on currentSessionId so the loop fires once per session
+    // boot, not once per scan — scan-site resolution above handles
+    // the steady-state append case.
+    LaunchedEffect(currentSessionId) {
+        val sessionId = currentSessionId ?: return@LaunchedEffect
         val missing = currentLotNumbers.filter { it !in lotAmountCache }
         for (rdNumber in missing) {
             val amount = runCatching {
@@ -497,6 +536,8 @@ private fun RDCameraScreen(
             }.getOrNull()
             lotAmountCache[rdNumber] = amount
         }
+        // Suppress unused warning; sessionId is the key.
+        @Suppress("UNUSED_EXPRESSION") sessionId
     }
 
     // Derived live total for the chip. monthsPaid is always 1 at scan
@@ -549,8 +590,17 @@ private fun RDCameraScreen(
             if (lastRow != null) {
                 app.database.rdNumberDao().deleteById(lastRow.id)
                 currentLotNumbers.remove(lastRow.number)
+                currentLotNumbersSet.remove(lastRow.number)
                 allSessionNumbers.remove(lastRow.number)
-                Toast.makeText(context, "Removed: ${lastRow.number}", Toast.LENGTH_SHORT).show()
+                allSessionNumbersSet.remove(lastRow.number)
+                lotAmountCache.remove(lastRow.number)
+                // PII: shoulder-surfing protection. The rd_number is a
+                // sensitive financial identifier; surfacing it in a
+                // Toast (visible to anyone glancing at the screen and
+                // captured by some accessibility tooling) leaks the
+                // customer's account number. Confirm the undo action
+                // without disclosing which number was removed.
+                Toast.makeText(context, "Last scan removed", Toast.LENGTH_SHORT).show()
                 if (currentLotNumbers.isEmpty()) {
                     app.database.scanLotDao().deleteIfEmpty(lotId)
                     app.database.scanSessionDao().setActiveLotId(sessionId, null)
@@ -656,7 +706,15 @@ private fun RDCameraScreen(
             totalLotsInSession++
             currentLotNumber++
             currentLotId = null
+            // Drop cached monthlyAmount for rows belonging to the
+            // just-finished LOT. Without this the cache grows for the
+            // whole session (~40 bytes/row × 500 scans = 20KB of dead
+            // entries), and a re-scan of the same rd_number in a later
+            // LOT would silently reuse a stale amount if the operator
+            // edited it via Accounts mid-session.
+            lotAmountCache.keys.removeAll(currentLotNumbers.toSet())
             currentLotNumbers.clear()
+            currentLotNumbersSet.clear()
 
             lotReviewLotId = lotId
             lotReviewLotNumber = savedLotNumber
@@ -681,7 +739,9 @@ private fun RDCameraScreen(
                 totalLotsInSession++
                 currentLotNumber++
                 currentLotId = null
+                lotAmountCache.keys.removeAll(currentLotNumbers.toSet())
                 currentLotNumbers.clear()
+                currentLotNumbersSet.clear()
 
                 lotReviewLotId = lotId
                 lotReviewLotNumber = savedLotNumber
@@ -731,72 +791,84 @@ private fun RDCameraScreen(
         }
     }
 
+    // Hoist the PreviewView reference so camera binding happens
+    // exactly once (LaunchedEffect below), not on every AndroidView
+    // recomposition. The prior pattern called addListener() inside
+    // AndroidView.update, which runs on every recomposition (rotation,
+    // dialog open/close, state change). Each call accumulated another
+    // listener on the already-completed ListenableFuture and triggered
+    // another unbindAll() + bindToLifecycle() cycle — at ~50 recomps
+    // per session that's 50 redundant camera rebinds and a runaway
+    // listener list. Binding once on first PreviewView availability
+    // matches CameraX's documented lifecycle contract.
+    val previewViewRef = remember { mutableStateOf<PreviewView?>(null) }
+
+    LaunchedEffect(Unit) {
+        val previewView = snapshotFlow { previewViewRef.value }.first { it != null } ?: return@LaunchedEffect
+        try {
+            // ProcessCameraProvider.getInstance returns a ListenableFuture
+            // that completes on a CameraX-internal init executor. .get()
+            // blocks the calling thread until ready, so it must run on
+            // Dispatchers.IO — the alternative (kotlinx-coroutines-guava
+            // .await()) would add a transitive dep we don't otherwise need.
+            val cameraProvider = withContext(Dispatchers.IO) { cameraProviderFuture.get() }
+            val preview = Preview.Builder()
+                .build()
+                .also { it.surfaceProvider = previewView.surfaceProvider }
+
+            val imageAnalysis = ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .build()
+                .also { analysis ->
+                    analysis.setAnalyzer(executor) { imageProxy ->
+                        if (scanningEnabledRef.get() && isScanningRef.get() && pendingValueRef.get() == null) {
+                            val mediaImage = imageProxy.image
+                            if (mediaImage != null) {
+                                val image = InputImage.fromMediaImage(
+                                    mediaImage,
+                                    imageProxy.imageInfo.rotationDegrees
+                                )
+                                barcodeScanner.process(image)
+                                    .addOnSuccessListener { barcodes ->
+                                        barcodes.firstOrNull()?.rawValue?.let { value ->
+                                            if (scanningEnabledRef.get() &&
+                                                isScanningRef.compareAndSet(true, false) &&
+                                                pendingValueRef.compareAndSet(null, value)) {
+                                                scanTrigger++
+                                            }
+                                        }
+                                    }
+                                    .addOnCompleteListener { imageProxy.close() }
+                            } else {
+                                imageProxy.close()
+                            }
+                        } else {
+                            imageProxy.close()
+                        }
+                    }
+                }
+
+            cameraProvider.unbindAll()
+            camera = cameraProvider.bindToLifecycle(
+                lifecycleOwner,
+                CameraSelector.DEFAULT_BACK_CAMERA,
+                preview,
+                imageAnalysis
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
-        // Camera Preview
         AndroidView(
             factory = { ctx ->
                 PreviewView(ctx).apply {
                     implementationMode = PreviewView.ImplementationMode.COMPATIBLE
                     scaleType = PreviewView.ScaleType.FILL_CENTER
-                }
+                }.also { previewViewRef.value = it }
             },
-            modifier = Modifier.fillMaxSize(),
-            update = { previewView ->
-                cameraProviderFuture.addListener({
-                    try {
-                        val cameraProvider = cameraProviderFuture.get()
-                        
-                        val preview = Preview.Builder()
-                            .build()
-                            .also { it.surfaceProvider = previewView.surfaceProvider }
-                        
-                        val imageAnalysis = ImageAnalysis.Builder()
-                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                            .build()
-                            .also { analysis ->
-                                analysis.setAnalyzer(executor) { imageProxy ->
-                                    // Use atomic refs for thread-safe reads
-                                    if (scanningEnabledRef.get() && isScanningRef.get() && pendingValueRef.get() == null) {
-                                        val mediaImage = imageProxy.image
-                                        if (mediaImage != null) {
-                                            val image = InputImage.fromMediaImage(
-                                                mediaImage,
-                                                imageProxy.imageInfo.rotationDegrees
-                                            )
-                                            barcodeScanner.process(image)
-                                                .addOnSuccessListener { barcodes ->
-                                                    barcodes.firstOrNull()?.rawValue?.let { value ->
-                                                        // Double-check and atomically set
-                                                        if (scanningEnabledRef.get() && 
-                                                            isScanningRef.compareAndSet(true, false) && 
-                                                            pendingValueRef.compareAndSet(null, value)) {
-                                                            // Trigger UI update on main thread
-                                                            scanTrigger++
-                                                        }
-                                                    }
-                                                }
-                                                .addOnCompleteListener { imageProxy.close() }
-                                        } else {
-                                            imageProxy.close()
-                                        }
-                                    } else {
-                                        imageProxy.close()
-                                    }
-                                }
-                            }
-                        
-                        cameraProvider.unbindAll()
-                        camera = cameraProvider.bindToLifecycle(
-                            lifecycleOwner,
-                            CameraSelector.DEFAULT_BACK_CAMERA,
-                            preview,
-                            imageAnalysis
-                        )
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
-                }, ContextCompat.getMainExecutor(context))
-            }
+            modifier = Modifier.fillMaxSize()
         )
         
         // Modern scanner overlay
@@ -1398,14 +1470,17 @@ private fun RDCameraScreen(
                         // "already scanned in this session" duplicate guard
                         // at line ~388 and the operator cannot rescan at all.
                         val deletedNumbers = currentLotNumbers.toList()
+                        val deletedSet = deletedNumbers.toSet()
                         currentLotNumbers.clear()
-                        allSessionNumbers.removeAll(deletedNumbers.toSet())
+                        currentLotNumbersSet.clear()
+                        allSessionNumbers.removeAll(deletedSet)
+                        allSessionNumbersSet.removeAll(deletedSet)
                         // Also drop cached monthlyAmount entries for
                         // the discarded LOT so a future rescan re-
                         // resolves from rd_accounts (catches any
                         // amount edits that landed between the
                         // original scan + the rescan).
-                        lotAmountCache.keys.removeAll(deletedNumbers.toSet())
+                        lotAmountCache.keys.removeAll(deletedSet)
                         scanningEnabledRef.set(true)
                         isScanningRef.set(true)
                         Toast.makeText(

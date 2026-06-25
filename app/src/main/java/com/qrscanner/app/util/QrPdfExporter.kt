@@ -214,7 +214,13 @@ object QrPdfExporter {
             }
         }
     } catch (e: Exception) {
-        android.util.Log.e("QrPdfExporter", "QR encode failed for content=$content", e)
+        // PII redaction: `content` is the rd_number, a sensitive
+        // financial identifier. Logging it verbatim leaks customer
+        // account numbers to logcat / crash reports / device backups.
+        // Tail-4 + length is enough for a developer to disambiguate
+        // failures without exposing the full identifier.
+        val masked = "***${content.takeLast(4)} (len=${content.length})"
+        android.util.Log.e("QrPdfExporter", "QR encode failed for $masked", e)
         null
     }
 

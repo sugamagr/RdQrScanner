@@ -33,9 +33,11 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PersonAddAlt1
 import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -84,7 +86,8 @@ fun HomeScreen(
     onNavigateToAddAccounts: () -> Unit,
     onNavigateToAccounts: () -> Unit,
     onNavigateToHowItWorks: () -> Unit,
-    onNavigateToAppInfo: () -> Unit
+    onNavigateToAppInfo: () -> Unit,
+    onNavigateToSettings: () -> Unit
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as QRScannerApp
@@ -214,6 +217,17 @@ fun HomeScreen(
                     unreadCount = recentEvents.size,
                     onTap = { showHistorySheet = true }
                 )
+                IconButton(
+                    onClick = onNavigateToSettings,
+                    modifier = Modifier.size(44.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Settings,
+                        contentDescription = "Settings",
+                        tint = TextSecondary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
             }
 
             val showBanner = displayedSummary.state != SyncPillState.NOT_SIGNED_IN &&

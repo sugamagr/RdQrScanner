@@ -46,6 +46,16 @@ interface ScanSessionDao {
 
     @Query("DELETE FROM scan_sessions WHERE id = :id")
     suspend fun deleteById(id: Long)
+
+    /**
+     * Sign-out wipe: removes ALL scan_sessions rows. Called from the
+     * AppDatabase.wipeAllUserData() transaction. NEVER call this in
+     * normal flows — it is destructive. FK cascade handles scan_lots
+     * and rd_numbers, but the wipe still calls each table's deleteAll
+     * for fail-safety against partial cascade on older Room versions.
+     */
+    @Query("DELETE FROM scan_sessions")
+    suspend fun deleteAll()
     
     // End session with display number
     @Query("UPDATE scan_sessions SET isActive = 0, endTime = :endTime, totalLots = :totalLots, totalRdNumbers = :totalRdNumbers, displayNumber = :displayNumber, activeLotId = NULL WHERE id = :id")
@@ -291,6 +301,10 @@ interface ScanLotDao {
 
     @Insert
     suspend fun insert(lot: ScanLot): Long
+
+    /** Sign-out wipe — see [ScanSessionDao.deleteAll] for contract. */
+    @Query("DELETE FROM scan_lots")
+    suspend fun deleteAllLots()
 
     @Query("DELETE FROM scan_lots WHERE sessionId = :sessionId")
     suspend fun deleteLotsForSession(sessionId: Long)

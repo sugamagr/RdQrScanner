@@ -56,6 +56,19 @@ interface RdAccountDao {
     @Query("SELECT * FROM rd_accounts WHERE rdNumber = :rdNumber LIMIT 1")
     suspend fun findByRdNumberIncludingDeleted(rdNumber: String): RdAccount?
 
+    /**
+     * Batched lookup — replaces an N+1 query pattern in
+     * [com.qrscanner.app.ui.screens.LotReviewBuilder.build] where an
+     * 80-row LOT was firing 80 separate `findByRdNumber` queries
+     * (80-240ms blocking before the review screen opened). One IN
+     * clause closes that to a single round-trip. SQLite's default
+     * `SQLITE_LIMIT_VARIABLE_NUMBER` is 999 on Android, so the caller
+     * must chunk if `rdNumbers.size > 999`; in-app LOTs are bounded
+     * to 80 by the live counter, so we don't pre-chunk here.
+     */
+    @Query("SELECT * FROM rd_accounts WHERE rdNumber IN (:rdNumbers) AND deletedAt IS NULL")
+    suspend fun findByRdNumbers(rdNumbers: List<String>): List<RdAccount>
+
     // ── Local writes (NOT auto-DIRTY — callers must flip syncStatus) ─
 
     @Insert
@@ -305,6 +318,14 @@ interface RdAccountDao {
 
     @Query("UPDATE rd_accounts SET syncStatus = 'DIRTY' WHERE syncStatus = 'SYNCING'")
     suspend fun recoverStuckSyncing()
+
+    /**
+     * Sign-out wipe — removes ALL rd_accounts rows. Called from the
+     * AppDatabase.wipeAllUserData() transaction. Destructive; never
+     * call in normal flows.
+     */
+    @Query("DELETE FROM rd_accounts")
+    suspend fun deleteAll()
 
     // ── Pull merge helpers ────────────────────────────────────────────
 

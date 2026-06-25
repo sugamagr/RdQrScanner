@@ -5,6 +5,7 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
+import androidx.room.withTransaction
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
@@ -27,6 +28,30 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun deviceSettingsDao(): DeviceSettingsDao
     abstract fun syncEventDao(): SyncEventDao
     abstract fun rdAccountDao(): RdAccountDao
+
+    /**
+     * Sign-out wipe — atomically drops every row of user-owned content
+     * (sessions, lots, rd_numbers, rd_accounts, sync_events). The
+     * device_settings singleton is NOT cleared here — callers invoke
+     * [DeviceSettingsDao.clearOwner] separately so identity-vs-data
+     * stay independently testable. Delete order respects FK direction
+     * (children first) so the wipe never fails an FK check mid-
+     * transaction even when destructive-migration paths skip cascade.
+     *
+     * Threat model: without this wipe, signing out and signing back
+     * in as a different owner would surface the prior owner's
+     * locally-cached sessions and accounts — a cross-owner data leak
+     * on shared devices.
+     */
+    suspend fun wipeAllUserData() {
+        withTransaction {
+            rdNumberDao().deleteAll()
+            scanLotDao().deleteAllLots()
+            scanSessionDao().deleteAll()
+            rdAccountDao().deleteAll()
+            syncEventDao().deleteAll()
+        }
+    }
 
     companion object {
         @Volatile

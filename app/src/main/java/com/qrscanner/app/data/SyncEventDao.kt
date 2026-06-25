@@ -22,6 +22,10 @@ interface SyncEventDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(event: SyncEvent): Long
 
+    /** Sign-out wipe — see ScanSessionDao.deleteAll() for contract. */
+    @Query("DELETE FROM sync_events")
+    suspend fun deleteAll()
+
     @Query("SELECT * FROM sync_events WHERE occurredAt > :since ORDER BY occurredAt DESC LIMIT :limit")
     suspend fun getEventsSince(since: Long, limit: Int = 20): List<SyncEvent>
 

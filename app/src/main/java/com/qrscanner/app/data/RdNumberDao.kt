@@ -40,6 +40,10 @@ interface RdNumberDao {
     """)
     suspend fun getAllRowsInSession(sessionId: Long): List<RdNumber>
 
+    /** Sign-out wipe — see [ScanSessionDao.deleteAll] for contract. */
+    @Query("DELETE FROM rd_numbers")
+    suspend fun deleteAll()
+
     @Query("DELETE FROM rd_numbers WHERE lotId = :lotId")
     suspend fun deleteForLot(lotId: Long)
 

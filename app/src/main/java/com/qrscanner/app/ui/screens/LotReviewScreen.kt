@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.qrscanner.app.R
+import com.qrscanner.app.data.RdAccount
 import com.qrscanner.app.data.RdNumber
 import com.qrscanner.app.ui.components.GradientTopBar
 import com.qrscanner.app.ui.theme.AccentCoral
@@ -1414,10 +1415,21 @@ object LotReviewBuilder {
         val anchor = MonthYear.fromEpochMillis(
             lotTimestamp.takeIf { it > 0 } ?: System.currentTimeMillis()
         )
+        // Single batched lookup instead of N+1 per-row queries. For an
+        // 80-row LOT this drops 80 round-trips to 1 (~80-240ms saved
+        // before the review screen renders). The Map gives O(1) access
+        // in the map{} below.
+        val accountsByRdNumber: Map<String, RdAccount> = if (rdRows.isEmpty()) {
+            emptyMap()
+        } else {
+            runCatching {
+                app.database.rdAccountDao()
+                    .findByRdNumbers(rdRows.map { it.number })
+                    .associateBy { it.rdNumber }
+            }.getOrDefault(emptyMap())
+        }
         return rdRows.map { rd ->
-            val account = runCatching {
-                app.database.rdAccountDao().findByRdNumber(rd.number)
-            }.getOrNull()
+            val account = accountsByRdNumber[rd.number]
             val accountLastPaid = account?.lastPaidThrough?.let { MonthYear.parseToken(it) }
             val existing = MonthYear.parseList(rd.monthsList, rd.monthsPaid)
             val selected: List<MonthYear> = if (existing != null) {

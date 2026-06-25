@@ -411,7 +411,18 @@ private fun LotCard(
         try {
             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             val rdNumbersString = rdNumberStrings.joinToString(", ")
-            clipboard.setPrimaryClip(ClipData.newPlainText("LOT ${lot.lotNumber}", rdNumbersString))
+            val clip = ClipData.newPlainText("LOT ${lot.lotNumber}", rdNumbersString)
+            // PII: rd_numbers are sensitive financial identifiers. On
+            // Android 13+ the system shows a clipboard preview in the
+            // keyboard suggestion strip and notification shade; without
+            // the sensitive flag, comma-separated rd_numbers are
+            // visible to bystanders and to screenshot capture tools.
+            // The IS_SENSITIVE extra suppresses preview while still
+            // letting the user paste into the target app.
+            clip.description.extras = android.os.PersistableBundle().apply {
+                putBoolean("android.content.extra.IS_SENSITIVE", true)
+            }
+            clipboard.setPrimaryClip(clip)
             Toast.makeText(context, "Copied $rdNumberCount numbers", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
             Toast.makeText(context, "Failed to copy", Toast.LENGTH_SHORT).show()
