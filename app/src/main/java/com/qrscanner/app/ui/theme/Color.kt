@@ -17,8 +17,13 @@ val AccentCoral = Color(0xFFFF6B6B)
 
 // Darker coral used specifically for the bell unread badge so
 // white 10sp text passes WCAG AA (4.5:1 small text). #DC2626
-// (red-600) has luminance ~0.133, giving 5.43:1 white contrast.
-// Kept separate from AccentCoral so non-badge usages preserve the
+// (red-600) has relative luminance ~0.167 (recomputed from sRGB
+// → linear → coefficients: 0.2126·0.715 + 0.7152·0.0194 +
+// 0.0722·0.0194 = 0.167), giving white contrast (1.05)/(0.217)
+// = 4.83:1. A prior comment claimed 5.43:1 — that was a math
+// error caught in QC; 4.83:1 still passes the 4.5:1 AA-small
+// threshold so the badge readability is unaffected. Kept
+// separate from AccentCoral so non-badge usages preserve the
 // brand's friendlier coral tone.
 val AccentCoralDark = Color(0xFFDC2626)
 
