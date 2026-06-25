@@ -32,8 +32,11 @@ create table if not exists public.devices (
     last_seen_at  timestamptz not null default now(),
     app_version   text,
     created_at    timestamptz not null default now(),
-    updated_at    timestamptz not null default now()
+    updated_at    timestamptz not null default now(),
+    deleted_at    timestamptz
 );
+-- Idempotent column add for upgrades from earlier schema versions.
+alter table public.devices add column if not exists deleted_at timestamptz;
 create index if not exists devices_owner_idx
     on public.devices (owner_id, last_seen_at desc);
 
@@ -58,11 +61,29 @@ create index if not exists scan_sessions_owner_deletedat_idx
     on public.scan_sessions (owner_id, deleted_at);
 create index if not exists scan_sessions_owner_displaynum_idx
     on public.scan_sessions (owner_id, display_number);
+-- Pull-cycle hot path: WHERE owner_id = :me AND updated_at > :cursor.
+-- Without this composite the pull does a full table scan + filesort.
+create index if not exists scan_sessions_owner_updatedat_idx
+    on public.scan_sessions (owner_id, updated_at);
+-- Defense in depth against next_display_number RPC bugs: the advisory
+-- lock serializes the RPC, but the unique constraint guarantees that
+-- even if the lock is bypassed (future refactor mistake) the DB will
+-- still reject duplicate display numbers per owner.
+alter table public.scan_sessions
+    drop constraint if exists scan_sessions_owner_displaynum_unique;
+alter table public.scan_sessions
+    add constraint scan_sessions_owner_displaynum_unique
+    unique (owner_id, display_number);
 
 create table if not exists public.scan_lots (
     id          uuid primary key default gen_random_uuid(),
     owner_id    uuid not null references auth.users(id) on delete cascade,
-    session_id  uuid not null references public.scan_sessions(id) on delete cascade,
+    -- ON DELETE RESTRICT (not CASCADE): hard-deleting a session would
+    -- silently drop child lots without producing tombstones, so phones
+    -- that haven't pulled yet would never learn the lots were deleted.
+    -- Soft-delete (deleted_at) is the only supported deletion path per
+    -- spec 11; RESTRICT enforces that contract at the FK boundary.
+    session_id  uuid not null references public.scan_sessions(id) on delete restrict,
     lot_number  int not null,
     timestamp   timestamptz not null,
     created_at  timestamptz not null default now(),
@@ -70,15 +91,24 @@ create table if not exists public.scan_lots (
     deleted_at  timestamptz,
     unique (session_id, lot_number)
 );
+-- Idempotent column add for upgrades from earlier schema versions.
+alter table public.scan_lots add column if not exists deleted_at timestamptz;
 create index if not exists scan_lots_session_lotnum_idx
     on public.scan_lots (session_id, lot_number);
 create index if not exists scan_lots_owner_idx
     on public.scan_lots (owner_id);
+-- Same pull-cycle + deletion-filter rationale as scan_sessions above.
+create index if not exists scan_lots_owner_updatedat_idx
+    on public.scan_lots (owner_id, updated_at);
+create index if not exists scan_lots_owner_deletedat_idx
+    on public.scan_lots (owner_id, deleted_at);
 
 create table if not exists public.rd_numbers (
     id                    uuid primary key default gen_random_uuid(),
     owner_id              uuid not null references auth.users(id) on delete cascade,
-    lot_id                uuid not null references public.scan_lots(id) on delete cascade,
+    -- ON DELETE RESTRICT (not CASCADE): same rationale as scan_lots ->
+    -- scan_sessions above. Hard-deleting a lot would orphan tombstones.
+    lot_id                uuid not null references public.scan_lots(id) on delete restrict,
     number                text not null,
     position              int not null,
     scanned_at            timestamptz not null,
@@ -106,6 +136,12 @@ create index if not exists rd_numbers_owner_idx
     on public.rd_numbers (owner_id);
 create index if not exists rd_numbers_owner_number_idx
     on public.rd_numbers (owner_id, number);
+-- Pull-cycle hot path + deletion filter. Same rationale as
+-- scan_sessions above.
+create index if not exists rd_numbers_owner_updatedat_idx
+    on public.rd_numbers (owner_id, updated_at);
+create index if not exists rd_numbers_owner_deletedat_idx
+    on public.rd_numbers (owner_id, deleted_at);
 -- Trigram GIN index for sub-100ms partial-match search at scale.
 -- Phase 5 T5.10. Powers the portal's searchRdNumbers() ILIKE query.
 -- gin_trgm_ops requires pg_trgm extension (created above).
@@ -147,6 +183,51 @@ create trigger trg_rd_numbers_updated_at
     before update on public.rd_numbers
     for each row execute function public.set_updated_at();
 
+-- Clock-skew clamp on inbound updated_at. A phone with a wrong clock
+-- (manual time-set, broken NTP) could push rows whose updated_at is
+-- years in the future, winning every LWW comparison forever. The clamp
+-- accepts up to 1h of NTP drift but rejects anything beyond that and
+-- pins it to now(). Fires on BEFORE INSERT only; UPDATE is already
+-- covered by set_updated_at() which unconditionally stamps now().
+
+create or replace function public.clamp_updated_at()
+returns trigger
+language plpgsql
+as $$
+declare
+    v_max_allowed timestamptz := now() + interval '1 hour';
+begin
+    if new.updated_at is null then
+        new.updated_at := now();
+    elsif new.updated_at > v_max_allowed then
+        raise notice 'clamp_updated_at: % was %, clamped to now()',
+            tg_table_name, new.updated_at;
+        new.updated_at := now();
+    end if;
+    return new;
+end;
+$$;
+
+drop trigger if exists trg_devices_clamp_updated_at on public.devices;
+create trigger trg_devices_clamp_updated_at
+    before insert on public.devices
+    for each row execute function public.clamp_updated_at();
+
+drop trigger if exists trg_scan_sessions_clamp_updated_at on public.scan_sessions;
+create trigger trg_scan_sessions_clamp_updated_at
+    before insert on public.scan_sessions
+    for each row execute function public.clamp_updated_at();
+
+drop trigger if exists trg_scan_lots_clamp_updated_at on public.scan_lots;
+create trigger trg_scan_lots_clamp_updated_at
+    before insert on public.scan_lots
+    for each row execute function public.clamp_updated_at();
+
+drop trigger if exists trg_rd_numbers_clamp_updated_at on public.rd_numbers;
+create trigger trg_rd_numbers_clamp_updated_at
+    before insert on public.rd_numbers
+    for each row execute function public.clamp_updated_at();
+
 -- 3. next_display_number RPC ------------------------------------------
 -- Server-assigned display number under a Postgres advisory lock so two
 -- concurrent phones can never collide on the same number. Per spec §5.
@@ -170,11 +251,17 @@ begin
 
     perform pg_advisory_xact_lock(hashtext(p_owner_id::text));
 
+    -- No deleted_at filter: tombstoned sessions still occupy their
+    -- display number so the sequence never reuses one. Without this,
+    -- soft-deleting Session #47 would let the next finalized session
+    -- re-claim #47, producing duplicate display numbers in the owner's
+    -- audit trail and breaking cross-device monotonicity. The unique
+    -- constraint added to scan_sessions enforces this at the DB level
+    -- as a safety net.
     select coalesce(max(display_number), 0) + 1
         into v_next
         from public.scan_sessions
-        where owner_id = p_owner_id
-          and deleted_at is null;
+        where owner_id = p_owner_id;
 
     return v_next;
 end;
@@ -216,23 +303,41 @@ create policy "scan_sessions: owner update" on public.scan_sessions
     for update using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
 -- scan_lots --------------------------------------------------------
+-- INSERT policy also verifies the parent session belongs to the same
+-- owner. Defense in depth: UUIDs are 128-bit random so guessing a
+-- victim's session id is infeasible, but the EXISTS check costs us
+-- nothing and the policy reads more correctly (it enforces the
+-- ownership invariant the FK alone can't express).
 drop policy if exists "scan_lots: owner select" on public.scan_lots;
 create policy "scan_lots: owner select" on public.scan_lots
     for select using (owner_id = auth.uid());
 drop policy if exists "scan_lots: owner insert" on public.scan_lots;
 create policy "scan_lots: owner insert" on public.scan_lots
-    for insert with check (owner_id = auth.uid());
+    for insert with check (
+        owner_id = auth.uid()
+        and exists (
+            select 1 from public.scan_sessions s
+            where s.id = session_id and s.owner_id = auth.uid()
+        )
+    );
 drop policy if exists "scan_lots: owner update" on public.scan_lots;
 create policy "scan_lots: owner update" on public.scan_lots
     for update using (owner_id = auth.uid()) with check (owner_id = auth.uid());
 
 -- rd_numbers -------------------------------------------------------
+-- Same defense-in-depth EXISTS check on parent lot ownership.
 drop policy if exists "rd_numbers: owner select" on public.rd_numbers;
 create policy "rd_numbers: owner select" on public.rd_numbers
     for select using (owner_id = auth.uid());
 drop policy if exists "rd_numbers: owner insert" on public.rd_numbers;
 create policy "rd_numbers: owner insert" on public.rd_numbers
-    for insert with check (owner_id = auth.uid());
+    for insert with check (
+        owner_id = auth.uid()
+        and exists (
+            select 1 from public.scan_lots l
+            where l.id = lot_id and l.owner_id = auth.uid()
+        )
+    );
 drop policy if exists "rd_numbers: owner update" on public.rd_numbers;
 create policy "rd_numbers: owner update" on public.rd_numbers
     for update using (owner_id = auth.uid()) with check (owner_id = auth.uid());
@@ -307,11 +412,21 @@ create index if not exists rd_accounts_owner_active_idx
     on public.rd_accounts (owner_id, is_active);
 create index if not exists rd_accounts_name_trgm_idx
     on public.rd_accounts using gin (lower(name) gin_trgm_ops);
+-- Pull-cycle hot path + deletion filter (round-5 hardening).
+create index if not exists rd_accounts_owner_updatedat_idx
+    on public.rd_accounts (owner_id, updated_at);
+create index if not exists rd_accounts_owner_deletedat_idx
+    on public.rd_accounts (owner_id, deleted_at);
 
 drop trigger if exists trg_rd_accounts_updated_at on public.rd_accounts;
 create trigger trg_rd_accounts_updated_at
     before update on public.rd_accounts
     for each row execute function public.set_updated_at();
+
+drop trigger if exists trg_rd_accounts_clamp_updated_at on public.rd_accounts;
+create trigger trg_rd_accounts_clamp_updated_at
+    before insert on public.rd_accounts
+    for each row execute function public.clamp_updated_at();
 
 alter table public.rd_accounts enable row level security;
 
