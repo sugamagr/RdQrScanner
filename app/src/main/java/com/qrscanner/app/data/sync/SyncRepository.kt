@@ -858,6 +858,22 @@ class SyncRepository(
         var pages = 0
         while (true) {
             pages++
+            // Surface progress only after the first page completes —
+            // single-page pulls (the steady-state case) never show the
+            // counter. The counter renders only when a drain is
+            // actually in progress (pages > 1 or current page is
+            // already known to be full).
+            if (pages > 1) {
+                updateSummary {
+                    it.copy(
+                        state = SyncPillState.SYNCING,
+                        pullProgress = PullProgress(
+                            pagesProcessed = pages,
+                            pagesUpperBound = MAX_DRAIN_PAGES
+                        )
+                    )
+                }
+            }
             val delta = try {
                 cloudClient.pullChangesSince(ownerId, sinceCursor)
             } catch (e: CloudException.AuthExpired) {
@@ -945,7 +961,12 @@ class SyncRepository(
             // Pull success means cloud is reachable + auth works, so
             // also clear any stale ERROR/SCHEMA_MISSING/lastErrorMessage
             // from a prior push failure.
-            it.copy(state = SyncPillState.SYNCED, lastSuccessfulPullAt = now, lastErrorMessage = null)
+            it.copy(
+                state = SyncPillState.SYNCED,
+                lastSuccessfulPullAt = now,
+                lastErrorMessage = null,
+                pullProgress = null
+            )
         }
         notifyRemoteEdits(allNotices)
         return Result.success(Unit)
@@ -1032,7 +1053,9 @@ class SyncRepository(
                 }
             } else {
                 val wasAlive = existing.deletedAt == null
-                sessionDao.mergeFromCloud(
+                val priorStatus = existing.syncStatus
+                val priorUpdatedAt = existing.updatedAt
+                val rowsAffected = sessionDao.mergeFromCloud(
                     id = existing.id,
                     cloudId = dto.id,
                     deviceCloudId = dto.deviceId,
@@ -1045,7 +1068,26 @@ class SyncRepository(
                     updatedAt = updatedAt,
                     deletedAt = deletedAt
                 )
-                if (!isOwn && wasAlive && deletedAt != null) {
+                // Spec §11 line 626: WARN on every silent overwrite of
+                // a non-SYNCED row so post-hoc "my edit vanished"
+                // debugging is possible. Without this log, a phone-side
+                // session-level edit being clobbered by a portal echo
+                // (rare but possible during operator-switch races)
+                // leaves zero diagnostic trail.
+                if (rowsAffected == 1 && priorStatus != SyncStatus.SYNCED) {
+                    android.util.Log.w(
+                        "SyncRepository",
+                        "Silent overwrite: scan_sessions.cloudId=${dto.id} " +
+                            "local.updatedAt=$priorUpdatedAt (status=$priorStatus) " +
+                            "remote.updatedAt=$updatedAt. Local change discarded."
+                    )
+                }
+                // Notice emission gated on rowsAffected so a no-op merge
+                // (local was newer) doesn't fire a "deleted" banner for
+                // a change that the LWW filter rejected. Without this
+                // gate, the bell shows phantom deletions whenever the
+                // operator's own delete races a stale remote echo.
+                if (rowsAffected == 1 && !isOwn && wasAlive && deletedAt != null) {
                     notices += RemoteEditNotice(
                         type = SyncEventType.REMOTE_SESSION_DELETED,
                         displayNumber = dto.displayNumber,
@@ -1075,7 +1117,9 @@ class SyncRepository(
             if (existing == null) {
                 lotDao.insert(LotMapper.toEntity(dto).copy(sessionId = parent.id))
             } else {
-                lotDao.mergeFromCloud(
+                val priorStatus = existing.syncStatus
+                val priorUpdatedAt = existing.updatedAt
+                val rowsAffected = lotDao.mergeFromCloud(
                     id = existing.id,
                     cloudId = dto.id,
                     sessionId = parent.id,
@@ -1084,6 +1128,14 @@ class SyncRepository(
                     updatedAt = updatedAt,
                     deletedAt = deletedAt
                 )
+                if (rowsAffected == 1 && priorStatus != SyncStatus.SYNCED) {
+                    android.util.Log.w(
+                        "SyncRepository",
+                        "Silent overwrite: scan_lots.cloudId=${dto.id} " +
+                            "local.updatedAt=$priorUpdatedAt (status=$priorStatus) " +
+                            "remote.updatedAt=$updatedAt. Local change discarded."
+                    )
+                }
             }
         }
     }

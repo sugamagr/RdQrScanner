@@ -15,7 +15,28 @@ data class SyncSummary(
     val pendingCount: Int,
     val lastSuccessfulPushAt: Long?,
     val lastSuccessfulPullAt: Long?,
-    val lastErrorMessage: String?
+    val lastErrorMessage: String?,
+    /**
+     * Non-null only during a multi-page pull drain (typically the
+     * first-install case where the cursor=0 fetches thousands of
+     * historical rows). Lets the pill render "Syncing... (3/12)"
+     * instead of a stuck SYNCING badge for the 10-30s drain window.
+     * Null during single-page pulls and outside the pull cycle.
+     */
+    val pullProgress: PullProgress? = null
+)
+
+/**
+ * Multi-page pull-drain progress. [pagesProcessed] is 1-indexed and
+ * monotonically advances; [pagesUpperBound] is the worst-case ceiling
+ * ([SyncRepository.MAX_DRAIN_PAGES]) because the cloud doesn't return
+ * a total page count up front. The pill uses these to render the
+ * familiar "n / N" UX even though N is an upper bound, not the actual
+ * remaining work; common case is the drain finishes well before N.
+ */
+data class PullProgress(
+    val pagesProcessed: Int,
+    val pagesUpperBound: Int
 )
 
 /**

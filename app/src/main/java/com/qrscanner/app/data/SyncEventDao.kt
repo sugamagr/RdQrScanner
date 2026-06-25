@@ -26,16 +26,24 @@ interface SyncEventDao {
     @Query("DELETE FROM sync_events")
     suspend fun deleteAll()
 
-    @Query("SELECT * FROM sync_events WHERE occurredAt > :since ORDER BY occurredAt DESC LIMIT :limit")
+    // Secondary ORDER BY id DESC stabilizes ordering for events with
+    // identical occurredAt timestamps. Without it, a bulk insert that
+    // lands 50 events in the same millisecond (CSV upload, multi-row
+    // merge) has undefined display order — the operator sees
+    // "Account Z added" before "Account A added" inconsistently across
+    // recompositions. Room's autoGenerate id is monotonic per insert so
+    // it's a stable proxy for insertion order within the same ms.
+
+    @Query("SELECT * FROM sync_events WHERE occurredAt > :since ORDER BY occurredAt DESC, id DESC LIMIT :limit")
     suspend fun getEventsSince(since: Long, limit: Int = 20): List<SyncEvent>
 
-    @Query("SELECT * FROM sync_events WHERE occurredAt > :since ORDER BY occurredAt DESC LIMIT :limit")
+    @Query("SELECT * FROM sync_events WHERE occurredAt > :since ORDER BY occurredAt DESC, id DESC LIMIT :limit")
     fun observeEventsSince(since: Long, limit: Int = 20): Flow<List<SyncEvent>>
 
     @Query("SELECT COUNT(*) FROM sync_events WHERE occurredAt > :since")
     suspend fun countSince(since: Long): Int
 
-    @Query("SELECT * FROM sync_events ORDER BY occurredAt DESC LIMIT :limit")
+    @Query("SELECT * FROM sync_events ORDER BY occurredAt DESC, id DESC LIMIT :limit")
     fun observeRecentEvents(limit: Int = 100): Flow<List<SyncEvent>>
 
     /**

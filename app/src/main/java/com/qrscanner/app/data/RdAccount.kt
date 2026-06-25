@@ -35,7 +35,14 @@ import androidx.room.PrimaryKey
     indices = [
         Index(value = ["name"]),
         Index(value = ["source"]),
-        Index(value = ["isActive"])
+        Index(value = ["isActive"]),
+        // Push-loop hot path; see ScanSession indices KDoc for rationale.
+        Index(value = ["syncStatus", "updatedAt"]),
+        Index(value = ["deletedAt"]),
+        // cloudId is set to rdNumber for this entity (the PK already
+        // indexes it), but the merge-from-cloud path queries by cloudId
+        // in some call sites; keep the symmetry with other entities.
+        Index(value = ["cloudId"])
     ]
 )
 data class RdAccount(

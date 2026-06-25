@@ -12,6 +12,7 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.room.withTransaction
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
@@ -445,18 +446,35 @@ private fun RDCameraScreen(
                             isScanningRef.set(true)
                             return@LaunchedEffect
                         }
-                        val lotId = currentLotId ?: run {
-                            val newId = app.database.scanLotDao().insert(
-                                ScanLot(sessionId = session.id, lotNumber = currentLotNumber)
+                        // Atomic scan insert: lot create + activeLotId
+                        // pin + position lookup + rd_number insert all
+                        // commit or all roll back. Without the
+                        // transaction a process kill between lot insert
+                        // and rd_number insert leaves an orphan empty
+                        // lot (the activeLotId pin is set but the LOT
+                        // has no children); on next launch adoptSession
+                        // hydrates the empty lot and the operator sees
+                        // a phantom "in-progress LOT" with no rows.
+                        // The position-vs-insert race is bounded by the
+                        // mutex too: two scans of the same RD on
+                        // different LOTs would otherwise both read the
+                        // same getNextPosition value and collide on
+                        // the unique (lotId, position) implicit order.
+                        val lotId = app.database.withTransaction {
+                            val resolvedLotId = currentLotId ?: run {
+                                val newId = app.database.scanLotDao().insert(
+                                    ScanLot(sessionId = session.id, lotNumber = currentLotNumber)
+                                )
+                                app.database.scanSessionDao().setActiveLotId(session.id, newId)
+                                newId
+                            }
+                            val position = app.database.rdNumberDao().getNextPosition(resolvedLotId)
+                            app.database.rdNumberDao().insert(
+                                RdNumber(lotId = resolvedLotId, number = cleanValue, position = position)
                             )
-                            currentLotId = newId
-                            app.database.scanSessionDao().setActiveLotId(session.id, newId)
-                            newId
+                            resolvedLotId
                         }
-                        val position = app.database.rdNumberDao().getNextPosition(lotId)
-                        app.database.rdNumberDao().insert(
-                            RdNumber(lotId = lotId, number = cleanValue, position = position)
-                        )
+                        currentLotId = lotId
                         // Auto-reactivate inactive account profile on scan
                         // (user contract: scanning a marked-inactive RD
                         // flips it back to active + DIRTY for sync — the

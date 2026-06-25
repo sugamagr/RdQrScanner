@@ -17,7 +17,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SyncEvent::class,
         RdAccount::class
     ],
-    version = 9,
+    version = 10,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -352,6 +352,54 @@ abstract class AppDatabase : RoomDatabase() {
          * columns added schema-only this round (no UI yet).
          */
         /**
+         * v9 → v10: Adds covering indexes on the push-loop hot path
+         * for every syncable entity (scan_sessions, scan_lots,
+         * rd_numbers, rd_accounts):
+         *  - (syncStatus, updatedAt) — covers getDirtyForPush's
+         *    `WHERE syncStatus IN ('DIRTY','SYNC_ERROR') ORDER BY
+         *    updatedAt ASC` with a single index seek.
+         *  - (deletedAt) — covers the `WHERE deletedAt IS NULL`
+         *    filter present in 10+ history/list queries.
+         *  - rd_accounts also gains a cloudId index for symmetry
+         *    with the other entities.
+         *
+         * Pure index-add migration: no schema/data changes, no
+         * backfill needed. Safe to re-run (CREATE INDEX IF NOT
+         * EXISTS) so a partial-failure replay doesn't break.
+         */
+        private val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_scan_sessions_syncStatus_updatedAt` ON `scan_sessions` (`syncStatus`, `updatedAt`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_scan_sessions_deletedAt` ON `scan_sessions` (`deletedAt`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_scan_lots_syncStatus_updatedAt` ON `scan_lots` (`syncStatus`, `updatedAt`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_scan_lots_deletedAt` ON `scan_lots` (`deletedAt`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_rd_numbers_syncStatus_updatedAt` ON `rd_numbers` (`syncStatus`, `updatedAt`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_rd_numbers_deletedAt` ON `rd_numbers` (`deletedAt`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_rd_accounts_syncStatus_updatedAt` ON `rd_accounts` (`syncStatus`, `updatedAt`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_rd_accounts_deletedAt` ON `rd_accounts` (`deletedAt`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_rd_accounts_cloudId` ON `rd_accounts` (`cloudId`)"
+                )
+            }
+        }
+
+        /**
          * v8 → v9: Adds [RdNumber.lastEditorDeviceId] so pulls can
          * persist the per-row "edited by Portal / edited by another
          * phone" attribution that previously existed only on the
@@ -436,7 +484,8 @@ abstract class AppDatabase : RoomDatabase() {
                         MIGRATION_5_6,
                         MIGRATION_6_7,
                         MIGRATION_7_8,
-                        MIGRATION_8_9
+                        MIGRATION_8_9,
+                        MIGRATION_9_10
                     )
                     .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()

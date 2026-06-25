@@ -89,7 +89,18 @@ fun SyncStatusPill(
         SyncPillState.INITIALIZING -> stringResource(R.string.pill_initializing)
         SyncPillState.SYNCED -> stringResource(R.string.pill_synced)
         SyncPillState.PENDING -> stringResource(R.string.pill_pending, summary.pendingCount)
-        SyncPillState.SYNCING -> stringResource(R.string.pill_syncing)
+        SyncPillState.SYNCING -> {
+            val progress = summary.pullProgress
+            if (progress != null) {
+                stringResource(
+                    R.string.pill_syncing_progress,
+                    progress.pagesProcessed,
+                    progress.pagesUpperBound
+                )
+            } else {
+                stringResource(R.string.pill_syncing)
+            }
+        }
         SyncPillState.ERROR -> stringResource(R.string.pill_error)
         SyncPillState.SCHEMA_MISSING -> stringResource(R.string.pill_schema_missing)
     }

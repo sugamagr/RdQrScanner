@@ -19,7 +19,10 @@ import androidx.room.PrimaryKey
         Index(value = ["lotId"]),
         Index(value = ["lotId", "number"]),
         Index(value = ["number"]),
-        Index(value = ["cloudId"])
+        Index(value = ["cloudId"]),
+        // Push-loop hot path; see ScanSession indices KDoc for rationale.
+        Index(value = ["syncStatus", "updatedAt"]),
+        Index(value = ["deletedAt"])
     ]
 )
 data class RdNumber(

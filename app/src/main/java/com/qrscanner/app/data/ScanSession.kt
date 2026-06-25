@@ -7,7 +7,21 @@ import androidx.room.PrimaryKey
 
 @Entity(
     tableName = "scan_sessions",
-    indices = [Index(value = ["cloudId"])]
+    indices = [
+        Index(value = ["cloudId"]),
+        // Push-loop hot path. getDirtyForPush queries:
+        //   WHERE syncStatus IN ('DIRTY','SYNC_ERROR') AND isActive = 0
+        //   ORDER BY updatedAt ASC
+        // The composite (syncStatus, updatedAt) covers both the filter
+        // and the sort with a single index seek instead of a full table
+        // scan + filesort. At 1,200 sessions/year the index pays for
+        // itself within the first push cycle.
+        Index(value = ["syncStatus", "updatedAt"]),
+        // History/list queries filter `deletedAt IS NULL` (10+ call
+        // sites). Standalone index on deletedAt suffices because the
+        // selectivity is high (most rows live, few tombstoned).
+        Index(value = ["deletedAt"])
+    ]
 )
 data class ScanSession(
     @PrimaryKey(autoGenerate = true)
@@ -74,7 +88,10 @@ data class ScanSession(
     ],
     indices = [
         Index(value = ["sessionId"]),
-        Index(value = ["cloudId"])
+        Index(value = ["cloudId"]),
+        // See ScanSession indices KDoc — same push-loop rationale.
+        Index(value = ["syncStatus", "updatedAt"]),
+        Index(value = ["deletedAt"])
     ]
 )
 data class ScanLot(
