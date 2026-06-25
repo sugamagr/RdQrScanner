@@ -12,8 +12,18 @@ const queryClient = new QueryClient({
     queries: {
       staleTime: 30_000,
       gcTime: 5 * 60_000,
+      // retry: 1 with default exponential backoff (1s, 5s) covers
+      // transient 401s after a TOKEN_REFRESHED race + brief network
+      // blips. The second retry uses the freshly-refreshed token via
+      // the shared supabase client.
       retry: 1,
+      retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 5000),
       refetchOnWindowFocus: true,
+      // offlineFirst lets cached views render immediately when the
+      // tab regains focus on a slow/paused Supabase project — the
+      // refetch runs in the background instead of blocking the UI
+      // behind a spinner.
+      networkMode: 'offlineFirst',
     },
   },
 });

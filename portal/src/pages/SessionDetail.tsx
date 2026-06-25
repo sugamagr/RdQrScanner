@@ -45,7 +45,11 @@ export function SessionDetailPage() {
   }, [rdQuery.data]);
 
   const session = sessionQuery.data;
-  const isLoading = sessionQuery.isLoading || lotsQuery.isLoading;
+  // Include rdQuery.isLoading so the LOT cards' RD-chip rows render a
+  // skeleton state instead of popping in 200-500ms after the cards
+  // appear. Without this the page shows empty LOT cards momentarily,
+  // then the chips materialize, causing a visible layout shift.
+  const isLoading = sessionQuery.isLoading || lotsQuery.isLoading || rdQuery.isLoading;
   const [exportError, setExportError] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ rd: RdNumberRow; lotTimestamp: string } | null>(null);
   const canExport =

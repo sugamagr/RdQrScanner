@@ -66,6 +66,26 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
     setParseResult(null);
     setShowAllErrors(false);
     if (picked) {
+      // Hard 5 MB cap. PapaParse loads the entire file into memory and
+      // a 100 MB CSV would freeze the browser tab for 10-30 seconds
+      // before the synchronous parse completes. 5 MB is ~50,000 rows
+      // of realistic CSV — well beyond the 200 accounts/month user
+      // workload but a reasonable safety net against accidental drag-
+      // and-drop of the wrong file.
+      const MAX_BYTES = 5 * 1024 * 1024;
+      if (picked.size > MAX_BYTES) {
+        setParseResult({
+          valid: [],
+          errors: [
+            {
+              row: 0,
+              message: `File too large (${Math.round(picked.size / 1024 / 1024)} MB). Maximum is 5 MB.`,
+            },
+          ],
+          totalRows: 0,
+        });
+        return;
+      }
       const result = await parseAccountsCsv(picked);
       if (mountedRef.current) setParseResult(result);
     }

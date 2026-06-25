@@ -189,7 +189,7 @@ export function AccountsPage() {
 
       {!isInitialLoad && visibleAccounts.length > 0 && (
         <div className="mt-6 overflow-x-auto rounded-2xl border border-surface-border bg-surface shadow-card">
-          <table className="w-full min-w-[760px] text-left text-sm">
+          <table className="w-full sm:min-w-[760px] text-left text-sm">
             <caption className="sr-only">RD Accounts list</caption>
             <thead className="border-b border-surface-border bg-surface-alt text-xs uppercase tracking-wide text-ink-secondary">
               <tr>

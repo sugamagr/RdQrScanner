@@ -9,20 +9,35 @@ import type {
 } from '../types/db';
 
 /**
+ * Marker error class for an expired or missing auth session, thrown
+ * by [requireOwnerId] so callers can distinguish "user is signed out"
+ * from other mutation failures and route to the sign-in page instead
+ * of showing a generic error toast. The catch-side check is `if (err
+ * instanceof SessionExpiredError)`.
+ */
+export class SessionExpiredError extends Error {
+  constructor() {
+    super('Your session expired. Please sign in again.');
+    this.name = 'SessionExpiredError';
+  }
+}
+
+/**
  * Resolves the current owner_id for defense-in-depth filtering on
  * mutations. RLS at cloud/schema.sql §318-326 already blocks cross-
  * owner writes, but adding the explicit `.eq('owner_id', x)` filter
  * here means the wire payload itself encodes the constraint and any
  * future RLS misconfiguration gets caught client-side before the
- * round trip. Throws if there's no live session so a caller never
- * silently runs an unfiltered mutation.
+ * round trip. Throws [SessionExpiredError] if there's no live session
+ * so a caller never silently runs an unfiltered mutation AND the UI
+ * can route to /signin instead of surfacing developer-speak.
  */
 async function requireOwnerId(): Promise<string> {
   const { data, error } = await supabase.auth.getUser();
   if (error) throw error;
   const ownerId = data.user?.id;
   if (!ownerId) {
-    throw new Error('No active session — refusing to mutate without owner_id scope.');
+    throw new SessionExpiredError();
   }
   return ownerId;
 }
@@ -112,6 +127,105 @@ export async function fetchDevices(): Promise<DeviceRow[]> {
     .order('last_seen_at', { ascending: false });
   if (error) throw error;
   return (data ?? []) as DeviceRow[];
+}
+
+/**
+ * Soft-delete a session by stamping `deleted_at`. Mirrors the phone's
+ * `SyncRepository.softDeleteSession` so the tombstone propagates via
+ * the normal LWW merge path. Hard-delete is INTENTIONALLY not exposed
+ * here — spec §11 line 188 says clients never hard-delete, and the
+ * FK constraints (round-5 RESTRICT change) would refuse it anyway.
+ *
+ * Defensive helper exists EVEN BEFORE any UI uses it: oracle bg_a5d8fee6
+ * flagged the missing function as a latent landmine. A future
+ * maintainer adding a "Delete Session" button would naturally reach
+ * for `supabase.from('scan_sessions').delete()`, which would either
+ * fail the FK (after round-5) or break sync (before round-5). Having
+ * the correct helper present makes the obviously-wrong path harder to
+ * stumble into.
+ */
+export async function softDeleteSession(sessionId: string): Promise<void> {
+  const ownerId = await requireOwnerId();
+  const { error } = await supabase
+    .from('scan_sessions')
+    .update({ deleted_at: new Date().toISOString() })
+    .eq('id', sessionId)
+    .eq('owner_id', ownerId)
+    .is('deleted_at', null);
+  if (error) throw error;
+}
+
+/**
+ * Per-LOT 20K cap enforcement helper. Spec §15.5.12 + D24: every LOT's
+ * `Σ(monthly_amount × months_paid) <= 20_000`. Phone enforces this in
+ * `LotReviewScreen.kt`. The portal MUST mirror the rule on defaulter
+ * edits — without it, a portal save can push a LOT over cap and the
+ * phone gets stuck unable to edit it (since LotReviewScreen.isOver
+ * blocks Confirm regardless of what direction the operator pushes).
+ *
+ * Computes the cap by reading ALL alive rd_numbers in the LOT, joined
+ * with rd_accounts for monthly_amount. The `excludeRdId` lets the
+ * caller substitute its in-flight edit's new months_paid value into
+ * the sum: pass the row's id to exclude its stored months_paid, then
+ * add `pendingMonthsPaid × pendingMonthlyAmount` on top.
+ *
+ * Rows without a profile (rd_accounts row missing) contribute zero to
+ * `verifiedRupees` and increment `unverifiedCount` — same semantic as
+ * `LiveLotTotal` on the phone scanner so the portal warning copy can
+ * match.
+ */
+export interface LotTotalsSnapshot {
+  verifiedRupees: number;
+  unverifiedCount: number;
+}
+
+export async function fetchLotTotalsExcluding(params: {
+  lotId: string;
+  excludeRdId: string;
+}): Promise<LotTotalsSnapshot> {
+  const { lotId, excludeRdId } = params;
+  const { data, error } = await supabase
+    .from('rd_numbers')
+    .select(
+      `
+      id, number, months_paid,
+      account:rd_accounts!left(monthly_amount)
+    `
+    )
+    .eq('lot_id', lotId)
+    .neq('id', excludeRdId)
+    .is('deleted_at', null);
+  if (error) throw error;
+  let verifiedRupees = 0;
+  let unverifiedCount = 0;
+  for (const row of (data ?? []) as Array<{
+    months_paid: number;
+    account: { monthly_amount: number } | { monthly_amount: number }[] | null;
+  }>) {
+    // PostgREST may return the joined row as an object or a 1-element
+    // array depending on relationship cardinality detection. Normalize.
+    const profile = Array.isArray(row.account) ? row.account[0] : row.account;
+    const amount = profile?.monthly_amount;
+    if (typeof amount === 'number' && amount > 0) {
+      verifiedRupees += amount * row.months_paid;
+    } else {
+      unverifiedCount += 1;
+    }
+  }
+  return { verifiedRupees, unverifiedCount };
+}
+
+export async function fetchAccountForRdNumber(
+  rdNumber: string
+): Promise<{ monthly_amount: number; name: string } | null> {
+  const { data, error } = await supabase
+    .from('rd_accounts')
+    .select('monthly_amount, name')
+    .eq('rd_number', rdNumber)
+    .is('deleted_at', null)
+    .maybeSingle();
+  if (error) throw error;
+  return data ?? null;
 }
 
 export async function updateRdNumberMonths(params: {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   autoWindow,
   formatExport,
@@ -10,11 +10,16 @@ import {
   plusOneMonth,
   type MonthYear,
 } from '../lib/monthYear';
-import { updateRdNumberMonths } from '../lib/queries';
+import {
+  fetchAccountForRdNumber,
+  fetchLotTotalsExcluding,
+  updateRdNumberMonths,
+} from '../lib/queries';
 import type { RdNumberRow } from '../types/db';
 
 const MONTHS_MIN = 1;
 const MONTHS_MAX = 36;
+const LOT_TOTAL_LIMIT_RUPEES = 20_000;
 
 interface Props {
   rd: RdNumberRow;
@@ -70,6 +75,37 @@ export function EditDefaulterDialog({ rd, lotTimestamp, onClose }: Props) {
     });
   }, [monthsPaid, anchor]);
 
+  // Cap-enforcement state. Fetch the rest-of-LOT verified total ONCE
+  // on mount (the other rows' months_paid won't change inside this
+  // dialog) and the THIS row's account monthly_amount ONCE. Then the
+  // live cap check is pure arithmetic in render — no extra round trips
+  // as the operator slides months_paid.
+  const restOfLotTotals = useQuery({
+    queryKey: ['lot-totals-excluding', rd.lot_id, rd.id],
+    queryFn: () => fetchLotTotalsExcluding({ lotId: rd.lot_id, excludeRdId: rd.id }),
+    staleTime: 60_000,
+  });
+  const ownAccount = useQuery({
+    queryKey: ['account-for-rd', rd.number],
+    queryFn: () => fetchAccountForRdNumber(rd.number),
+    staleTime: 60_000,
+  });
+
+  // Live verified rupees if this save lands: rest-of-LOT verified
+  // (unchanged) + this row's monthly_amount × pending months_paid. If
+  // the account profile is missing, this row contributes zero to the
+  // verified total but the unverifiedCount goes up by 1 (matches the
+  // phone's LiveLotTotal semantic).
+  const ownMonthlyAmount = ownAccount.data?.monthly_amount ?? null;
+  const restTotals = restOfLotTotals.data ?? { verifiedRupees: 0, unverifiedCount: 0 };
+  const pendingVerifiedRupees =
+    restTotals.verifiedRupees +
+    (ownMonthlyAmount != null && ownMonthlyAmount > 0 ? ownMonthlyAmount * monthsPaid : 0);
+  const pendingUnverifiedCount =
+    restTotals.unverifiedCount + (ownMonthlyAmount != null && ownMonthlyAmount > 0 ? 0 : 1);
+  const isOverCap = pendingVerifiedRupees > LOT_TOTAL_LIMIT_RUPEES;
+  const totalsLoading = restOfLotTotals.isLoading || ownAccount.isLoading;
+
   const mutation = useMutation({
     mutationFn: () =>
       updateRdNumberMonths({
@@ -81,6 +117,7 @@ export function EditDefaulterDialog({ rd, lotTimestamp, onClose }: Props) {
       qc.invalidateQueries({ queryKey: ['rd'] });
       qc.invalidateQueries({ queryKey: ['rd-search'] });
       qc.invalidateQueries({ queryKey: ['sessions'] });
+      qc.invalidateQueries({ queryKey: ['lot-totals-excluding'] });
       onClose();
     },
   });
@@ -142,9 +179,11 @@ export function EditDefaulterDialog({ rd, lotTimestamp, onClose }: Props) {
     };
   }, [onClose]);
 
-  // Selection is always a complete N-month contiguous block under the
-  // anchor-tap model, so Save is only blocked by an in-flight mutation.
-  const saveDisabled = mutation.isPending;
+  // Save blocked by (a) in-flight mutation, (b) over-cap state (spec
+  // §15.5.12 / D24 — phone enforces the same boundary so portal MUST
+  // mirror or the phone gets stuck on subsequent edits), or (c) totals
+  // still loading (don't let the user save with an unverified cap).
+  const saveDisabled = mutation.isPending || isOverCap || totalsLoading;
   const blockLabel = monthsPaid > 1 && selected.length === monthsPaid
     ? `${formatExport(selected[selected.length - 1])} – ${formatExport(selected[0])}`
     : '';
@@ -241,6 +280,40 @@ export function EditDefaulterDialog({ rd, lotTimestamp, onClose }: Props) {
                   );
                 })}
               </div>
+            </div>
+          )}
+
+          {!totalsLoading && (
+            <div
+              className={
+                isOverCap
+                  ? 'rounded-xl border border-danger/30 bg-danger/5 px-3 py-2 text-xs text-danger'
+                  : 'rounded-xl border border-surface-border bg-surface-alt px-3 py-2 text-xs text-ink-secondary'
+              }
+              aria-live="polite"
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-medium">LOT total</span>
+                <span className="font-mono">
+                  ₹{pendingVerifiedRupees.toLocaleString('en-IN')}
+                  {' / '}
+                  ₹{LOT_TOTAL_LIMIT_RUPEES.toLocaleString('en-IN')}
+                </span>
+              </div>
+              {isOverCap && (
+                <p className="mt-1 text-[11px]">
+                  Saving here would exceed the ₹{LOT_TOTAL_LIMIT_RUPEES.toLocaleString('en-IN')}{' '}
+                  per-LOT cap. Reduce months for this row or another row in
+                  the same LOT before saving.
+                </p>
+              )}
+              {pendingUnverifiedCount > 0 && !isOverCap && (
+                <p className="mt-1 text-[11px] text-ink-muted">
+                  {pendingUnverifiedCount} row
+                  {pendingUnverifiedCount === 1 ? '' : 's'} without an account profile
+                  not counted — real total may be higher.
+                </p>
+              )}
             </div>
           )}
 

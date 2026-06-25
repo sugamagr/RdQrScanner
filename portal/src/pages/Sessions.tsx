@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader';
 import {
   SESSIONS_PAGE_SIZE,
@@ -10,8 +10,32 @@ import {
 import { formatDateTime, formatNumber, formatRelativeTime } from '../lib/format';
 
 export function SessionsPage() {
-  const [searchInput, setSearchInput] = useState('');
-  const [committedSearch, setCommittedSearch] = useState('');
+  // Search state is persisted in URL ?q= so browser Back from
+  // SessionDetail returns to the same filtered + scrolled view, and
+  // the owner can bookmark or share a filtered link. Without this the
+  // search box clears on every nav-away even though the Sessions
+  // route remembers nothing else either.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlSearch = searchParams.get('q') ?? '';
+  const [searchInput, setSearchInput] = useState(urlSearch);
+  const [committedSearch, setCommittedSearch] = useState(urlSearch);
+  // Resync local state when the URL changes (back/forward navigation
+  // or external link). Without this the input shows stale text after
+  // a popstate event.
+  useEffect(() => {
+    setSearchInput(urlSearch);
+    setCommittedSearch(urlSearch);
+  }, [urlSearch]);
+  const commitSearch = (next: string) => {
+    setCommittedSearch(next);
+    const params = new URLSearchParams(searchParams);
+    if (next) {
+      params.set('q', next);
+    } else {
+      params.delete('q');
+    }
+    setSearchParams(params, { replace: false });
+  };
 
   const query = useInfiniteQuery<SessionsPage>({
     queryKey: ['sessions', committedSearch],
@@ -37,7 +61,7 @@ export function SessionsPage() {
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              setCommittedSearch(searchInput);
+              commitSearch(searchInput);
             }}
             className="flex items-center gap-2"
           >
@@ -58,7 +82,7 @@ export function SessionsPage() {
                 type="button"
                 onClick={() => {
                   setSearchInput('');
-                  setCommittedSearch('');
+                  commitSearch('');
                 }}
                 className="rounded-pill px-3 py-1.5 text-xs text-ink-secondary hover:text-ink-primary"
               >
@@ -84,7 +108,7 @@ export function SessionsPage() {
 
       {!isInitialLoad && rows.length > 0 && (
         <div className="mt-6 overflow-x-auto rounded-2xl border border-surface-border bg-surface shadow-card">
-          <table className="w-full min-w-[640px] text-left text-sm">
+          <table className="w-full sm:min-w-[640px] text-left text-sm">
             <caption className="sr-only">Scanning sessions list</caption>
             <thead className="border-b border-surface-border bg-surface-alt text-xs uppercase tracking-wide text-ink-secondary">
               <tr>

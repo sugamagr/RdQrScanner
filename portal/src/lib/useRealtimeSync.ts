@@ -33,11 +33,20 @@ export function useRealtimeSync(): void {
   useEffect(() => {
     if (!userId) return;
 
+    // Each subscription is filtered by `owner_id=eq.${userId}` so the
+    // Supabase realtime server filters BEFORE delivery. Without the
+    // filter, the server broadcasts the row to every connected portal
+    // and RLS filters client-side AFTER the row already crossed the
+    // wire — bandwidth waste and realtime quota burn proportional to
+    // the number of concurrent owners. Spec §14 explicitly mandates
+    // the filter on phone-side; portal must mirror.
+    const ownerFilter = `owner_id=eq.${userId}`;
+
     const channel = supabase
       .channel(`portal-${userId}`)
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'scan_sessions' },
+        { event: '*', schema: 'public', table: 'scan_sessions', filter: ownerFilter },
         () => {
           qc.invalidateQueries({ queryKey: ['sessions'] });
           qc.invalidateQueries({ queryKey: ['session'] });
@@ -45,7 +54,7 @@ export function useRealtimeSync(): void {
       )
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'scan_lots' },
+        { event: '*', schema: 'public', table: 'scan_lots', filter: ownerFilter },
         () => {
           qc.invalidateQueries({ queryKey: ['lots'] });
           qc.invalidateQueries({ queryKey: ['session'] });
@@ -53,30 +62,48 @@ export function useRealtimeSync(): void {
       )
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'rd_numbers' },
+        { event: '*', schema: 'public', table: 'rd_numbers', filter: ownerFilter },
         () => {
           qc.invalidateQueries({ queryKey: ['rd'] });
           qc.invalidateQueries({ queryKey: ['rd-search'] });
+          qc.invalidateQueries({ queryKey: ['lot-totals-excluding'] });
         }
       )
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'devices' },
+        { event: '*', schema: 'public', table: 'devices', filter: ownerFilter },
         () => {
           qc.invalidateQueries({ queryKey: ['devices'] });
         }
       )
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'rd_accounts' },
+        { event: '*', schema: 'public', table: 'rd_accounts', filter: ownerFilter },
         () => {
           qc.invalidateQueries({ queryKey: ['accounts'] });
+          qc.invalidateQueries({ queryKey: ['account-for-rd'] });
+          qc.invalidateQueries({ queryKey: ['lot-totals-excluding'] });
         }
       )
       .subscribe();
 
+    // Network reconnect handler: supabase-js auto-reconnects the
+    // WebSocket but postgres_changes has no backfill — events that
+    // fired during the disconnect window are lost. Invalidating every
+    // query on `online` (network back) + `visibilitychange` (tab back
+    // from background) catches phones that pushed during a laptop
+    // sleep or network blip.
+    const refetchAll = () => qc.invalidateQueries();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refetchAll();
+    };
+    window.addEventListener('online', refetchAll);
+    document.addEventListener('visibilitychange', onVisible);
+
     return () => {
       void supabase.removeChannel(channel);
+      window.removeEventListener('online', refetchAll);
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, [userId, qc]);
 }

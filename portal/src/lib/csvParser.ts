@@ -2,6 +2,29 @@ import Papa, { type ParseResult } from 'papaparse';
 
 const RD_NUMBER_REGEX = /^\d{9,15}$/;
 
+/**
+ * Strip Excel formula prefixes from a name cell so a malicious CSV
+ * with =cmd|'/c calc'!A1 (or similar) in the name field doesn't run
+ * commands when the owner later re-exports to XLSX and opens in
+ * Excel/Sheets. Prefixes any leading =, +, -, @, tab, or carriage
+ * return with a single quote so the formula engine treats the cell
+ * as literal text. Idempotent on already-prefixed values.
+ *
+ * The threat surface is downstream: our portal itself doesn't execute
+ * the formula — but customers exporting + re-opening in Excel would.
+ * The defense is at the ingest boundary so every downstream consumer
+ * is protected by default.
+ */
+function sanitizeFormulaPrefix(value: string): string {
+  if (value.length === 0) return value;
+  const first = value.charCodeAt(0);
+  // = + - @ \t \r
+  if (first === 0x3d || first === 0x2b || first === 0x2d || first === 0x40 || first === 0x09 || first === 0x0d) {
+    return `'${value}`;
+  }
+  return value;
+}
+
 interface RawCsvRow {
   name?: string;
   rd_number?: string;
@@ -101,7 +124,7 @@ export function parseAccountsCsv(file: File): Promise<CsvParseResult> {
             return;
           }
           seenRdNumbers.add(rdNumber);
-          valid.push({ rdNumber, name, monthlyAmount: amount });
+          valid.push({ rdNumber, name: sanitizeFormulaPrefix(name), monthlyAmount: amount });
         });
 
         resolve({
