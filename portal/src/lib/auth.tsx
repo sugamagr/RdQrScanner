@@ -15,9 +15,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [expiryReason, setExpiryReason] = useState<string | null>(null);
   const qc = useQueryClient();
-  // Tracks the last session id so we can distinguish a fresh-login transition
-  // (null -> session) from an involuntary sign-out (session -> null).
-  const lastSessionIdRef = useRef<string | null>(null);
+  // Tracks the last session's user.id so we can distinguish a fresh-login transition
+  // (null -> session), involuntary sign-out (session -> null), AND a cross-account
+  // swap (session A -> session B with different user.id). The third case can fire
+  // without an intervening null when a storage event from another tab or an
+  // auto-refresh races a sign-in to a different account; without the swap branch
+  // the previous owner's qc cache would be visible to the new owner until refetch.
+  const lastUserIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -31,22 +35,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then(({ data }) => {
         if (!mounted) return;
         setSession(data.session);
-        lastSessionIdRef.current = data.session?.access_token ?? null;
+        lastUserIdRef.current = data.session?.user.id ?? null;
         setLoading(false);
       })
       .catch((err: unknown) => {
         if (!mounted) return;
         console.warn('[auth] getSession() failed during boot', err);
         setSession(null);
-        lastSessionIdRef.current = null;
+        lastUserIdRef.current = null;
         setLoading(false);
       });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, next) => {
-      const prevHadSession = !!lastSessionIdRef.current;
-      const nextHasSession = !!next;
+      const prevUserId = lastUserIdRef.current;
+      const nextUserId = next?.user.id ?? null;
+      const prevHadSession = prevUserId !== null;
+      const nextHasSession = nextUserId !== null;
+      const ownerChanged =
+        prevHadSession && nextHasSession && prevUserId !== nextUserId;
 
       if (prevHadSession && !nextHasSession) {
         // Cross-account safety: wipe the in-memory query cache so the
@@ -61,9 +69,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       } else if (!prevHadSession && nextHasSession) {
         setExpiryReason(null);
+      } else if (ownerChanged) {
+        // Same browser, different owner — must wipe cache even though
+        // the supabase SDK never emitted a null between the two
+        // sessions. Otherwise the new owner sees the prior owner's
+        // rows for a render before TanStack refetches.
+        qc.clear();
+        setExpiryReason(null);
       }
 
-      lastSessionIdRef.current = next?.access_token ?? null;
+      lastUserIdRef.current = nextUserId;
       setSession(next);
     });
 

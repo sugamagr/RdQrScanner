@@ -101,6 +101,22 @@ export function useRealtimeSync(): void {
       )
       .subscribe();
 
+    // Token-refresh handoff: supabase-js auto-refreshes the access
+    // token, but the realtime websocket's auth context is set at
+    // connect time and does not pick up the new JWT automatically.
+    // Without this listener, after the first hourly refresh the
+    // server-side RLS check against the stale token will start
+    // rejecting filtered events and the portal silently goes blind
+    // until the user reloads. setAuth() pushes the fresh JWT into
+    // the existing channel without dropping it.
+    const {
+      data: { subscription: tokenSub },
+    } = supabase.auth.onAuthStateChange((event, next) => {
+      if (event === 'TOKEN_REFRESHED' && next?.access_token) {
+        supabase.realtime.setAuth(next.access_token);
+      }
+    });
+
     // Network reconnect handler: supabase-js auto-reconnects the
     // WebSocket but postgres_changes has no backfill — events that
     // fired during the disconnect window are lost. Invalidating every
@@ -115,6 +131,7 @@ export function useRealtimeSync(): void {
     document.addEventListener('visibilitychange', onVisible);
 
     return () => {
+      tokenSub.unsubscribe();
       void supabase.removeChannel(channel);
       window.removeEventListener('online', refetchAll);
       document.removeEventListener('visibilitychange', onVisible);
