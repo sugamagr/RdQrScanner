@@ -50,6 +50,10 @@ export function useRealtimeSync(): void {
         () => {
           qc.invalidateQueries({ queryKey: ['sessions'] });
           qc.invalidateQueries({ queryKey: ['session'] });
+          // Activity feed is materialised from scan_sessions; invalidate
+          // it on every session change so finalize + soft-delete events
+          // show up live without the owner refreshing /activity.
+          qc.invalidateQueries({ queryKey: ['activity'] });
         }
       )
       .on(
@@ -67,6 +71,10 @@ export function useRealtimeSync(): void {
           qc.invalidateQueries({ queryKey: ['rd'] });
           qc.invalidateQueries({ queryKey: ['rd-search'] });
           qc.invalidateQueries({ queryKey: ['lot-totals-excluding'] });
+          // Defaulter edits (months_paid > 1) are an Activity feed
+          // category; invalidate so a phone-side correction reflows
+          // the portal feed live.
+          qc.invalidateQueries({ queryKey: ['activity'] });
         }
       )
       .on(
@@ -83,6 +91,7 @@ export function useRealtimeSync(): void {
           qc.invalidateQueries({ queryKey: ['accounts'] });
           qc.invalidateQueries({ queryKey: ['account-for-rd'] });
           qc.invalidateQueries({ queryKey: ['lot-totals-excluding'] });
+          qc.invalidateQueries({ queryKey: ['activity'] });
         }
       )
       .subscribe();

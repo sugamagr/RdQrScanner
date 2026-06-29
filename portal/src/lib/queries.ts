@@ -1,6 +1,8 @@
 import { supabase } from './supabase';
 import type {
   AccountSource,
+  ActivityKind,
+  ActivityRow,
   DeviceRow,
   RdAccountRow,
   RdNumberRow,
@@ -127,6 +129,206 @@ export async function fetchDevices(): Promise<DeviceRow[]> {
     .order('last_seen_at', { ascending: false });
   if (error) throw error;
   return (data ?? []) as DeviceRow[];
+}
+
+/**
+ * Materializes the Activity feed by reading recent rows from the three
+ * tables that carry events (scan_sessions, rd_numbers with defaulter
+ * data, rd_accounts) and projecting into a uniform [ActivityRow] shape.
+ *
+ * The cloud has no dedicated `activity` table — the phone's bell uses a
+ * Room-local `sync_events` table that doesn't exist server-side (spec
+ * §15.5.5), so the portal can't read from it. The four queries here
+ * fetch each event-emitting source independently, sorted by their
+ * `updated_at` or `created_at`. The merge interleaves them client-side
+ * and trims to [limit] so the UI gets a single feed.
+ *
+ * Attribution mirrors `mergeRdNumbers` on the phone:
+ *  - `null` last_editor_device_id  → "Portal"
+ *  - resolved device row           → device.device_name
+ *  - unresolved (deleted device)   → "(removed phone)"
+ *
+ * Categories defined in [ActivityKind]:
+ *  - `session_finalized` — scan_sessions row with isActive=0 (no
+ *    column; we treat any non-deleted session as finalized because
+ *    portal-visible sessions are always finalized — active sessions
+ *    don't push to cloud per §10)
+ *  - `session_deleted` — scan_sessions row with deleted_at != null
+ *  - `defaulter_edited` — rd_numbers row with months_paid > 1
+ *  - `account_added` — rd_accounts row with created_at == updated_at
+ *  - `account_edited` — rd_accounts row with updated_at > created_at
+ */
+export async function fetchActivityFeed(params: {
+  limit?: number;
+  kinds?: ReadonlyArray<ActivityKind>;
+}): Promise<ActivityRow[]> {
+  const limit = params.limit ?? 100;
+  const requested = new Set(params.kinds ?? [
+    'session_finalized',
+    'session_deleted',
+    'defaulter_edited',
+    'account_added',
+    'account_edited',
+  ]);
+
+  // Fetch the device map once so attribution is O(1) per event after.
+  const { data: deviceRows, error: devicesErr } = await supabase
+    .from('devices')
+    .select('id, device_name');
+  if (devicesErr) throw devicesErr;
+  const deviceById = new Map<string, string>();
+  for (const row of (deviceRows ?? []) as Array<{ id: string; device_name: string }>) {
+    deviceById.set(row.id, row.device_name);
+  }
+  const labelFor = (deviceId: string | null): string => {
+    if (deviceId == null) return 'Portal';
+    return deviceById.get(deviceId) ?? '(removed phone)';
+  };
+
+  // Each source fetches up to `limit` rows. The merge below trims to
+  // the global `limit` so we don't over-fetch.
+  const events: ActivityRow[] = [];
+
+  if (requested.has('session_finalized') || requested.has('session_deleted')) {
+    const { data, error } = await supabase
+      .from('scan_sessions')
+      .select('id, display_number, operator_name, total_lots, total_rd_numbers, device_id, updated_at, deleted_at')
+      .order('updated_at', { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    for (const row of (data ?? []) as Array<{
+      id: string;
+      display_number: number;
+      operator_name: string | null;
+      total_lots: number;
+      total_rd_numbers: number;
+      device_id: string;
+      updated_at: string;
+      deleted_at: string | null;
+    }>) {
+      if (row.deleted_at != null) {
+        if (!requested.has('session_deleted')) continue;
+        events.push({
+          kind: 'session_deleted',
+          occurredAt: row.deleted_at,
+          actorLabel: labelFor(row.device_id),
+          primary: `Session #${row.display_number} deleted`,
+          secondary: row.operator_name ?? null,
+          linkTo: null,
+        });
+      } else {
+        if (!requested.has('session_finalized')) continue;
+        events.push({
+          kind: 'session_finalized',
+          occurredAt: row.updated_at,
+          actorLabel: labelFor(row.device_id),
+          primary: `Session #${row.display_number} finalized`,
+          secondary: `${row.total_lots} LOT${row.total_lots === 1 ? '' : 's'} · ${row.total_rd_numbers} RD numbers`,
+          linkTo: `/sessions/${row.id}`,
+        });
+      }
+    }
+  }
+
+  if (requested.has('defaulter_edited')) {
+    // Defaulter edits are rd_numbers rows with months_paid > 1. We
+    // can't reliably distinguish "initial defaulter at scan time"
+    // from "edited later" without comparing to a baseline — the
+    // cloud doesn't track that. Treat any defaulter row whose
+    // updated_at differs from scanned_at as edited (the trigger
+    // bumps updated_at on every write so the gap is reliable).
+    const { data, error } = await supabase
+      .from('rd_numbers')
+      .select('id, number, months_paid, last_editor_device_id, updated_at, scanned_at, lot:scan_lots!inner(session_id, session:scan_sessions!inner(id, display_number))')
+      .gt('months_paid', 1)
+      .is('deleted_at', null)
+      .order('updated_at', { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    for (const row of (data ?? []) as unknown as Array<{
+      id: string;
+      number: string;
+      months_paid: number;
+      last_editor_device_id: string | null;
+      updated_at: string;
+      scanned_at: string;
+      lot: { session_id: string; session: { id: string; display_number: number } } | { session_id: string; session: { id: string; display_number: number } }[] | null;
+    }>) {
+      // PostgREST returns embedded relationships as object OR
+      // 1-element array depending on cardinality detection.
+      const lot = Array.isArray(row.lot) ? row.lot[0] : row.lot;
+      if (!lot?.session) continue;
+      const session = Array.isArray(lot.session) ? lot.session[0] : lot.session;
+      if (!session) continue;
+      events.push({
+        kind: 'defaulter_edited',
+        occurredAt: row.updated_at,
+        actorLabel: labelFor(row.last_editor_device_id),
+        primary: `Defaulter edit on RD ${maskRdNumber(row.number)}`,
+        secondary: `${row.months_paid} months · Session #${session.display_number}`,
+        linkTo: `/sessions/${session.id}`,
+      });
+    }
+  }
+
+  if (requested.has('account_added') || requested.has('account_edited')) {
+    const { data, error } = await supabase
+      .from('rd_accounts')
+      .select('rd_number, name, last_editor_device_id, created_at, updated_at')
+      .is('deleted_at', null)
+      .order('updated_at', { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    for (const row of (data ?? []) as Array<{
+      rd_number: string;
+      name: string;
+      last_editor_device_id: string | null;
+      created_at: string;
+      updated_at: string;
+    }>) {
+      // Equal created_at / updated_at means insert with no follow-up
+      // edit; anything else means at least one edit landed after
+      // creation. The server trigger guarantees updated_at >= created_at.
+      const isFreshInsert = row.created_at === row.updated_at;
+      if (isFreshInsert) {
+        if (!requested.has('account_added')) continue;
+        events.push({
+          kind: 'account_added',
+          occurredAt: row.created_at,
+          actorLabel: labelFor(row.last_editor_device_id),
+          primary: `Account added — ${row.name}`,
+          secondary: maskRdNumber(row.rd_number),
+          linkTo: '/accounts',
+        });
+      } else {
+        if (!requested.has('account_edited')) continue;
+        events.push({
+          kind: 'account_edited',
+          occurredAt: row.updated_at,
+          actorLabel: labelFor(row.last_editor_device_id),
+          primary: `Account edited — ${row.name}`,
+          secondary: maskRdNumber(row.rd_number),
+          linkTo: '/accounts',
+        });
+      }
+    }
+  }
+
+  events.sort((a, b) => (b.occurredAt < a.occurredAt ? -1 : b.occurredAt > a.occurredAt ? 1 : 0));
+  return events.slice(0, limit);
+}
+
+/**
+ * Masks all but the last 4 digits of an RD number for display in the
+ * activity feed. Mirrors the phone's PII redaction policy: the bell
+ * sheet showed full numbers historically (operator was the actor); on
+ * the portal the owner sees a broader feed so showing only the tail is
+ * the right default. The Account/Session pages still show full numbers
+ * via direct navigation, gated by RLS.
+ */
+function maskRdNumber(rdNumber: string): string {
+  if (rdNumber.length <= 4) return rdNumber;
+  return `***${rdNumber.slice(-4)} (len=${rdNumber.length})`;
 }
 
 /**

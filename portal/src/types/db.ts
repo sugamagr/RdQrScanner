@@ -79,3 +79,32 @@ export interface RdAccountRow {
   updated_at: string;
   deleted_at: string | null;
 }
+
+/**
+ * Derived view for the Activity page. The cloud has no `activity` table —
+ * the feed is materialized in the portal by reading recent rows from
+ * `scan_sessions`, `rd_numbers`, and `rd_accounts` and projecting them
+ * into a uniform shape so the UI can render a single list.
+ *
+ * `actorLabel` follows the same attribution logic as the phone bell:
+ *   - `null` last_editor_device_id (or null device row) → "Portal"
+ *   - resolved device row → device_name (e.g. "Counter Phone")
+ *
+ * The portal user (you) is always the actor for portal-originated events;
+ * the labels are useful when there are multiple phones in play.
+ */
+export type ActivityKind =
+  | 'session_finalized'
+  | 'session_deleted'
+  | 'defaulter_edited'
+  | 'account_added'
+  | 'account_edited';
+
+export interface ActivityRow {
+  kind: ActivityKind;
+  occurredAt: string;
+  actorLabel: string;
+  primary: string;
+  secondary: string | null;
+  linkTo: string | null;
+}

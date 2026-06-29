@@ -6,6 +6,7 @@ const navItems = [
   { to: '/sessions', label: 'Sessions' },
   { to: '/search', label: 'Search' },
   { to: '/accounts', label: 'Accounts' },
+  { to: '/activity', label: 'Activity' },
   { to: '/devices', label: 'Devices' },
 ];
 

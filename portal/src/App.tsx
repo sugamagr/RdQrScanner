@@ -7,6 +7,7 @@ import { SessionDetailPage } from './pages/SessionDetail';
 import { DevicesPage } from './pages/Devices';
 import { SearchPage } from './pages/Search';
 import { AccountsPage } from './pages/Accounts';
+import { ActivityPage } from './pages/Activity';
 import { AppShell } from './components/AppShell';
 
 export default function App() {
@@ -37,6 +38,7 @@ function AuthedRoot() {
         <Route path="/sessions/:sessionId" element={<SessionDetailPage />} />
         <Route path="/search" element={<SearchPage />} />
         <Route path="/accounts" element={<AccountsPage />} />
+        <Route path="/activity" element={<ActivityPage />} />
         <Route path="/devices" element={<DevicesPage />} />
         <Route path="*" element={<Navigate to="/sessions" replace />} />
       </Routes>
