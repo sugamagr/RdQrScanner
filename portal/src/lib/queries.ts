@@ -1,6 +1,5 @@
 import { supabase } from './supabase';
 import type {
-  AccountSource,
   ActivityKind,
   ActivityRow,
   DeviceRow,
@@ -62,9 +61,11 @@ export async function fetchSessionsPage(params: {
 }): Promise<SessionsPage> {
   const { offset, search } = params;
   const to = offset + SESSIONS_PAGE_SIZE - 1;
+  const ownerId = await requireOwnerId();
   let query = supabase
     .from('scan_sessions')
     .select('*', { count: 'exact' })
+    .eq('owner_id', ownerId)
     .is('deleted_at', null)
     .order('end_time', { ascending: false })
     .range(offset, to);
@@ -89,10 +90,12 @@ export async function fetchSessionsPage(params: {
 }
 
 export async function fetchSession(sessionId: string): Promise<ScanSessionRow | null> {
+  const ownerId = await requireOwnerId();
   const { data, error } = await supabase
     .from('scan_sessions')
     .select('*')
     .eq('id', sessionId)
+    .eq('owner_id', ownerId)
     .is('deleted_at', null)
     .maybeSingle();
   if (error) throw error;
@@ -100,10 +103,12 @@ export async function fetchSession(sessionId: string): Promise<ScanSessionRow | 
 }
 
 export async function fetchLotsForSession(sessionId: string): Promise<ScanLotRow[]> {
+  const ownerId = await requireOwnerId();
   const { data, error } = await supabase
     .from('scan_lots')
     .select('*')
     .eq('session_id', sessionId)
+    .eq('owner_id', ownerId)
     .is('deleted_at', null)
     .order('lot_number', { ascending: true });
   if (error) throw error;
@@ -112,10 +117,12 @@ export async function fetchLotsForSession(sessionId: string): Promise<ScanLotRow
 
 export async function fetchRdNumbersForLots(lotIds: string[]): Promise<RdNumberRow[]> {
   if (lotIds.length === 0) return [];
+  const ownerId = await requireOwnerId();
   const { data, error } = await supabase
     .from('rd_numbers')
     .select('*')
     .in('lot_id', lotIds)
+    .eq('owner_id', ownerId)
     .is('deleted_at', null)
     .order('position', { ascending: true });
   if (error) throw error;
@@ -123,9 +130,12 @@ export async function fetchRdNumbersForLots(lotIds: string[]): Promise<RdNumberR
 }
 
 export async function fetchDevices(): Promise<DeviceRow[]> {
+  const ownerId = await requireOwnerId();
   const { data, error } = await supabase
     .from('devices')
     .select('*')
+    .eq('owner_id', ownerId)
+    .is('deleted_at', null)
     .order('last_seen_at', { ascending: false });
   if (error) throw error;
   return (data ?? []) as DeviceRow[];
@@ -170,11 +180,13 @@ export async function fetchActivityFeed(params: {
     'account_added',
     'account_edited',
   ]);
+  const ownerId = await requireOwnerId();
 
   // Fetch the device map once so attribution is O(1) per event after.
   const { data: deviceRows, error: devicesErr } = await supabase
     .from('devices')
-    .select('id, device_name');
+    .select('id, device_name')
+    .eq('owner_id', ownerId);
   if (devicesErr) throw devicesErr;
   const deviceById = new Map<string, string>();
   for (const row of (deviceRows ?? []) as Array<{ id: string; device_name: string }>) {
@@ -193,6 +205,7 @@ export async function fetchActivityFeed(params: {
     const { data, error } = await supabase
       .from('scan_sessions')
       .select('id, display_number, operator_name, total_lots, total_rd_numbers, device_id, updated_at, deleted_at')
+      .eq('owner_id', ownerId)
       .order('updated_at', { ascending: false })
       .limit(limit);
     if (error) throw error;
@@ -240,6 +253,7 @@ export async function fetchActivityFeed(params: {
     const { data, error } = await supabase
       .from('rd_numbers')
       .select('id, number, months_paid, last_editor_device_id, updated_at, scanned_at, lot:scan_lots!inner(session_id, session:scan_sessions!inner(id, display_number))')
+      .eq('owner_id', ownerId)
       .gt('months_paid', 1)
       .is('deleted_at', null)
       .order('updated_at', { ascending: false })
@@ -275,6 +289,7 @@ export async function fetchActivityFeed(params: {
     const { data, error } = await supabase
       .from('rd_accounts')
       .select('rd_number, name, last_editor_device_id, created_at, updated_at')
+      .eq('owner_id', ownerId)
       .is('deleted_at', null)
       .order('updated_at', { ascending: false })
       .limit(limit);
@@ -386,6 +401,7 @@ export async function fetchLotTotalsExcluding(params: {
   excludeRdId: string;
 }): Promise<LotTotalsSnapshot> {
   const { lotId, excludeRdId } = params;
+  const ownerId = await requireOwnerId();
   const { data, error } = await supabase
     .from('rd_numbers')
     .select(
@@ -395,6 +411,7 @@ export async function fetchLotTotalsExcluding(params: {
     `
     )
     .eq('lot_id', lotId)
+    .eq('owner_id', ownerId)
     .neq('id', excludeRdId)
     .is('deleted_at', null);
   if (error) throw error;
@@ -420,10 +437,12 @@ export async function fetchLotTotalsExcluding(params: {
 export async function fetchAccountForRdNumber(
   rdNumber: string
 ): Promise<{ monthly_amount: number; name: string } | null> {
+  const ownerId = await requireOwnerId();
   const { data, error } = await supabase
     .from('rd_accounts')
     .select('monthly_amount, name')
     .eq('rd_number', rdNumber)
+    .eq('owner_id', ownerId)
     .is('deleted_at', null)
     .maybeSingle();
   if (error) throw error;
@@ -471,6 +490,7 @@ export async function searchRdNumbers(query: string): Promise<RdSearchHit[]> {
   const trimmed = query.trim();
   if (trimmed.length < 2) return [];
 
+  const ownerId = await requireOwnerId();
   const escaped = trimmed.replace(/[%_\\]/g, (c) => `\\${c}`);
   const { data, error } = await supabase
     .from('rd_numbers')
@@ -483,6 +503,7 @@ export async function searchRdNumbers(query: string): Promise<RdSearchHit[]> {
       )
     `
     )
+    .eq('owner_id', ownerId)
     .ilike('number', `%${escaped}%`)
     .is('deleted_at', null)
     .order('scanned_at', { ascending: false })
@@ -539,9 +560,11 @@ export async function searchRdNumbers(query: string): Promise<RdSearchHit[]> {
  * cache reconciles. Sorted by lower(name) to match phone-side ordering.
  */
 export async function fetchAccounts(): Promise<RdAccountRow[]> {
+  const ownerId = await requireOwnerId();
   const { data, error } = await supabase
     .from('rd_accounts')
     .select('*')
+    .eq('owner_id', ownerId)
     .is('deleted_at', null)
     .order('name', { ascending: true });
   if (error) throw error;
@@ -630,6 +653,7 @@ export async function fetchExistingLastPaidThroughMap(
   rdNumbers: ReadonlyArray<string>
 ): Promise<Map<string, string | null>> {
   if (rdNumbers.length === 0) return new Map();
+  const ownerId = await requireOwnerId();
   const result = new Map<string, string | null>();
   // Chunked to stay under PostgREST's IN-list URL-length limit. 500
   // is well under Supabase's default 16 KB header cap (max 7 KB of
@@ -641,6 +665,7 @@ export async function fetchExistingLastPaidThroughMap(
     const { data, error } = await supabase
       .from('rd_accounts')
       .select('rd_number, last_paid_through')
+      .eq('owner_id', ownerId)
       .in('rd_number', chunk)
       .is('deleted_at', null);
     if (error) throw error;
@@ -705,7 +730,7 @@ export async function bulkUpsertAccounts(
       owner_id: ownerId,
       name: row.name,
       monthly_amount: row.monthlyAmount,
-      source: 'CSV' as AccountSource,
+      source: 'CSV',
       is_active: true,
       last_editor_device_id: null,
       // Resurrect tombstoned rows on CSV re-import. Mirrors phone-side

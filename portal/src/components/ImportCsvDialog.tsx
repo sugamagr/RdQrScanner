@@ -35,6 +35,19 @@ interface RegressionRow {
 function monthsBackward(incoming: string, existing: string): number {
   const [iy, im] = incoming.split('-').map(Number);
   const [ey, em] = existing.split('-').map(Number);
+  // Defence-in-depth NaN guard: csvParser validates YYYY-MM with
+  // MONTH_TOKEN_REGEX so legal input never reaches here malformed,
+  // but a future caller (cloud-side row, manual UI override, etc.)
+  // could supply a bad token and a NaN return value would silently
+  // sort to the bottom of the regression list — exactly hiding the
+  // case the operator most needs to see. Returning 0 keeps the
+  // row visible while the parser layer still rejects it elsewhere.
+  if (
+    !Number.isFinite(iy) || !Number.isFinite(im) ||
+    !Number.isFinite(ey) || !Number.isFinite(em)
+  ) {
+    return 0;
+  }
   return (ey - iy) * 12 + (em - im);
 }
 

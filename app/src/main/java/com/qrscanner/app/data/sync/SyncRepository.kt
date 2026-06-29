@@ -242,16 +242,24 @@ class SyncRepository(
      * leave parent soft-deleted while children are still alive.
      */
     suspend fun softDeleteSession(sessionId: Long) {
-        val session = sessionDao.getSessionById(sessionId) ?: return
         val now = System.currentTimeMillis()
-        if (session.cloudId == null) {
-            database.withTransaction {
+        // Read MUST happen inside the transaction. Pulling cloudId
+        // outside opens a TOCTOU race: a concurrent pull worker or
+        // realtime UPDATE can stamp cloudId on the local row between
+        // the read and the branch decision. If the read sees the
+        // stale cloudId==null and the branch hard-deletes, the cloud
+        // copy survives untouched and the next pull resurrects the
+        // row we just tried to delete. Re-reading inside the
+        // transaction serialises against any concurrent writer per
+        // Room's per-transaction lock semantics (verified against
+        // SQLite WAL contract). bg_f0d47c71 R3 F1.
+        database.withTransaction {
+            val session = sessionDao.getSessionById(sessionId) ?: return@withTransaction
+            if (session.cloudId == null) {
                 rdNumberDao.deleteForSession(sessionId)
                 lotDao.deleteLotsForSession(sessionId)
                 sessionDao.deleteById(sessionId)
-            }
-        } else {
-            database.withTransaction {
+            } else {
                 rdNumberDao.softDeleteForSession(sessionId, now)
                 lotDao.softDeleteForSession(sessionId, now)
                 sessionDao.softDelete(sessionId, now)

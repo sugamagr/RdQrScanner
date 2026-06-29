@@ -94,7 +94,8 @@ fun QRScannerNavigation(
                 onNavigateBack = { navController.popBackStack() },
                 onNavigateToSession = { sessionId ->
                     navController.navigate(Screen.SessionDetail.createRoute(sessionId))
-                }
+                },
+                onStartScanning = { navController.navigate(Screen.RDScanner.route) },
             )
         }
         
@@ -123,7 +124,8 @@ fun QRScannerNavigation(
 
         composable(Screen.Accounts.route) {
             AccountsScreen(
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToAddAccount = { navController.navigate(Screen.AddAccounts.route) },
             )
         }
         

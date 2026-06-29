@@ -22,12 +22,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let mounted = true;
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (!mounted) return;
-      setSession(data.session);
-      lastSessionIdRef.current = data.session?.access_token ?? null;
-      setLoading(false);
-    });
+    // Without the .catch(), a transient network failure or an SDK
+    // rejection during boot would leave loading=true forever and the
+    // app would be stuck on the FullPageLoader. Always flip loading
+    // off in the failure branch; the user can hit Sign in to retry.
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (!mounted) return;
+        setSession(data.session);
+        lastSessionIdRef.current = data.session?.access_token ?? null;
+        setLoading(false);
+      })
+      .catch((err: unknown) => {
+        if (!mounted) return;
+        console.warn('[auth] getSession() failed during boot', err);
+        setSession(null);
+        lastSessionIdRef.current = null;
+        setLoading(false);
+      });
 
     const {
       data: { subscription },

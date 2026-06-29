@@ -493,6 +493,14 @@ function readSortKey(
       return account.monthly_amount;
     case 'last_paid_through':
       return account.last_paid_through;
+    default: {
+      // Exhaustive guard. If SortKey gains a member and a future caller
+      // forgets to teach this switch about it, TypeScript fails the
+      // build here at compile time instead of silently returning
+      // undefined and corrupting the sort order.
+      const _exhaustive: never = key;
+      throw new Error(`readSortKey: unhandled SortKey ${String(_exhaustive)}`);
+    }
   }
 }
 

@@ -30,6 +30,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.PersonAddAlt1
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -129,6 +131,7 @@ fun AddAccountsScreen(
     val drafts = remember { listOf(AccountDraft(), AccountDraft()).toMutableStateList() }
     var saveModal by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
+    var discardConfirm by remember { mutableStateOf(false) }
 
     val validRowCount by remember {
         derivedStateOf {
@@ -140,8 +143,39 @@ fun AddAccountsScreen(
             drafts.any { it.isPartiallyFilled() && !it.isFullyValid() }
         }
     }
+    val hasUnsavedWork by remember {
+        derivedStateOf { drafts.any { it.isPartiallyFilled() } }
+    }
     val saveEnabled by remember {
         derivedStateOf { validRowCount >= 1 && !anyInvalid && !saving }
+    }
+
+    // Back-press guard: if any draft row has been touched, intercept
+    // the back gesture so the operator confirms before discarding.
+    // BackHandler with enabled=false transparently passes the gesture
+    // through to the system, so the empty-grid case still pops the
+    // back stack with no extra tap. The header's back button reuses
+    // the same path via attemptBack(). bg_3f549114 R3 HIGH F11.1.
+    val attemptBack: () -> Unit = {
+        if (hasUnsavedWork) discardConfirm = true else onNavigateBack()
+    }
+    BackHandler(enabled = hasUnsavedWork) { discardConfirm = true }
+
+    if (discardConfirm) {
+        AlertDialog(
+            onDismissRequest = { discardConfirm = false },
+            title = { Text("Discard unsaved accounts?") },
+            text = { Text("You have account rows that have not been saved. Going back now will lose them.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    discardConfirm = false
+                    onNavigateBack()
+                }) { Text("Discard") }
+            },
+            dismissButton = {
+                TextButton(onClick = { discardConfirm = false }) { Text("Keep editing") }
+            },
+        )
     }
 
     Box(
@@ -155,13 +189,14 @@ fun AddAccountsScreen(
             AddAccountsHeader(
                 countLabel = if (validRowCount == 0) "Fill in to begin"
                 else "$validRowCount ready to save",
-                onNavigateBack = onNavigateBack
+                onNavigateBack = attemptBack
             )
 
         LazyColumn(
             modifier = Modifier
                 .weight(1f)
-                .fillMaxWidth(),
+                .fillMaxWidth()
+                .imePadding(),
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
@@ -693,7 +728,7 @@ private fun SaveConfirmDialog(
                     Text("Cancel", color = TextSecondary)
                 }
                 TextButton(onClick = onSaveOnly) {
-                    Text("Save without QR", color = AccentMint, fontWeight = FontWeight.SemiBold)
+                    Text("Save without QR", color = TextSecondary, fontWeight = FontWeight.SemiBold)
                 }
             }
         },

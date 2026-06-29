@@ -233,7 +233,7 @@ fun HomeScreen(
             val showBanner = displayedSummary.state != SyncPillState.NOT_SIGNED_IN &&
                 recentEvents.isNotEmpty()
             if (showBanner) {
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
                 RecentChangesBanner(
                     events = recentEvents,
                     onDismiss = {
@@ -295,8 +295,7 @@ fun HomeScreen(
             Text(
                 text = "RD Book Scanner",
                 style = MaterialTheme.typography.headlineMedium.copy(
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 26.sp
+                    fontWeight = FontWeight.Bold
                 )
             )
             
@@ -366,7 +365,7 @@ fun HomeScreen(
                 onClick = onNavigateToScanner
             )
             
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(16.dp))
             
             // Each card has a distinct accent color so the three roles
             // read at a glance — Add (orange) / Accounts (mint) /
@@ -604,7 +603,7 @@ private fun SecondaryActionCard(
                 )
             }
             
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             
             Text(
                 text = title,

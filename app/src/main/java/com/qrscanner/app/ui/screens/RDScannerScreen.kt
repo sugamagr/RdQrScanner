@@ -18,11 +18,15 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -1032,8 +1036,18 @@ private fun RDCameraScreen(
         // Scan Feedback
         AnimatedVisibility(
             visible = lastScanFeedback != null,
-            enter = fadeIn() + slideInVertically(),
-            exit = fadeOut() + slideOutVertically(),
+            // scaleIn from 0.6f with MediumBouncy spring gives the
+            // success/duplicate/invalid card a quick punch-in feel
+            // that reads as a confirmation receipt, matching the
+            // tone played at the same instant. Spring (not tween)
+            // because tweens at low durations look mechanical;
+            // dampingRatio 0.6f is the inflection where the
+            // overshoot is just visible without becoming wobbly.
+            enter = fadeIn() + scaleIn(
+                initialScale = 0.6f,
+                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy)
+            ),
+            exit = fadeOut() + scaleOut(targetScale = 0.85f),
             modifier = Modifier
                 .align(Alignment.Center)
                 .padding(top = 100.dp)

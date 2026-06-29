@@ -23,9 +23,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Visibility
@@ -113,7 +117,10 @@ import kotlinx.coroutines.withContext
  * isActive state immediately.
  */
 @Composable
-fun AccountsScreen(onNavigateBack: () -> Unit) {
+fun AccountsScreen(
+    onNavigateBack: () -> Unit,
+    onNavigateToAddAccount: () -> Unit,
+) {
     val context = LocalContext.current
     val app = context.applicationContext as QRScannerApp
     val scope = rememberCoroutineScope()
@@ -237,7 +244,8 @@ fun AccountsScreen(onNavigateBack: () -> Unit) {
                 AccountListSkeleton()
             } else if (visibleAccounts.isEmpty()) {
                 EmptyState(
-                    isFiltered = searchQuery.isNotBlank() || (!showInactive && inactiveCount > 0)
+                    isFiltered = searchQuery.isNotBlank() || (!showInactive && inactiveCount > 0),
+                    onAddAccount = onNavigateToAddAccount,
                 )
             } else {
                 LazyColumn(
@@ -500,10 +508,12 @@ private fun FilterBar(
             Surface(
                 color = if (showInactive) AccentMint.copy(alpha = 0.15f) else CardBackground,
                 shape = RoundedCornerShape(20.dp),
-                modifier = Modifier.clickable { onToggleShowInactive(!showInactive) }
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .clickable { onToggleShowInactive(!showInactive) }
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
@@ -690,7 +700,10 @@ private fun AccountRow(
 }
 
 @Composable
-private fun EmptyState(isFiltered: Boolean) {
+private fun EmptyState(
+    isFiltered: Boolean,
+    onAddAccount: () -> Unit,
+) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(
@@ -710,10 +723,34 @@ private fun EmptyState(isFiltered: Boolean) {
                 text = if (isFiltered)
                     "Try a different search or toggle Show inactive."
                 else
-                    "Add accounts from Home → Add Account.",
+                    "Add your first RD account to start tracking deposits.",
                 style = MaterialTheme.typography.bodySmall,
                 color = TextSecondary
             )
+            if (!isFiltered) {
+                Spacer(modifier = Modifier.height(20.dp))
+                Button(
+                    onClick = onAddAccount,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = PrimaryOrange,
+                        contentColor = Color.White,
+                    ),
+                    shape = RoundedCornerShape(24.dp),
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Add Account",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                    )
+                }
+            }
         }
     }
 }

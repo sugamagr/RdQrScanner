@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -56,6 +57,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.TableChart
@@ -129,7 +131,8 @@ private enum class HistoryFilter(val label: String) {
 @Composable
 fun SessionHistoryScreen(
     onNavigateBack: () -> Unit,
-    onNavigateToSession: (Long) -> Unit
+    onNavigateToSession: (Long) -> Unit,
+    onStartScanning: () -> Unit,
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as QRScannerApp
@@ -284,7 +287,7 @@ fun SessionHistoryScreen(
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
                                 "Session History",
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = Color.White)
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color.White)
                             )
                             Text(
                                 "${completedSessions.size} sessions",
@@ -371,7 +374,9 @@ fun SessionHistoryScreen(
                                         fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
                                     )
                                 },
-                                modifier = Modifier.scale(chipScale),
+                                modifier = Modifier
+                                    .heightIn(min = 48.dp)
+                                    .scale(chipScale),
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = PrimaryOrange,
                                     selectedLabelColor = Color.White,
@@ -406,6 +411,28 @@ fun SessionHistoryScreen(
                             Text("No Sessions Yet", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold), color = TextSecondary)
                             Spacer(modifier = Modifier.height(8.dp))
                             Text("Start scanning RD books to see your history here", style = MaterialTheme.typography.bodyMedium, color = TextSecondary.copy(alpha = 0.7f))
+                            Spacer(modifier = Modifier.height(24.dp))
+                            Button(
+                                onClick = onStartScanning,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = PrimaryOrange,
+                                    contentColor = Color.White,
+                                ),
+                                shape = RoundedCornerShape(24.dp),
+                                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+                                modifier = Modifier.heightIn(min = 48.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.QrCodeScanner,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Start Scanning",
+                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                                )
+                            }
                         }
                     }
                 }
