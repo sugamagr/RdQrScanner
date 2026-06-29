@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -65,7 +66,7 @@ fun AppInfoScreen(
                 )
             )
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
             GradientTopBar {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -171,11 +172,16 @@ fun AppInfoScreen(
                             "Initial release of RD Book Scanner",
                             "Scan RD book QR codes with LOT management",
                             "Session-based scanning with sequential numbering",
+                            "Cloud sync across 2 to 5 phones with sub-second realtime updates",
+                            "Companion web portal at rd-scanner-portal.pages.dev — Dashboard, Sessions, Accounts, Activity, Devices, Search",
+                            "Bulk import accounts via 4-column CSV (name, rd_number, monthly_amount, last_paid_through)",
+                            "Track defaulters automatically — months_paid > 1 means the holder is catching up",
+                            "Paper book is truth — last paid month never auto-regresses, only operator can lower it explicitly",
+                            "Soft delete with 30-day undo window on sessions and accounts",
                             "Share LOTs with image attachment for WhatsApp",
                             "Export sessions as XLSX or TXT",
                             "Generate QR code PDFs for RD numbers",
                             "Duplicate detection within session",
-                            "Track defaulter accounts — pick the exact months paid (e.g. Jun, Jul, Aug 2024) for portal reconciliation",
                             "Modern light orange theme"
                         )
                     )
@@ -332,7 +338,17 @@ fun AppInfoScreen(
                         TechChip(text = "Material 3", modifier = Modifier.weight(1f))
                     }
                 }
-                
+
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        TechChip(text = "Supabase", modifier = Modifier.weight(1f))
+                        TechChip(text = "WorkManager", modifier = Modifier.weight(1f))
+                    }
+                }
+
                 item {
                     Spacer(modifier = Modifier.height(24.dp).navigationBarsPadding())
                     

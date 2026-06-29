@@ -6,11 +6,40 @@
   /* P6δ NITPICK: ensure raw <a> elements get the same focus-visible
      ring as <button>/<input>/<textarea>/<select>. Without this, the
      ErrorBoundary's "Reload page" link and any future raw anchor
-     would be focusable but invisible to keyboard users. */
+     would be focusable but invisible to keyboard users. QC R1 H4:
+     border-radius now inherits so the ring matches whatever
+     rounding the target uses (rounded-pill / rounded-xl / etc.).
+     The 6px fallback was clipping the corner on rounded-xl=12px
+     buttons giving a square halo on a pill. */
   a:focus-visible {
     outline: none;
     box-shadow: 0 0 0 2px rgb(var(--ring-color, 255 159 67) / 0.6);
-    border-radius: 6px;
+    border-radius: inherit;
+  }
+}
+
+@layer base {
+  /* QC R1 H1 a11y: operators who set prefers-reduced-motion in their
+     OS get every decorative animation disabled. We keep functional
+     state transitions (e.g. layout shifts during route changes) but
+     mute the loader spin, gradient drift, floating bubbles, shimmer,
+     and CSV progress bar. Without this, the dashboard loader would
+     induce motion-sickness on macOS Reduce Motion / Windows "Show
+     animations" off. */
+  @media (prefers-reduced-motion: reduce) {
+    .animate-loader-spin-cw,
+    .animate-loader-spin-ccw,
+    .animate-loader-pulse,
+    .animate-loader-shimmer,
+    .animate-bubble-a,
+    .animate-bubble-b,
+    .animate-bubble-c,
+    .animate-gradient-drift,
+    .animate-csv-progress,
+    .animate-pulse,
+    .animate-spin {
+      animation: none !important;
+    }
   }
 }
 

@@ -10,7 +10,7 @@ import { SearchPage } from './pages/Search';
 import { AccountsPage } from './pages/Accounts';
 import { ActivityPage } from './pages/Activity';
 import { AppShell } from './components/AppShell';
-import { FullPageLoader } from './components/Loader';
+import { DashboardRouteSkeleton, FullPageLoader } from './components/Loader';
 
 // Dashboard ships Recharts (~300KB) which makes the route the heaviest
 // in the app. Lazy-loading splits it into its own chunk so the rest of
@@ -47,7 +47,7 @@ function AuthedRoot() {
         <Route
           path="/"
           element={
-            <Suspense fallback={<FullPageLoader label="Building dashboard" />}>
+            <Suspense fallback={<DashboardRouteSkeleton />}>
               <DashboardPage />
             </Suspense>
           }

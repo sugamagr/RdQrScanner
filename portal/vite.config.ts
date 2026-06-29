@@ -17,5 +17,20 @@ export default defineConfig({
     // entirely. No Sentry today; revisit when we wire crash reporting
     // (uploadable maps via Sentry CLI is the standard pattern then).
     sourcemap: false,
+    rollupOptions: {
+      output: {
+        // QC R1 perf: keep the main bundle lean by isolating the two
+        // heaviest dependency trees in their own async chunks. Recharts
+        // pulls in ~300KB (d3-shape, victory-vendor) and only matters
+        // on the Dashboard route; @react-pdf/renderer is ~250KB and
+        // only matters when the operator clicks Export PDF. Without
+        // this both ended up in the eager bundle through tree shaking's
+        // shared-module resolution, blowing past the 500KB main budget.
+        manualChunks: {
+          recharts: ['recharts'],
+          pdf: ['@react-pdf/renderer'],
+        },
+      },
+    },
   },
 });

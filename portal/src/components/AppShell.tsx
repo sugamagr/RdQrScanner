@@ -1,5 +1,6 @@
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { type ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../lib/useAuth';
 
 const navItems = [
@@ -14,10 +15,27 @@ const navItems = [
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const qc = useQueryClient();
 
   const handleSignOut = async () => {
     await signOut();
     navigate('/signin', { replace: true });
+  };
+
+  // Title click = "go home + refresh everything". When already on the
+  // dashboard route this is just an invalidate + smooth scroll-to-top;
+  // when on another route we navigate first so the dashboard mounts
+  // fresh, then the dashboard's own useQuery picks up the invalidation.
+  // Using a button instead of NavLink prevents React Router from
+  // short-circuiting same-path navigations.
+  const handleTitleClick = () => {
+    void qc.invalidateQueries();
+    if (location.pathname === '/') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else {
+      navigate('/');
+    }
   };
 
   return (
@@ -30,14 +48,19 @@ export function AppShell({ children }: { children: ReactNode }) {
       </a>
       <header className="sticky top-0 z-30 border-b border-surface-border bg-surface/85 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-7xl items-center gap-6 px-4 sm:px-6 lg:px-8">
-          <NavLink to="/" end className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleTitleClick}
+            aria-label="Refresh dashboard"
+            className="flex items-center gap-2 rounded-pill focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
             <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary text-white shadow-card">
               <span className="text-base font-bold">RD</span>
             </span>
             <span className="hidden text-sm font-semibold text-ink-primary sm:inline">
               Scanner Portal
             </span>
-          </NavLink>
+          </button>
 
           <nav className="ml-2 flex items-center gap-1">
             {navItems.map((item) => (

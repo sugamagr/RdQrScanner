@@ -18,7 +18,12 @@ const queryClient = new QueryClient({
       // the shared supabase client.
       retry: 1,
       retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 5000),
-      refetchOnWindowFocus: true,
+      // QC R1 LOW L1: useRealtimeSync already invalidates every active
+      // query on the visibilitychange 'visible' event, so leaving
+      // refetchOnWindowFocus on top duplicated every fetch on tab
+      // focus. The realtime path is more authoritative (it also
+      // covers reconnect after a long sleep) so this turns off.
+      refetchOnWindowFocus: false,
       // offlineFirst lets cached views render immediately when the
       // tab regains focus on a slow/paused Supabase project — the
       // refetch runs in the background instead of blocking the UI

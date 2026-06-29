@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -216,7 +217,7 @@ fun SessionDetailScreen(
                 )
             )
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
             GradientTopBar {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -567,8 +568,12 @@ private fun LotCard(
                         Icon(
                             imageVector = Icons.Default.EditCalendar,
                             contentDescription = "Edit defaulters",
-                            tint = WarningAmber,
-                            modifier = Modifier.size(20.dp)
+                            // IconButton's built-in disabled overlay only applies when the
+                            // tint inherits from LocalContentColor. An explicit tint bypasses
+                            // it, so the disabled state must encode its own alpha — otherwise
+                            // every LOT's edit icon looks tappable even when it is not.
+                            tint = if (rdNumberEntities.isNotEmpty()) WarningAmber else WarningAmber.copy(alpha = 0.32f),
+                            modifier = Modifier.size(22.dp)
                         )
                     }
 

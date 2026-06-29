@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -25,12 +26,15 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CloudSync
+import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.EditCalendar
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Numbers
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -80,7 +84,7 @@ fun HowItWorksScreen(
                 )
             )
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
             GradientTopBar {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -342,7 +346,31 @@ private fun HindiContent() {
             FeatureItem(
                 icon = Icons.Default.EditCalendar,
                 title = "डिफॉल्टर मार्क करें",
-                description = "एक LOT स्कैन करने के बाद, उन खातों को मार्क करें जिनके लिए एक से अधिक महीने का भुगतान हुआ है। हर डिफॉल्टर के लिए कौन से महीने (जैसे जून, जुलाई 2024) हैं, यह भी चुनें — पोर्टल से मिलान करने में आसानी होगी। महीने LOT कार्ड और सभी एक्सपोर्ट में दिखेंगे।"
+                description = "एक LOT स्कैन करने के बाद, उन खातों को मार्क करें जिनके लिए एक से अधिक महीने का भुगतान हुआ है (months_paid > 1)। हर डिफॉल्टर के लिए कौन से महीने (जैसे जून, जुलाई 2024) हैं, यह भी चुनें — पोर्टल से मिलान करने में आसानी होगी। महीने LOT कार्ड और सभी एक्सपोर्ट में दिखेंगे।"
+            )
+        }
+
+        item {
+            FeatureItem(
+                icon = Icons.Default.CloudSync,
+                title = "क्लाउड सिंक",
+                description = "सब कुछ अपने आप 2 से 5 फोनों के बीच एक सेकंड से कम में सिंक होता है। ऑफलाइन में भी काम करता है — कनेक्शन वापस आने पर अपलोड हो जाता है।"
+            )
+        }
+
+        item {
+            FeatureItem(
+                icon = Icons.Default.Devices,
+                title = "वेब पोर्टल",
+                description = "rd-scanner-portal.pages.dev पर डैशबोर्ड देखें — सेशन, खाते, गतिविधि, डिवाइस और सर्च। चार्ट, रिपोर्ट और PDF एक्सपोर्ट उपलब्ध हैं।"
+            )
+        }
+
+        item {
+            FeatureItem(
+                icon = Icons.Default.Upload,
+                title = "CSV से थोक अपलोड",
+                description = "पोर्टल से 4 कॉलम (नाम, RD नंबर, मासिक राशि, अंतिम भुगतान महीना) वाली CSV अपलोड करें। मौजूदा खाते अपडेट हो जाएंगे; नए जुड़ जाएंगे। 'पेपर बुक सत्य है' — अंतिम भुगतान महीना केवल ऑपरेटर कम कर सकता है।"
             )
         }
 
@@ -350,10 +378,10 @@ private fun HindiContent() {
             FeatureItem(
                 icon = Icons.Default.FolderOpen,
                 title = "सेशन एक्सपोर्ट करें",
-                description = "रिकॉर्ड रखने या आगे की प्रक्रिया के लिए पूरे सेशन को XLSX या TXT फाइल के रूप में एक्सपोर्ट करें।"
+                description = "रिकॉर्ड रखने या आगे की प्रक्रिया के लिए पूरे सेशन को XLSX या TXT फाइल के रूप में एक्सपोर्ट करें। सेशन डिलीट करने पर 30 दिन तक वापस लाने का विकल्प मिलता है।"
             )
         }
-        
+
         item {
             Spacer(modifier = Modifier.height(16.dp).navigationBarsPadding())
         }
@@ -516,7 +544,31 @@ private fun EnglishContent() {
             FeatureItem(
                 icon = Icons.Default.EditCalendar,
                 title = "Mark Defaulters",
-                description = "After scanning a LOT, mark any account that paid for more than one month — and pick which months (e.g. Jun, Jul 2024) so you can reconcile against the postal portal. Months show up on the LOT card and in every export."
+                description = "After scanning a LOT, mark any account that paid for more than one month (months_paid > 1) and pick which months (e.g. Jun, Jul 2024) so you can reconcile against the postal portal. Months show up on the LOT card and in every export."
+            )
+        }
+
+        item {
+            FeatureItem(
+                icon = Icons.Default.CloudSync,
+                title = "Cloud Sync",
+                description = "Everything syncs in under a second across 2 to 5 phones. Works offline — pending changes upload as soon as the connection returns."
+            )
+        }
+
+        item {
+            FeatureItem(
+                icon = Icons.Default.Devices,
+                title = "Web Portal",
+                description = "Open rd-scanner-portal.pages.dev for the full Dashboard, Sessions, Accounts, Activity, Devices and Search. Charts, reports and PDF exports included."
+            )
+        }
+
+        item {
+            FeatureItem(
+                icon = Icons.Default.Upload,
+                title = "Bulk Upload via CSV",
+                description = "From the portal, upload a 4-column CSV (name, rd_number, monthly_amount, last_paid_through). Existing accounts update; new ones are added. Paper book is truth — last_paid_through only goes backward on explicit operator override."
             )
         }
 
@@ -524,10 +576,10 @@ private fun EnglishContent() {
             FeatureItem(
                 icon = Icons.Default.FolderOpen,
                 title = "Export Sessions",
-                description = "Export complete sessions as XLSX or TXT files for record-keeping or further processing."
+                description = "Export complete sessions as XLSX or TXT files for record-keeping or further processing. Deleted sessions can be restored within 30 days."
             )
         }
-        
+
         item {
             Spacer(modifier = Modifier.height(16.dp).navigationBarsPadding())
         }

@@ -186,6 +186,30 @@ interface SkeletonCardProps {
   className?: string;
 }
 
+/**
+ * Lightweight dashboard-shaped skeleton used as the Suspense fallback
+ * for the lazy Dashboard route. Lives in Loader.tsx (not Dashboard.tsx)
+ * so the synchronous fallback path does NOT pull in the lazy Recharts
+ * chunk — otherwise Suspense would suspend on its own fallback, which
+ * is a tightly-undefined React behaviour and caused CLS in QC R1.
+ */
+export function DashboardRouteSkeleton() {
+  return (
+    <div className="space-y-8" role="status" aria-live="polite">
+      <div className="flex items-end justify-between">
+        <div>
+          <div className="h-7 w-44 animate-loader-shimmer rounded-lg bg-surface-alt" />
+          <div className="mt-2 h-4 w-72 animate-loader-shimmer rounded-md bg-surface-alt" />
+        </div>
+        <div className="h-9 w-48 animate-loader-shimmer rounded-pill bg-surface-alt" />
+      </div>
+      <SkeletonCard count={4} heightPx={104} rounded="2xl" />
+      <SkeletonCard count={2} heightPx={300} rounded="2xl" />
+      <span className="sr-only">Loading dashboard</span>
+    </div>
+  );
+}
+
 export function SkeletonCard({
   count = 6,
   heightPx = 56,

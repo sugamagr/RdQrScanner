@@ -34,7 +34,7 @@ export class SessionExpiredError extends Error {
  * so a caller never silently runs an unfiltered mutation AND the UI
  * can route to /signin instead of surfacing developer-speak.
  */
-async function requireOwnerId(): Promise<string> {
+export async function requireOwnerId(): Promise<string> {
   const { data, error } = await supabase.auth.getUser();
   if (error) throw error;
   const ownerId = data.user?.id;
@@ -326,7 +326,7 @@ export async function fetchActivityFeed(params: {
  * the right default. The Account/Session pages still show full numbers
  * via direct navigation, gated by RLS.
  */
-function maskRdNumber(rdNumber: string): string {
+export function maskRdNumber(rdNumber: string): string {
   if (rdNumber.length <= 4) return rdNumber;
   return `***${rdNumber.slice(-4)} (len=${rdNumber.length})`;
 }

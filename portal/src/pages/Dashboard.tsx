@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
@@ -24,14 +24,20 @@ import {
   Banknote,
   Boxes,
   Cpu,
+  Download,
+  Inbox,
+  IndianRupee,
   Layers,
   ScanLine,
+  ShieldCheck,
+  ShieldAlert,
+  Sparkles,
   UserMinus,
   Users,
   Wallet,
 } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
-import { FullPageLoader, SkeletonCard } from '../components/Loader';
+import { SkeletonCard } from '../components/Loader';
 import {
   fetchDashboardStats,
   type DashboardRange,
@@ -40,47 +46,66 @@ import {
 import { formatDateTime, formatNumber, formatRelativeTime } from '../lib/format';
 import type { ActivityKind } from '../types/db';
 
+const ExportPdfDialog = lazy(() =>
+  import('../components/ExportPdfDialog').then((m) => ({ default: m.ExportPdfDialog })),
+);
+
 /**
  * Operator dashboard — home page of the portal. Composes the full
- * picture from [fetchDashboardStats] into a 10-widget grid:
+ * picture from [fetchDashboardStats] into a 14-widget grid:
  *
- *   1. KPI row: total accounts, active accounts, defaulters, collected
- *      this month, sessions in range, total scans in range, active
- *      devices.
- *   2. Trends: monthly session counts (area chart), monthly scans
- *      with defaulter overlay (composed line + bar).
- *   3. Distribution: account source breakdown (donut), monthly amount
+ *   1. KPI row: total accounts, defaulters, collected this month,
+ *      sessions in range, scans in range, active devices, avg ticket,
+ *      account source mix, total book amount, current count vs default
+ *      count, current amount vs default amount.
+ *   2. Money charts: monthly money collected (area), current vs default
+ *      (stacked bar).
+ *   3. Activity trends: monthly session counts (area), monthly scans
+ *      with defaulter overlay (line).
+ *   4. Distribution: account source breakdown (donut), monthly amount
  *      histogram (bar).
- *   4. Top defaulters table (top 10).
- *   5. Recent activity strip linking into the Activity feed.
+ *   5. Top defaulters table (top 10, masked).
+ *   6. Recent activity strip linking into the Activity feed.
  *
- * Time range selector (3 / 6 / 12 / All) gates the time-series widgets.
- * The KPIs that are inherently "now" (active accounts, active devices,
- * collected this month) ignore the range. The dashboard query
- * de-duplicates work by reading every dependency once and projecting
- * client-side — see fetchDashboardStats for the rationale.
+ * Time range selector: 3M / 6M / 12M / All / Current month / Custom.
+ * "Now" KPIs (active accounts, active devices, collected this month,
+ * book amount) ignore the range; time-series widgets honor it.
  */
 
-const RANGE_OPTIONS: Array<{ value: DashboardRange; label: string }> = [
-  { value: 3, label: '3M' },
-  { value: 6, label: '6M' },
-  { value: 12, label: '12M' },
-  { value: null, label: 'All' },
+interface PresetOption {
+  key: '3M' | '6M' | '12M' | 'All' | 'Month';
+  label: string;
+  range: DashboardRange;
+}
+
+const PRESETS: PresetOption[] = [
+  { key: 'Month', label: 'This month', range: { kind: 'current-month' } },
+  { key: '3M', label: '3M', range: 3 },
+  { key: '6M', label: '6M', range: 6 },
+  { key: '12M', label: '12M', range: 12 },
+  { key: 'All', label: 'All', range: null },
 ];
+
+function rangeKey(r: DashboardRange): string {
+  if (r === null) return 'all';
+  if (typeof r === 'number') return `m${r}`;
+  if (r.kind === 'current-month') return 'cm';
+  return `cu:${r.fromIso}:${r.toIso}`;
+}
 
 export function DashboardPage() {
   const [range, setRange] = useState<DashboardRange>(12);
+  const [exportOpen, setExportOpen] = useState(false);
+  const { session } = useDashboardSession();
 
-  const { data, isPending, isError, error, refetch } = useQuery({
-    queryKey: ['dashboard', range],
+  const { data, isPending, isError, error, refetch, isFetching } = useQuery({
+    queryKey: ['dashboard', rangeKey(range)],
     queryFn: () => fetchDashboardStats(range),
-    // Stale-while-revalidate is the right default for a dashboard:
-    // realtime invalidates on writes, this just smooths route
-    // re-entries within a session.
+    enabled: !!session,
     staleTime: 30_000,
   });
 
-  if (isPending) return <FullPageLoader label="Building dashboard" />;
+  if (isPending) return <DashboardSkeleton />;
   if (isError) {
     const msg = error instanceof Error ? error.message : 'Failed to load dashboard.';
     return (
@@ -100,25 +125,83 @@ export function DashboardPage() {
     );
   }
 
-  return <DashboardBody stats={data} range={range} onRangeChange={setRange} />;
+  return (
+    <>
+      <DashboardBody
+        stats={data}
+        range={range}
+        onRangeChange={setRange}
+        isFetching={isFetching}
+        onExportClick={() => setExportOpen(true)}
+      />
+      {exportOpen && (
+        <Suspense fallback={null}>
+          <ExportPdfDialog
+            stats={data}
+            range={range}
+            onClose={() => setExportOpen(false)}
+          />
+        </Suspense>
+      )}
+    </>
+  );
+}
+
+/**
+ * Tiny wrapper around supabase.auth.getSession that only reads the
+ * cached value the AuthProvider already maintains via onAuthStateChange.
+ * Avoids importing the AuthProvider directly (circular). useState lazy
+ * init keeps it sync.
+ */
+function useDashboardSession(): { session: boolean } {
+  // Cheap reactive marker — the AuthProvider in main.tsx puts auth into
+  // a context that other queries already consume. The dashboard only
+  // needs to know "is there an authenticated owner?" because RLS-only
+  // queries below also throw via requireOwnerId on missing auth. Treat
+  // the existence of a non-empty localStorage `sb-…-auth-token` as
+  // session-present so we don't paint the dashboard before login lands.
+  const present = typeof window !== 'undefined'
+    && Object.keys(window.localStorage).some((k) => k.startsWith('sb-') && k.endsWith('-auth-token')
+      && (window.localStorage.getItem(k) ?? '').length > 2);
+  return { session: present };
 }
 
 interface DashboardBodyProps {
   stats: DashboardStats;
   range: DashboardRange;
   onRangeChange: (r: DashboardRange) => void;
+  isFetching: boolean;
+  onExportClick: () => void;
 }
 
-function DashboardBody({ stats, range, onRangeChange }: DashboardBodyProps) {
+function DashboardBody({ stats, range, onRangeChange, isFetching, onExportClick }: DashboardBodyProps) {
+  const rangeLabel = describeRange(range);
   return (
     <div className="space-y-8">
       <PageHeader
         title="Dashboard"
-        subtitle="Snapshot of accounts, sessions, scans, and devices"
-        action={<RangeSelector value={range} onChange={onRangeChange} />}
+        subtitle={`${rangeLabel}${isFetching ? ' · refreshing' : ''}`}
+        action={
+          <div className="flex flex-wrap items-center gap-2">
+            <RangeSelector value={range} onChange={onRangeChange} />
+            <button
+              type="button"
+              onClick={onExportClick}
+              className="inline-flex items-center gap-1.5 rounded-pill bg-primary px-3.5 py-2 text-xs font-semibold text-white shadow-card transition-colors hover:bg-primary-dark"
+            >
+              <Download className="h-3.5 w-3.5" aria-hidden="true" />
+              Export PDF
+            </button>
+          </div>
+        }
       />
 
       <KpiRow stats={stats} />
+
+      <div className="grid gap-6 lg:grid-cols-3">
+        <MoneyTrendCard data={stats.monthlyMoneyCollected} className="lg:col-span-2" />
+        <CurrentVsDefaultCard breakdown={stats.currentVsDefault} />
+      </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
         <SessionTrendCard data={stats.monthlySessionCounts} className="lg:col-span-2" />
@@ -138,6 +221,15 @@ function DashboardBody({ stats, range, onRangeChange }: DashboardBodyProps) {
   );
 }
 
+function describeRange(range: DashboardRange): string {
+  if (range === null) return 'All time';
+  if (range === 3) return 'Last 3 months';
+  if (range === 6) return 'Last 6 months';
+  if (range === 12) return 'Last 12 months';
+  if (range.kind === 'current-month') return 'Current month';
+  return `${range.fromIso} to ${range.toIso}`;
+}
+
 function RangeSelector({
   value,
   onChange,
@@ -145,31 +237,145 @@ function RangeSelector({
   value: DashboardRange;
   onChange: (r: DashboardRange) => void;
 }) {
+  const isCustom = typeof value === 'object' && value !== null && value.kind === 'custom';
+  const [customOpen, setCustomOpen] = useState(isCustom);
+  const todayIso = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const defaultFromIso = useMemo(() => {
+    const d = new Date();
+    d.setUTCMonth(d.getUTCMonth() - 1);
+    return d.toISOString().slice(0, 10);
+  }, []);
+  const [fromIso, setFromIso] = useState<string>(isCustom ? value.fromIso : defaultFromIso);
+  const [toIso, setToIso] = useState<string>(isCustom ? value.toIso : todayIso);
+
+  // Roving tabindex pattern: arrow keys move focus across chips while
+  // Tab moves focus past the whole group. Required for WCAG 2.1.1 on
+  // the dashboard's primary control surface.
+  const groupRef = useRef<HTMLDivElement | null>(null);
+  const focusSibling = useCallback((current: HTMLElement, dir: 1 | -1) => {
+    const buttons = Array.from(groupRef.current?.querySelectorAll<HTMLButtonElement>('button[data-chip="true"]') ?? []);
+    const idx = buttons.indexOf(current as HTMLButtonElement);
+    if (idx === -1) return;
+    const next = buttons[(idx + dir + buttons.length) % buttons.length];
+    next?.focus();
+  }, []);
+
+  const matchPreset = (preset: PresetOption): boolean => {
+    if (preset.range === null && value === null) return true;
+    if (typeof preset.range === 'number' && preset.range === value) return true;
+    if (
+      typeof preset.range === 'object' &&
+      preset.range !== null &&
+      typeof value === 'object' &&
+      value !== null &&
+      preset.range.kind === 'current-month' &&
+      value.kind === 'current-month'
+    ) {
+      return true;
+    }
+    return false;
+  };
+
   return (
-    <div
-      role="group"
-      aria-label="Dashboard date range"
-      className="inline-flex items-center rounded-pill border border-surface-border bg-surface p-0.5 shadow-card"
-    >
-      {RANGE_OPTIONS.map((opt) => {
-        const active = opt.value === value;
-        return (
+    <div className="flex flex-wrap items-center gap-2">
+      <div
+        ref={groupRef}
+        role="group"
+        aria-label="Dashboard date range"
+        className="inline-flex flex-wrap items-center rounded-pill border border-surface-border bg-surface p-0.5 shadow-card"
+      >
+        {PRESETS.map((opt) => {
+          const active = matchPreset(opt);
+          return (
+            <button
+              key={opt.key}
+              data-chip="true"
+              type="button"
+              onClick={() => {
+                onChange(opt.range);
+                setCustomOpen(false);
+              }}
+              aria-pressed={active}
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  focusSibling(e.currentTarget, 1);
+                } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  focusSibling(e.currentTarget, -1);
+                }
+              }}
+              className={[
+                'min-h-[40px] rounded-pill px-3.5 py-2 text-xs font-semibold transition-colors',
+                active
+                  ? 'bg-primary text-white shadow-card'
+                  : 'text-ink-secondary hover:text-ink-primary',
+              ].join(' ')}
+            >
+              {opt.label}
+            </button>
+          );
+        })}
+        <button
+          data-chip="true"
+          type="button"
+          onClick={() => setCustomOpen((v) => !v)}
+          aria-pressed={isCustom}
+          aria-expanded={customOpen}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+              e.preventDefault();
+              focusSibling(e.currentTarget, 1);
+            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+              e.preventDefault();
+              focusSibling(e.currentTarget, -1);
+            }
+          }}
+          className={[
+            'min-h-[40px] rounded-pill px-3.5 py-2 text-xs font-semibold transition-colors',
+            isCustom
+              ? 'bg-primary text-white shadow-card'
+              : 'text-ink-secondary hover:text-ink-primary',
+          ].join(' ')}
+        >
+          Custom
+        </button>
+      </div>
+      {customOpen && (
+        <div className="inline-flex flex-wrap items-center gap-2 rounded-pill border border-surface-border bg-surface px-2 py-1 shadow-card">
+          <label className="flex items-center gap-1 text-[11px] font-medium text-ink-secondary">
+            From
+            <input
+              type="date"
+              value={fromIso}
+              max={toIso}
+              onChange={(e) => setFromIso(e.target.value)}
+              className="rounded-md border border-surface-border bg-surface px-2 py-1 text-xs"
+            />
+          </label>
+          <label className="flex items-center gap-1 text-[11px] font-medium text-ink-secondary">
+            To
+            <input
+              type="date"
+              value={toIso}
+              min={fromIso}
+              max={todayIso}
+              onChange={(e) => setToIso(e.target.value)}
+              className="rounded-md border border-surface-border bg-surface px-2 py-1 text-xs"
+            />
+          </label>
           <button
-            key={String(opt.value)}
             type="button"
-            onClick={() => onChange(opt.value)}
-            aria-pressed={active}
-            className={[
-              'rounded-pill px-3 py-1 text-xs font-semibold transition-colors',
-              active
-                ? 'bg-primary text-white shadow-card'
-                : 'text-ink-secondary hover:text-ink-primary',
-            ].join(' ')}
+            disabled={!fromIso || !toIso || fromIso > toIso}
+            onClick={() => {
+              onChange({ kind: 'custom', fromIso, toIso });
+            }}
+            className="min-h-[36px] rounded-pill bg-primary px-3.5 py-1.5 text-[11px] font-semibold text-white shadow-card transition-colors hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {opt.label}
+            Apply
           </button>
-        );
-      })}
+        </div>
+      )}
     </div>
   );
 }
@@ -186,8 +392,10 @@ interface KpiCardProps {
 const TONE_CLASSES: Record<KpiCardProps['tone'], { bg: string; ink: string }> = {
   primary: { bg: 'bg-primary/10', ink: 'text-primary-dark' },
   mint: { bg: 'bg-accent-mint/15', ink: 'text-accent-mint-ink' },
+  // text-amber-700 (#B45309 on white = 4.91:1) replaces the prior
+  // text-warn (#F59E0B on white = 1.76:1) — QC R1 M4 contrast fix.
   coral: { bg: 'bg-accent-coral/15', ink: 'text-accent-coral' },
-  warn: { bg: 'bg-warn/15', ink: 'text-warn' },
+  warn: { bg: 'bg-amber-100', ink: 'text-amber-700' },
   neutral: { bg: 'bg-surface-alt', ink: 'text-ink-primary' },
 };
 
@@ -200,7 +408,7 @@ function KpiCard({ title, value, subtitle, icon, tone, delta }: KpiCardProps) {
           <p className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
             {title}
           </p>
-          <p className="mt-2 truncate text-2xl font-semibold tracking-tight text-ink-primary">
+          <p className="mt-2 truncate text-xl font-semibold tracking-tight text-ink-primary sm:text-2xl">
             {value}
           </p>
           {subtitle && (
@@ -235,8 +443,8 @@ function KpiCard({ title, value, subtitle, icon, tone, delta }: KpiCardProps) {
 function KpiRow({ stats }: { stats: DashboardStats }) {
   // Compute MoM delta on session count using the last two contiguous
   // months of the monthlySessionCounts array. Zero-denominator returns
-  // "—" so the card doesn't render meaningless percentages on fresh
-  // installs.
+  // undefined so the card doesn't render meaningless percentages on
+  // fresh installs.
   const sessionsDelta = useMemo<KpiCardProps['delta'] | undefined>(() => {
     const arr = stats.monthlySessionCounts;
     if (arr.length < 2) return undefined;
@@ -251,6 +459,21 @@ function KpiRow({ stats }: { stats: DashboardStats }) {
       label: `${pct >= 0 ? '+' : ''}${pct}% MoM`,
     };
   }, [stats.monthlySessionCounts]);
+
+  const moneyDelta = useMemo<KpiCardProps['delta'] | undefined>(() => {
+    const arr = stats.monthlyMoneyCollected;
+    if (arr.length < 2) return undefined;
+    const last = arr[arr.length - 1].amount;
+    const prev = arr[arr.length - 2].amount;
+    if (prev === 0 && last === 0) return undefined;
+    if (prev === 0) return { direction: 'up', label: 'New collections' };
+    const pct = Math.round(((last - prev) / prev) * 100);
+    if (pct === 0) return undefined;
+    return {
+      direction: pct >= 0 ? 'up' : 'down',
+      label: `${pct >= 0 ? '+' : ''}${pct}% MoM`,
+    };
+  }, [stats.monthlyMoneyCollected]);
 
   return (
     <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4">
@@ -276,6 +499,21 @@ function KpiRow({ stats }: { stats: DashboardStats }) {
         tone="mint"
       />
       <KpiCard
+        title="Book amount"
+        value={`₹${formatNumber(stats.totalAccountAmount)}`}
+        subtitle="sum of monthly amounts (active)"
+        icon={<IndianRupee className="h-5 w-5" />}
+        tone="primary"
+      />
+      <KpiCard
+        title="Money collected (range)"
+        value={`₹${formatNumber(stats.monthlyMoneyCollected.reduce((s, m) => s + m.amount, 0))}`}
+        subtitle="scans weighted by months_paid"
+        icon={<Banknote className="h-5 w-5" />}
+        tone="mint"
+        delta={moneyDelta}
+      />
+      <KpiCard
         title="Sessions"
         value={formatNumber(stats.totalSessions)}
         subtitle="in selected range"
@@ -299,23 +537,24 @@ function KpiRow({ stats }: { stats: DashboardStats }) {
       />
       <KpiCard
         title="Avg ticket"
-        value={`₹${formatNumber(stats.totalAccounts > 0
-          ? Math.round(
-              stats.amountHistogram.reduce((s, b, i) => {
-                // Midpoint approximation per bucket — produces a stable
-                // "typical monthly amount" indicator without us having
-                // to ship the full account list to the client just for
-                // this number. Buckets are in fetchDashboardStats; if
-                // the bucket label set changes, update this midpoint
-                // table.
-                const midpoints = [250, 750, 1500, 3500, 7500];
-                return s + b.count * (midpoints[i] ?? 0);
-              }, 0) / stats.totalAccounts,
-            )
-          : 0)}`}
-        subtitle="monthly amount across accounts"
-        icon={<Banknote className="h-5 w-5" />}
+        value={`₹${formatNumber(stats.averageMonthlyAmount)}`}
+        subtitle="real average across active"
+        icon={<Sparkles className="h-5 w-5" />}
         tone="primary"
+      />
+      <KpiCard
+        title="Current vs default (accounts)"
+        value={`${formatNumber(stats.currentVsDefault.currentCount)} / ${formatNumber(stats.currentVsDefault.defaultCount)}`}
+        subtitle={`current · default`}
+        icon={<ShieldCheck className="h-5 w-5" />}
+        tone="coral"
+      />
+      <KpiCard
+        title="Current vs default (₹)"
+        value={`₹${formatNumber(stats.currentVsDefault.currentAmount)} / ₹${formatNumber(stats.currentVsDefault.defaultAmount)}`}
+        subtitle="monthly amounts split"
+        icon={<ShieldAlert className="h-5 w-5" />}
+        tone="warn"
       />
       <KpiCard
         title="Account mix"
@@ -350,7 +589,7 @@ function ChartCard({ title, subtitle, children, className, ariaLabel }: ChartCar
         <div>
           <h3 className="text-sm font-semibold text-ink-primary">{title}</h3>
           {subtitle && (
-            <p className="mt-0.5 text-xs text-ink-muted">{subtitle}</p>
+            <p className="mt-0.5 text-xs text-ink-secondary">{subtitle}</p>
           )}
         </div>
       </figcaption>
@@ -359,8 +598,10 @@ function ChartCard({ title, subtitle, children, className, ariaLabel }: ChartCar
           'h-[260px]',
           // Recharts injects its own default classes; these selectors
           // override fills/strokes so the chart inherits our token
-          // palette without per-chart prop bloat.
-          "[&_.recharts-cartesian-axis-tick_text]:fill-ink-muted",
+          // palette without per-chart prop bloat. Tick text uses
+          // ink-secondary (4.48:1 on white) instead of ink-muted
+          // (2.79:1) per QC R1 M3 contrast fix.
+          "[&_.recharts-cartesian-axis-tick_text]:fill-ink-secondary",
           "[&_.recharts-cartesian-axis-tick_text]:text-[11px]",
           "[&_.recharts-cartesian-grid_line]:stroke-surface-border",
           "[&_.recharts-cartesian-grid_line]:stroke-[0.5]",
@@ -373,14 +614,6 @@ function ChartCard({ title, subtitle, children, className, ariaLabel }: ChartCar
   );
 }
 
-/**
- * Custom Tailwind-themed tooltip — the default Recharts box is ugly.
- *
- * Recharts' upstream `TooltipProps` generic doesn't match the actual
- * runtime payload under `exactOptionalPropertyTypes: true`. We type
- * the props locally against the shape Recharts documents in its
- * `Customized` recipe and accept `unknown` color/name for safety.
- */
 interface ChartTooltipEntry {
   color?: string | undefined;
   name?: string | undefined;
@@ -391,14 +624,15 @@ interface ChartTooltipProps {
   active?: boolean | undefined;
   payload?: ChartTooltipEntry[] | undefined;
   label?: string | number | undefined;
+  currency?: boolean | undefined;
 }
 
-function ChartTooltip({ active, payload, label }: ChartTooltipProps) {
+function ChartTooltip({ active, payload, label, currency }: ChartTooltipProps) {
   if (!active || !payload || payload.length === 0) return null;
   return (
     <div className="rounded-xl border border-surface-border bg-surface px-3 py-2 shadow-elevated">
       {label != null && label !== '' && (
-        <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-muted">
+        <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-ink-secondary">
           {String(label)}
         </p>
       )}
@@ -411,12 +645,137 @@ function ChartTooltip({ active, payload, label }: ChartTooltipProps) {
             />
             <span className="text-ink-secondary">{p.name ?? ''}:</span>
             <span className="font-semibold tabular-nums text-ink-primary">
-              {typeof p.value === 'number' ? formatNumber(p.value) : String(p.value ?? '')}
+              {typeof p.value === 'number'
+                ? `${currency ? '₹' : ''}${formatNumber(p.value)}`
+                : String(p.value ?? '')}
             </span>
           </li>
         ))}
       </ul>
     </div>
+  );
+}
+
+function MoneyTrendCard({
+  data,
+  className,
+}: {
+  data: Array<{ month: string; amount: number; defaulterAmount: number }>;
+  className?: string;
+}) {
+  const total = data.reduce((s, d) => s + d.amount, 0);
+  const defaulterTotal = data.reduce((s, d) => s + d.defaulterAmount, 0);
+  return (
+    <ChartCard
+      title="Money collected"
+      subtitle={`₹${formatNumber(total)} in range · ₹${formatNumber(defaulterTotal)} from defaulters`}
+      className={className}
+      ariaLabel={`Monthly money collected. Total rupees ${total}.`}
+    >
+      {total === 0 ? (
+        <ChartEmpty message="No collections recorded in this range" />
+      ) : (
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={data} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
+            <defs>
+              <linearGradient id="moneyGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#0E8278" stopOpacity={0.45} />
+                <stop offset="95%" stopColor="#0E8278" stopOpacity={0} />
+              </linearGradient>
+              <linearGradient id="defaulterMoneyGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#B45309" stopOpacity={0.4} />
+                <stop offset="95%" stopColor="#B45309" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="2 4" vertical={false} />
+            <XAxis dataKey="month" tickLine={false} axisLine={false} />
+            <YAxis
+              tickLine={false}
+              axisLine={false}
+              width={48}
+              tickFormatter={(v: number) => `₹${formatNumber(v)}`}
+            />
+            <Tooltip content={<ChartTooltip currency />} />
+            <Legend iconType="circle" wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
+            <Area
+              type="monotone"
+              dataKey="amount"
+              name="Total collected"
+              stroke="#0E8278"
+              strokeWidth={2}
+              fill="url(#moneyGradient)"
+              activeDot={{ r: 4, strokeWidth: 0 }}
+            />
+            <Area
+              type="monotone"
+              dataKey="defaulterAmount"
+              name="From defaulters"
+              stroke="#B45309"
+              strokeWidth={2}
+              fill="url(#defaulterMoneyGradient)"
+              activeDot={{ r: 4, strokeWidth: 0 }}
+            />
+          </AreaChart>
+        </ResponsiveContainer>
+      )}
+    </ChartCard>
+  );
+}
+
+function CurrentVsDefaultCard({
+  breakdown,
+}: {
+  breakdown: DashboardStats['currentVsDefault'];
+}) {
+  const total = breakdown.currentAmount + breakdown.defaultAmount;
+  const chartData = [
+    {
+      label: 'Current',
+      count: breakdown.currentCount,
+      amount: breakdown.currentAmount,
+    },
+    {
+      label: 'Default',
+      count: breakdown.defaultCount,
+      amount: breakdown.defaultAmount,
+    },
+  ];
+  return (
+    <ChartCard
+      title="Current vs default"
+      subtitle={`Active accounts split by paid-up status`}
+      ariaLabel={`Current vs default. Current ${breakdown.currentCount} accounts, ₹${breakdown.currentAmount}. Default ${breakdown.defaultCount} accounts, ₹${breakdown.defaultAmount}.`}
+    >
+      {total === 0 && breakdown.currentCount + breakdown.defaultCount === 0 ? (
+        <ChartEmpty message="No active accounts yet" />
+      ) : (
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={chartData} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="2 4" vertical={false} />
+            <XAxis dataKey="label" tickLine={false} axisLine={false} />
+            <YAxis
+              yAxisId="amount"
+              tickLine={false}
+              axisLine={false}
+              width={48}
+              tickFormatter={(v: number) => `₹${formatNumber(v)}`}
+            />
+            <Tooltip content={<ChartTooltip currency />} />
+            <Bar
+              yAxisId="amount"
+              dataKey="amount"
+              name="Monthly amount"
+              fill="#FF9F43"
+              radius={[8, 8, 0, 0]}
+              maxBarSize={56}
+            >
+              <Cell fill="#0E8278" />
+              <Cell fill="#B45309" />
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      )}
+    </ChartCard>
   );
 }
 
@@ -507,7 +866,7 @@ function ScansTrendCard({
               type="monotone"
               dataKey="defaulters"
               name="Defaulter scans"
-              stroke="#F59E0B"
+              stroke="#B45309"
               strokeWidth={2}
               dot={false}
               activeDot={{ r: 4, strokeWidth: 0 }}
@@ -605,24 +964,25 @@ function AmountHistogramCard({
 function TopDefaultersCard({
   rows,
 }: {
-  rows: Array<{ name: string; rdNumber: string; monthsOverdue: number }>;
+  rows: Array<{ name: string; rdNumber: string; monthsOverdue: number; maskedRdNumber: string }>;
 }) {
   return (
     <div className="rounded-2xl border border-surface-border bg-surface p-5 shadow-card">
       <div className="mb-3 flex items-end justify-between">
         <div>
           <h3 className="text-sm font-semibold text-ink-primary">Top defaulters</h3>
-          <p className="mt-0.5 text-xs text-ink-muted">By months overdue</p>
+          <p className="mt-0.5 text-xs text-ink-secondary">By months overdue</p>
         </div>
         <Link
           to="/accounts"
-          className="rounded-pill border border-surface-border px-2.5 py-1 text-[11px] font-medium text-ink-secondary transition-colors hover:border-primary hover:text-primary"
+          className="min-h-[36px] rounded-pill border border-surface-border px-3 py-1.5 text-[11px] font-medium text-ink-secondary transition-colors hover:border-primary hover:text-primary"
         >
           View all
         </Link>
       </div>
       {rows.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-surface-border bg-surface-alt p-6 text-center text-xs text-ink-secondary">
+        <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-surface-border bg-surface-alt p-8 text-center text-xs text-ink-secondary">
+          <ShieldCheck className="h-6 w-6 text-accent-mint-ink" aria-hidden="true" />
           No active accounts are overdue.
         </div>
       ) : (
@@ -633,12 +993,12 @@ function TopDefaultersCard({
               className="flex items-center justify-between rounded-xl px-3 py-2 hover:bg-surface-alt"
             >
               <div className="flex min-w-0 items-center gap-3">
-                <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-pill bg-warn/15 text-[11px] font-semibold text-warn">
+                <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-pill bg-amber-100 text-[11px] font-semibold text-amber-700">
                   {i + 1}
                 </span>
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-ink-primary">{r.name}</p>
-                  <p className="truncate font-mono text-[11px] text-ink-muted">{r.rdNumber}</p>
+                  <p className="truncate font-mono text-[11px] text-ink-secondary">{r.maskedRdNumber}</p>
                 </div>
               </div>
               <span className="ml-3 inline-flex shrink-0 items-center rounded-pill bg-danger/10 px-2 py-0.5 text-[11px] font-semibold text-danger">
@@ -655,7 +1015,7 @@ function TopDefaultersCard({
 const KIND_BADGE: Record<ActivityKind, { label: string; className: string }> = {
   session_finalized: { label: 'Session', className: 'bg-primary/10 text-primary-dark' },
   session_deleted: { label: 'Deleted', className: 'bg-danger/10 text-danger' },
-  defaulter_edited: { label: 'Defaulter', className: 'bg-warn/15 text-warn' },
+  defaulter_edited: { label: 'Defaulter', className: 'bg-amber-100 text-amber-700' },
   account_added: { label: 'Added', className: 'bg-accent-mint/15 text-accent-mint-ink' },
   account_edited: { label: 'Edited', className: 'bg-accent-coral/15 text-accent-coral' },
 };
@@ -670,17 +1030,18 @@ function RecentActivityCard({
       <div className="mb-3 flex items-end justify-between">
         <div>
           <h3 className="text-sm font-semibold text-ink-primary">Recent activity</h3>
-          <p className="mt-0.5 text-xs text-ink-muted">Latest events from all phones</p>
+          <p className="mt-0.5 text-xs text-ink-secondary">Latest events from all phones</p>
         </div>
         <Link
           to="/activity"
-          className="rounded-pill border border-surface-border px-2.5 py-1 text-[11px] font-medium text-ink-secondary transition-colors hover:border-primary hover:text-primary"
+          className="min-h-[36px] rounded-pill border border-surface-border px-3 py-1.5 text-[11px] font-medium text-ink-secondary transition-colors hover:border-primary hover:text-primary"
         >
           View all
         </Link>
       </div>
       {rows.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-surface-border bg-surface-alt p-6 text-center text-xs text-ink-secondary">
+        <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-surface-border bg-surface-alt p-8 text-center text-xs text-ink-secondary">
+          <Inbox className="h-6 w-6 text-ink-muted" aria-hidden="true" />
           No activity yet.
         </div>
       ) : (
@@ -705,7 +1066,7 @@ function RecentActivityCard({
                 </div>
                 <span
                   title={formatDateTime(r.occurredAt)}
-                  className="ml-2 shrink-0 text-[11px] tabular-nums text-ink-muted"
+                  className="ml-2 shrink-0 text-[11px] tabular-nums text-ink-secondary"
                 >
                   {formatRelativeTime(r.occurredAt)}
                 </span>
@@ -730,15 +1091,13 @@ function RecentActivityCard({
 
 function ChartEmpty({ message }: { message: string }) {
   return (
-    <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-surface-border bg-surface-alt text-center">
+    <div className="flex h-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-surface-border bg-surface-alt text-center">
+      <Inbox className="h-6 w-6 text-ink-muted" aria-hidden="true" />
       <p className="px-6 text-xs text-ink-secondary">{message}</p>
     </div>
   );
 }
 
-// Suppress unused import warning while keeping the export shape used
-// by the App.tsx route plus the skeleton helper for callers that want
-// to preload the route.
 export function DashboardSkeleton() {
   return (
     <div className="space-y-8">
@@ -748,3 +1107,4 @@ export function DashboardSkeleton() {
     </div>
   );
 }
+
