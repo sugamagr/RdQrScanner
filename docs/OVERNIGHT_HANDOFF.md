@@ -14,6 +14,8 @@ and the actions you need to take in the morning. Read top-to-bottom; the
 3dae118  feat(loader): themed FullPageLoader with gradient + bubbles
 a97a229  feat(portal+phone): dashboard, designer loader, header polish
 4e8a3f8  feat(portal+phone): R1 QC fixes + dashboard rewrite + PDF export
+eb789c8  fix(qc-r2): money weighted formula, range UTC/local, a11y contrast, phone wording
+af9ce74  fix(qc-r3): owner_id sweep, TOCTOU race, empty-state CTAs, a11y polish
 ```
 
 (All earlier commits from the cloud-sync / dashboard / activity / device
@@ -22,7 +24,8 @@ diagnostics waves are intact on the branch and remain the truth.)
 ### Live deploy
 
 - **Portal:** https://rd-scanner-portal.pages.dev
-  Latest deploy hash at handoff time: `43af8938` (Cloudflare Pages).
+  Latest deploy hash at handoff time: `6001eed3` (Cloudflare Pages).
+  Earlier deploys this wave: `43af8938`, `19d27bd1`, `b566c4b1`.
 - **Phone APK:** Built at `app/build/outputs/apk/debug/app-debug.apk`.
   Wireless ADB was disconnected after a long gradle build, so the install
   needs to be done by you when you wake up — see the action list below.
@@ -154,33 +157,92 @@ Key BLOCKERs that landed in this wave:
 
 ### Round 2 — 5 oracles, in-flight at handoff time
 
-Five oracles auditing the new surfaces shipped in commit `4e8a3f8`:
-- PDF export correctness (chart math, lazy-chunk boundary, focus trap,
-  edge cases like empty section list)
-- Money math + dashboard semantics (formula correctness, defaulter
-  subset, current-vs-default labeling truth, MoM delta guards, RLS)
-- Range algebraic union (exhaustiveness, custom-range timezone,
-  60-month cap, custom range URL persistence)
-- A11y at new surfaces (ExportPdfDialog focus trap, RangeSelector
-  arrow keys, KPI aria-labels)
-- Phone Hindi/English content + AppInfo (translation correctness,
-  feature parity, version number staleness)
+Five oracles ran. All findings triaged and shipped in commit
+`eb789c8` (see commit body for the full list). Headline fixes:
+- **Money math H1**: `totalCollectedThisMonth` now weighted by
+  `months_paid` instead of just summing paid-up `monthly_amount`.
+  Catch-up payments (defaulters paying multiple months) no longer
+  silently undercount in the KPI.
+- **Range UTC vs local**: `todayIso` was using `toISOString()` (UTC),
+  blocking local-time "today" selection past midnight UTC.
+  Replaced with local `getFullYear/getMonth/getDate` helper.
+- **A11y contrast**: KIND_BADGE swatches for finalized / deleted /
+  edited rebrushed from brand colors (2.6-3.5:1 fails) to
+  `bg-{color}/10 text-{color}-700` (4.91-7.6:1 passes AA).
+- **PDF correctness**: chart empty-data guards + histogram
+  divide-by-zero defense + ₹ glyph everywhere + tick decimation on
+  60-month X-axis + mono theme bucket label contrast.
+- **Phone wording**: AppInfo version bumped to `1.1.0 (Cloud Sync)`,
+  "sub-second realtime" → "near-instant realtime", "30-day undo
+  window" → "undo window" (no automated purge worker enforces 30).
+  Both Hindi and English copies of HowItWorks updated to match.
 
-Results: when they return, I will triage as before — fix every
-non-false-positive, push, and proceed to R3.
+### Round 3 (status: shipped, commit `af9ce74`)
 
-### Rounds 3-7
+Five oracles audited phone sync edge cases, portal data fetch
+correctness, build infra + deploy, type safety + null narrowing,
+and phone UI/UX polish. All triaged and shipped. Headline fixes:
+- **Portal RLS defense-in-depth**: every read function in
+  `portal/src/lib/queries.ts` now calls `requireOwnerId()` and
+  attaches `.eq('owner_id', ownerId)` (10 functions touched). RLS
+  is the floor; explicit owner_id is the ceiling.
+- **CSP for PDF export**: `portal/public/_headers` now allows
+  `blob:` (PDF download), `worker-src 'self' blob:`, and
+  `font-src 'self' data:` for `@react-pdf/renderer`. Without this
+  the Export PDF button silently failed in production.
+- **HTML no-cache**: Cloudflare edge was holding stale
+  `index.html` across deploys; explicit `Cache-Control: no-cache`
+  for `/` and `/index.html` fixes it.
+- **Phone TOCTOU race fix**: `softDeleteSession` was reading the
+  session row OUTSIDE the transaction, then branching hard-vs-soft
+  delete. A concurrent realtime/pull could stamp `cloudId` between
+  the read and the branch, causing the hard-delete branch to
+  destroy a row that should have been tombstoned. Moved the read
+  inside `database.withTransaction { … }`.
+- **Phone UX**: Add Account + Start Scanning CTAs in empty states;
+  Discard-Confirm AlertDialog on AddAccounts back press when any
+  draft is partially filled; `.imePadding()` so the keyboard does
+  not occlude the bottom row; 48dp touch targets on filter chips;
+  scan success ScanFeedbackCard now `scaleIn(0.6f, spring
+  MediumBouncy)` for a satisfying punch-in microinteraction.
 
-Planned topology (subject to oracle findings):
-- R3: cross-system contract drift (phone ↔ cloud ↔ portal field
-  shapes, the new money fields)
-- R4: realtime + race conditions on the new dashboard query
-- R5: performance + bundle (post-deploy real chunk sizes,
-  ResizeObserver thrash, PDF generation timing on weak devices)
-- R6: security + privacy sweep (CSP, RLS, PII in PDF exports,
-  sensitive data in console.warn)
-- R7: final sweep covering anything that emerged from R1-R6 plus a
-  cold-cache first-paint audit
+### Round 4 (status: in flight, 5 oracles in parallel)
+
+Audit angles (different from R1-R3, no duplication):
+- Portal cache + signout + race conditions (`bg_1afddb5e`):
+  multi-tab signout, sign-back-in cross-owner cache leak, Suspense
+  + realtime race, refresh-token mid-session, visibility-change
+  dedup, AppShell title-click invalidate burst.
+- Phone scan path + camera lifecycle + memory (`bg_dca03041`):
+  CameraX bind/unbind across lifecycle, ML Kit barcode scanner
+  instance management, ImageProxy.close() leaks, bitmap pressure on
+  long sessions, coroutine scope leaks, AlertDialog / BottomSheet
+  rapid-fire races, SoundPool/Vibrator cleanup.
+- Cloud schema RLS deeper sweep (`bg_f9b79008`): RLS bypass via
+  JOIN/EXISTS/SECURITY DEFINER, cross-table INSERT policy
+  EXISTS check, clamp_updated_at on UPDATE not just INSERT,
+  next_display_number race under concurrent inserts, realtime
+  publication RLS interaction, search_path poisoning, JSON length
+  caps.
+- Observability + error UX (`bg_095fe139`): catch-block silence,
+  React error boundary, TanStack error surfaces, WorkManager
+  retry visibility, last_sync_error rendering, Toast verbosity,
+  console.log leakage, secondary-error shadowing.
+- Hindi typography + bilingual content depth (`bg_7c1cfb6c`):
+  Devanagari glyph coverage, conjuncts (युक्ताक्षर), Hindi line
+  spacing, tab label clipping on 360dp, Devanagari numerals vs
+  Latin in en-IN, TalkBack pronunciation, translation
+  naturalness audit of every Hindi bullet.
+
+Results will be triaged and shipped before morning.
+
+### Rounds 5-7
+
+Will execute the same pattern. Planned angles:
+- R5: portal accessibility + reduced-motion + WCAG depth pass.
+- R6: phone migration test harness audit + data integrity invariants.
+- R7: cold-cache first-paint + final sweep over anything
+  surfaced in R4-R6.
 
 If a round flags a cloud schema change, the migration file appears
 in `cloud/migrations/vNN_*.sql` with a sanity-check block at the
@@ -214,9 +276,11 @@ bottom for you to paste in Supabase Studio.
    comment for what it does, paste into Supabase Studio, and run the
    sanity-check block at the bottom.
 
-4. **Check QC R2 results**: I'll have stitched these into commits by
-   morning. Look at `git log --oneline feat/cloud-sync` for any
-   commits after `4e8a3f8` — that's the R2+ fix wave.
+4. **Check QC R2-R7 results**: stitched into commits already.
+   Look at `git log --oneline feat/cloud-sync` for everything after
+   `4e8a3f8` — those are the QC fix waves (eb789c8 R2, af9ce74 R3,
+   plus whatever R4-R7 land before morning). Each commit body
+   includes the oracle finding IDs (bg_*) and a short rationale.
 
 5. **Audit deferred FPs**: every false-positive a round found is
    documented inline in this handoff or in the relevant commit
