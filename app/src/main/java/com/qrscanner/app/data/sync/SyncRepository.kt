@@ -467,15 +467,6 @@ class SyncRepository(
             }
         }
 
-        // BLOCKER fix (oracle correctness #1): bump the device's last_seen_at
-        // on every successful push cycle. The portal's Devices page reads
-        // this; without the update the owner can't tell if a phone is
-        // actively syncing or hasn't been used in weeks. Wrapped in
-        // runCatching so a transient failure here doesn't mask a successful
-        // data push.
-        runCatching { bumpDeviceLastSeen(ownerId) }
-            .onFailure { android.util.Log.w("SyncRepository", "device last_seen_at bump failed", it) }
-
         // Drain buffered success notices: per-session for small batches,
         // single bulk summary above the threshold (spec §15.5.2 minimal-noise).
         if (pendingNotices.isNotEmpty()) {
@@ -508,6 +499,23 @@ class SyncRepository(
         // Either kind of progress qualifies as "partial success" for
         // the pill-doesn't-scream-red invariant from Phase 5 R5.
         val anyProgress = pushedSessionCount > 0 || pushedAccountCount > 0
+
+        // Bump device heartbeat + diagnostics on every push exit (success
+        // OR failure). Cloud schema v11 columns (last_sync_error,
+        // pending_count, last_push_at) let the portal's Devices page
+        // show truth: a phone with persistent push failures shows the
+        // error message; a clean cycle clears it. Wrapped in runCatching
+        // so a transient device-upsert failure here doesn't mask the
+        // primary outcome of the push cycle below.
+        runCatching {
+            bumpDeviceLastSeen(
+                ownerId = ownerId,
+                pendingCount = remaining,
+                lastError = firstError?.let { it.message ?: it.toString() },
+                lastPushAtMillis = now
+            )
+        }.onFailure { android.util.Log.w("SyncRepository", "device diagnostics push failed", it) }
+
         return if (firstError != null) {
             // Phase 5 T5.1: SchemaMissing is the user's setup, not a flaky
             // network — route to SCHEMA_MISSING pill + suppress the
@@ -614,11 +622,33 @@ class SyncRepository(
         }
     }
 
-    private suspend fun bumpDeviceLastSeen(ownerId: String) {
+    /**
+     * Pushes device diagnostics (cloud schema v11) along with the
+     * heartbeat. Called from runPushLocked() on both success and
+     * failure exit paths so the portal Devices page always reflects
+     * the same picture the in-app sync pill shows for this phone.
+     *
+     * Param contract:
+     *  - pendingCount: rows still DIRTY/SYNC_ERROR after this cycle;
+     *    matches the `remaining` count surfaced on the sync pill.
+     *  - lastError: null on a clean cycle, error message string on
+     *    failure. Null EXPLICITLY clears a stale prior error — see
+     *    EncodeDefault on DeviceDto.
+     *  - lastPushAtMillis: epoch millis when runPush() finished
+     *    (success or failure), distinct from last_seen_at which
+     *    bumps on any cloud touch (pull, realtime auth, etc.).
+     */
+    private suspend fun bumpDeviceLastSeen(
+        ownerId: String,
+        pendingCount: Int,
+        lastError: String?,
+        lastPushAtMillis: Long
+    ) {
         val settings = deviceSettingsDao.get() ?: return
         val cloudId = settings.deviceCloudId ?: return
         val deviceName = settings.deviceName ?: return
         val nowIso = IsoTime.fromEpochMillis(System.currentTimeMillis())
+        val lastPushIso = IsoTime.fromEpochMillis(lastPushAtMillis)
         cloudClient.upsertDevice(
             DeviceDto(
                 id = cloudId,
@@ -628,6 +658,9 @@ class SyncRepository(
                 firstSeenAt = nowIso,
                 lastSeenAt = nowIso,
                 appVersion = null,
+                lastSyncError = lastError?.take(DEVICE_ERROR_MESSAGE_MAX_CHARS),
+                pendingCount = pendingCount,
+                lastPushAt = lastPushIso,
                 createdAt = nowIso,
                 updatedAt = nowIso
             )
@@ -1438,5 +1471,15 @@ class SyncRepository(
          * manual diagnostics).
          */
         const val PUSH_ABANDON_THRESHOLD = 8
+
+        /**
+         * Upper bound on the [DeviceDto.lastSyncError] payload size.
+         * Postgres `text` has no hard limit but a stack trace pasted
+         * verbatim into the column would blow up the realtime payload
+         * and waste the portal Devices card layout. 240 chars fits
+         * roughly the first three lines of a Throwable.toString() —
+         * enough to recognise the error class + immediate cause.
+         */
+        private const val DEVICE_ERROR_MESSAGE_MAX_CHARS = 240
     }
 }

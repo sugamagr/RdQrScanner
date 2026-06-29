@@ -34,6 +34,14 @@ data class DeviceDto(
     @SerialName("first_seen_at") val firstSeenAt: String,
     @SerialName("last_seen_at") val lastSeenAt: String,
     @EncodeDefault @SerialName("app_version") val appVersion: String? = null,
+    // Diagnostics columns (cloud schema v11) — populated from runPush()
+    // exit so the portal reflects the same truth the in-app sync pill
+    // shows. EncodeDefault forces all three onto every wire payload so
+    // a clean cycle clears a stale error / pending count instead of
+    // letting Supabase ignore the omitted nullable field.
+    @EncodeDefault @SerialName("last_sync_error") val lastSyncError: String? = null,
+    @EncodeDefault @SerialName("pending_count") val pendingCount: Int = 0,
+    @EncodeDefault @SerialName("last_push_at") val lastPushAt: String? = null,
     @SerialName("created_at") val createdAt: String,
     @SerialName("updated_at") val updatedAt: String
 )

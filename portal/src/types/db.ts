@@ -11,6 +11,14 @@ export interface DeviceRow {
   first_seen_at: string;
   last_seen_at: string;
   app_version: string | null;
+  // Sync diagnostics (cloud schema v11) — pushed by the phone on every
+  // runPush() exit so the portal Devices page sees the same truth the
+  // in-app sync pill shows. `null` last_sync_error / `0` pending_count
+  // means caught up on the most recent cycle. `last_push_at` is null
+  // for devices that registered but haven't completed a push yet.
+  last_sync_error: string | null;
+  pending_count: number;
+  last_push_at: string | null;
   created_at: string;
   updated_at: string;
 }

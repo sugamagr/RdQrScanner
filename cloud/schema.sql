@@ -24,21 +24,30 @@ create extension if not exists "pg_trgm";    -- trigram index for RD search (Pha
 -- 1. Tables -----------------------------------------------------------
 
 create table if not exists public.devices (
-    id            uuid primary key default gen_random_uuid(),
-    owner_id      uuid not null references auth.users(id) on delete cascade,
-    device_name   text not null,
-    device_model  text,
-    first_seen_at timestamptz not null default now(),
-    last_seen_at  timestamptz not null default now(),
-    app_version   text,
-    created_at    timestamptz not null default now(),
-    updated_at    timestamptz not null default now(),
-    deleted_at    timestamptz
+    id              uuid primary key default gen_random_uuid(),
+    owner_id        uuid not null references auth.users(id) on delete cascade,
+    device_name     text not null,
+    device_model    text,
+    first_seen_at   timestamptz not null default now(),
+    last_seen_at    timestamptz not null default now(),
+    app_version     text,
+    last_sync_error text,
+    pending_count   int  not null default 0,
+    last_push_at    timestamptz,
+    created_at      timestamptz not null default now(),
+    updated_at      timestamptz not null default now(),
+    deleted_at      timestamptz
 );
--- Idempotent column add for upgrades from earlier schema versions.
-alter table public.devices add column if not exists deleted_at timestamptz;
+-- Idempotent column adds for upgrades from earlier schema versions
+-- (v9 deleted_at, v11 sync diagnostics).
+alter table public.devices add column if not exists deleted_at      timestamptz;
+alter table public.devices add column if not exists last_sync_error text;
+alter table public.devices add column if not exists pending_count   int  not null default 0;
+alter table public.devices add column if not exists last_push_at    timestamptz;
 create index if not exists devices_owner_idx
     on public.devices (owner_id, last_seen_at desc);
+create index if not exists devices_owner_last_push_idx
+    on public.devices (owner_id, last_push_at desc nulls last);
 
 create table if not exists public.scan_sessions (
     id                uuid primary key default gen_random_uuid(),

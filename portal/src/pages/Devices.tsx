@@ -1,11 +1,22 @@
 import { useQuery } from '@tanstack/react-query';
 import { PageHeader } from '../components/PageHeader';
 import { fetchDevices } from '../lib/queries';
-import { formatDateTime, formatRelativeTime } from '../lib/format';
+import { formatDateTime, formatNumber, formatRelativeTime } from '../lib/format';
 import type { DeviceRow } from '../types/db';
 
 const ACTIVE_THRESHOLD_MS = 10 * 60 * 1000;
 const IDLE_THRESHOLD_MS = 24 * 60 * 60 * 1000;
+
+// A device is "stalled" if it has either persistent failures (an error
+// from its last push) or work that hasn't drained. The card surfaces
+// this BEFORE the active/idle/dormant pill because a phone can be
+// "active" (recent heartbeat) AND simultaneously failing to push —
+// the owner needs to see the failure, not just the green dot.
+function syncHealth(device: DeviceRow): 'ok' | 'pending' | 'failing' {
+  if (device.last_sync_error) return 'failing';
+  if (device.pending_count > 0) return 'pending';
+  return 'ok';
+}
 
 export function DevicesPage() {
   const query = useQuery({
@@ -74,6 +85,7 @@ function DeviceCard({ device }: { device: DeviceRow }) {
   const lastSeenMs = Date.parse(device.last_seen_at);
   const age = Number.isNaN(lastSeenMs) ? Number.POSITIVE_INFINITY : Date.now() - lastSeenMs;
   const status = age < ACTIVE_THRESHOLD_MS ? 'active' : age < IDLE_THRESHOLD_MS ? 'idle' : 'dormant';
+  const health = syncHealth(device);
 
   return (
     <li className="rounded-2xl border border-surface-border bg-surface p-4 shadow-card transition-colors duration-150 hover:border-primary/30">
@@ -89,7 +101,10 @@ function DeviceCard({ device }: { device: DeviceRow }) {
             </p>
           )}
         </div>
-        <StatusBadge status={status} />
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <StatusBadge status={status} />
+          {health !== 'ok' && <SyncHealthBadge health={health} />}
+        </div>
       </div>
 
       <dl className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
@@ -106,6 +121,31 @@ function DeviceCard({ device }: { device: DeviceRow }) {
         </div>
         <div>
           <dt className="font-medium uppercase tracking-wider text-ink-muted">
+            Last push
+          </dt>
+          <dd
+            title={device.last_push_at ? formatDateTime(device.last_push_at) : 'never'}
+            className="mt-0.5 text-ink-primary"
+          >
+            {device.last_push_at ? formatRelativeTime(device.last_push_at) : (
+              <span className="text-ink-muted">never</span>
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt className="font-medium uppercase tracking-wider text-ink-muted">
+            Pending
+          </dt>
+          <dd className="mt-0.5 font-mono tabular-nums text-ink-primary">
+            {device.pending_count > 0 ? (
+              <span className="text-warn">{formatNumber(device.pending_count)}</span>
+            ) : (
+              <span className="text-ink-secondary">0</span>
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt className="font-medium uppercase tracking-wider text-ink-muted">
             Joined
           </dt>
           <dd
@@ -116,7 +156,41 @@ function DeviceCard({ device }: { device: DeviceRow }) {
           </dd>
         </div>
       </dl>
+
+      {device.last_sync_error && (
+        <div className="mt-3 rounded-xl border border-danger/20 bg-danger/5 p-3">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-danger">
+            Last sync error
+          </p>
+          <p
+            className="mt-1 break-words text-xs text-danger/90"
+            title={device.last_sync_error}
+          >
+            {device.last_sync_error}
+          </p>
+        </div>
+      )}
     </li>
+  );
+}
+
+function SyncHealthBadge({ health }: { health: 'pending' | 'failing' }) {
+  const config =
+    health === 'failing'
+      ? {
+          label: 'Failing',
+          classes: 'bg-danger/10 text-danger ring-1 ring-danger/30',
+        }
+      : {
+          label: 'Pending',
+          classes: 'bg-warn/15 text-warn ring-1 ring-warn/30',
+        };
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center gap-1 rounded-pill px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${config.classes}`}
+    >
+      {config.label}
+    </span>
   );
 }
 
