@@ -54,6 +54,7 @@ export function useRealtimeSync(): void {
           // it on every session change so finalize + soft-delete events
           // show up live without the owner refreshing /activity.
           qc.invalidateQueries({ queryKey: ['activity'] });
+          qc.invalidateQueries({ queryKey: ['dashboard'] });
         }
       )
       .on(
@@ -62,6 +63,7 @@ export function useRealtimeSync(): void {
         () => {
           qc.invalidateQueries({ queryKey: ['lots'] });
           qc.invalidateQueries({ queryKey: ['session'] });
+          qc.invalidateQueries({ queryKey: ['dashboard'] });
         }
       )
       .on(
@@ -75,6 +77,7 @@ export function useRealtimeSync(): void {
           // category; invalidate so a phone-side correction reflows
           // the portal feed live.
           qc.invalidateQueries({ queryKey: ['activity'] });
+          qc.invalidateQueries({ queryKey: ['dashboard'] });
         }
       )
       .on(
@@ -82,6 +85,7 @@ export function useRealtimeSync(): void {
         { event: '*', schema: 'public', table: 'devices', filter: ownerFilter },
         () => {
           qc.invalidateQueries({ queryKey: ['devices'] });
+          qc.invalidateQueries({ queryKey: ['dashboard'] });
         }
       )
       .on(
@@ -92,6 +96,7 @@ export function useRealtimeSync(): void {
           qc.invalidateQueries({ queryKey: ['account-for-rd'] });
           qc.invalidateQueries({ queryKey: ['lot-totals-excluding'] });
           qc.invalidateQueries({ queryKey: ['activity'] });
+          qc.invalidateQueries({ queryKey: ['dashboard'] });
         }
       )
       .subscribe();

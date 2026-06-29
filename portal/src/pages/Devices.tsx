@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { PageHeader } from '../components/PageHeader';
+import { SkeletonCard } from '../components/Loader';
 import { fetchDevices } from '../lib/queries';
 import { formatDateTime, formatNumber, formatRelativeTime } from '../lib/format';
 import type { DeviceRow } from '../types/db';
@@ -51,13 +52,8 @@ export function DevicesPage() {
       )}
 
       {query.isLoading && (
-        <div className="mt-6 space-y-2">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <div
-              key={i}
-              className="h-20 animate-pulse rounded-2xl border border-surface-border bg-surface-alt"
-            />
-          ))}
+        <div className="mt-6">
+          <SkeletonCard count={3} heightPx={80} rounded="2xl" label="Loading devices" />
         </div>
       )}
 

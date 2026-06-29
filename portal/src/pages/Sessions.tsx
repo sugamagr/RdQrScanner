@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader';
+import { SkeletonCard } from '../components/Loader';
 import {
   SESSIONS_PAGE_SIZE,
   fetchSessionsPage,
@@ -190,13 +191,8 @@ export function SessionsPage() {
 
 function SessionSkeletons() {
   return (
-    <div className="mt-6 space-y-2">
-      {Array.from({ length: 6 }).map((_, i) => (
-        <div
-          key={i}
-          className="h-14 animate-pulse rounded-xl border border-surface-border bg-surface-alt"
-        />
-      ))}
+    <div className="mt-6">
+      <SkeletonCard count={6} heightPx={56} rounded="xl" label="Loading sessions" />
     </div>
   );
 }

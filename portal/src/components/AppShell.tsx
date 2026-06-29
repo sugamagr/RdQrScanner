@@ -3,11 +3,12 @@ import { type ReactNode } from 'react';
 import { useAuth } from '../lib/useAuth';
 
 const navItems = [
-  { to: '/sessions', label: 'Sessions' },
-  { to: '/search', label: 'Search' },
-  { to: '/accounts', label: 'Accounts' },
-  { to: '/activity', label: 'Activity' },
-  { to: '/devices', label: 'Devices' },
+  { to: '/', label: 'Dashboard', end: true },
+  { to: '/sessions', label: 'Sessions', end: false },
+  { to: '/search', label: 'Search', end: false },
+  { to: '/accounts', label: 'Accounts', end: false },
+  { to: '/activity', label: 'Activity', end: false },
+  { to: '/devices', label: 'Devices', end: false },
 ];
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -29,7 +30,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </a>
       <header className="sticky top-0 z-30 border-b border-surface-border bg-surface/85 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-7xl items-center gap-6 px-4 sm:px-6 lg:px-8">
-          <NavLink to="/sessions" className="flex items-center gap-2">
+          <NavLink to="/" end className="flex items-center gap-2">
             <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary text-white shadow-card">
               <span className="text-base font-bold">RD</span>
             </span>
@@ -43,6 +44,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <NavLink
                 key={item.to}
                 to={item.to}
+                end={item.end}
                 className={({ isActive }) =>
                   [
                     'rounded-pill px-3.5 py-1.5 text-sm font-medium transition-colors',

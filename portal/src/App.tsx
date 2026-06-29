@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './lib/useAuth';
 import { useRealtimeSync } from './lib/useRealtimeSync';
@@ -9,12 +10,21 @@ import { SearchPage } from './pages/Search';
 import { AccountsPage } from './pages/Accounts';
 import { ActivityPage } from './pages/Activity';
 import { AppShell } from './components/AppShell';
+import { FullPageLoader } from './components/Loader';
+
+// Dashboard ships Recharts (~300KB) which makes the route the heaviest
+// in the app. Lazy-loading splits it into its own chunk so the rest of
+// the portal first-paint stays lean for power users who jump straight
+// to /sessions or /accounts.
+const DashboardPage = lazy(() =>
+  import('./pages/Dashboard').then((m) => ({ default: m.DashboardPage })),
+);
 
 export default function App() {
   const { session, loading } = useAuth();
 
   if (loading) {
-    return <FullPageSpinner />;
+    return <FullPageLoader label="Signing you in" />;
   }
 
   if (!session) {
@@ -34,22 +44,22 @@ function AuthedRoot() {
   return (
     <AppShell>
       <Routes>
+        <Route
+          path="/"
+          element={
+            <Suspense fallback={<FullPageLoader label="Building dashboard" />}>
+              <DashboardPage />
+            </Suspense>
+          }
+        />
         <Route path="/sessions" element={<SessionsPage />} />
         <Route path="/sessions/:sessionId" element={<SessionDetailPage />} />
         <Route path="/search" element={<SearchPage />} />
         <Route path="/accounts" element={<AccountsPage />} />
         <Route path="/activity" element={<ActivityPage />} />
         <Route path="/devices" element={<DevicesPage />} />
-        <Route path="*" element={<Navigate to="/sessions" replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AppShell>
-  );
-}
-
-function FullPageSpinner() {
-  return (
-    <div className="flex min-h-screen items-center justify-center">
-      <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary/20 border-t-primary" />
-    </div>
   );
 }

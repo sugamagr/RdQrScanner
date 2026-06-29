@@ -54,9 +54,38 @@ const config: Config = {
           '50%': { transform: 'translateX(150%)' },
           '100%': { transform: 'translateX(300%)' },
         },
+        // Loader: dual concentric arcs rotating in opposite directions
+        // at different speeds — the offset rotation gives the eye
+        // something to track even at low motion (designer-quality
+        // detail vs the default browser-spinner monotony).
+        'loader-spin-cw': {
+          '0%': { transform: 'rotate(0deg)' },
+          '100%': { transform: 'rotate(360deg)' },
+        },
+        'loader-spin-ccw': {
+          '0%': { transform: 'rotate(0deg)' },
+          '100%': { transform: 'rotate(-360deg)' },
+        },
+        // Subtle breathing pulse on the centre dot. 1.4s matches a
+        // calm-resting heart rate (≈42bpm) — the same cadence Apple
+        // uses for the iOS activity indicator's opacity loop.
+        'loader-pulse': {
+          '0%, 100%': { opacity: '0.4', transform: 'scale(0.85)' },
+          '50%': { opacity: '1', transform: 'scale(1)' },
+        },
+        // Skeleton shimmer: a soft highlight band traverses the
+        // placeholder L→R. 1.6s feels alive without distracting.
+        'loader-shimmer': {
+          '0%': { transform: 'translateX(-100%)' },
+          '100%': { transform: 'translateX(100%)' },
+        },
       },
       animation: {
         'csv-progress': 'csv-progress 1.2s ease-in-out infinite',
+        'loader-spin-cw': 'loader-spin-cw 1.2s linear infinite',
+        'loader-spin-ccw': 'loader-spin-ccw 1.8s linear infinite',
+        'loader-pulse': 'loader-pulse 1.4s ease-in-out infinite',
+        'loader-shimmer': 'loader-shimmer 1.6s ease-in-out infinite',
       },
     },
   },

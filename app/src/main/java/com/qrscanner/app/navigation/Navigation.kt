@@ -1,8 +1,5 @@
 package com.qrscanner.app.navigation
 
-import androidx.compose.animation.AnimatedContentTransitionScope
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -57,44 +54,17 @@ fun QRScannerNavigation(
     NavHost(
         navController = navController,
         startDestination = Screen.Home.route,
-        enterTransition = {
-            fadeIn(animationSpec = tween(400, easing = androidx.compose.animation.core.FastOutSlowInEasing)) + 
-            slideIntoContainer(
-                towards = AnimatedContentTransitionScope.SlideDirection.Start,
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioLowBouncy,
-                    stiffness = Spring.StiffnessLow
-                ),
-                initialOffset = { it / 4 }
-            )
-        },
-        exitTransition = {
-            fadeOut(animationSpec = tween(300)) + 
-            slideOutOfContainer(
-                towards = AnimatedContentTransitionScope.SlideDirection.Start,
-                animationSpec = tween(350),
-                targetOffset = { it / 4 }
-            )
-        },
-        popEnterTransition = {
-            fadeIn(animationSpec = tween(400, easing = androidx.compose.animation.core.FastOutSlowInEasing)) + 
-            slideIntoContainer(
-                towards = AnimatedContentTransitionScope.SlideDirection.End,
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioLowBouncy,
-                    stiffness = Spring.StiffnessLow
-                ),
-                initialOffset = { it / 4 }
-            )
-        },
-        popExitTransition = {
-            fadeOut(animationSpec = tween(300)) + 
-            slideOutOfContainer(
-                towards = AnimatedContentTransitionScope.SlideDirection.End,
-                animationSpec = tween(350),
-                targetOffset = { it / 4 }
-            )
-        }
+        // Snappy fade-only transitions. The previous slide + spring
+        // combo was the root cause of the "items load slow / lag type"
+        // feel on first SessionHistory entry — the slide ran while the
+        // Compose composition was still settling, making list items
+        // appear to stagger in. Fade-only at 220ms/160ms is well below
+        // the 250ms perceptual-instant threshold, so users read the
+        // screen as "appeared immediately" rather than "animating in".
+        enterTransition = { fadeIn(animationSpec = tween(220)) },
+        exitTransition = { fadeOut(animationSpec = tween(160)) },
+        popEnterTransition = { fadeIn(animationSpec = tween(220)) },
+        popExitTransition = { fadeOut(animationSpec = tween(160)) }
     ) {
         composable(Screen.Home.route) {
             HomeScreen(

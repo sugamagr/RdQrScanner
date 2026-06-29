@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
+import { SkeletonCard } from '../components/Loader';
 import { AccountEditDialog } from '../components/AccountEditDialog';
 import { DeleteOrInactivateDialog } from '../components/DeleteOrInactivateDialog';
 import { ImportCsvDialog } from '../components/ImportCsvDialog';
@@ -534,13 +535,8 @@ function SortableTh({
 
 function Skeletons() {
   return (
-    <div className="mt-6 space-y-2">
-      {Array.from({ length: 6 }).map((_, i) => (
-        <div
-          key={i}
-          className="h-14 animate-pulse rounded-xl border border-surface-border bg-surface-alt"
-        />
-      ))}
+    <div className="mt-6">
+      <SkeletonCard count={6} heightPx={56} rounded="xl" label="Loading accounts" />
     </div>
   );
 }

@@ -168,12 +168,7 @@ fun AddAccountsScreen(
                 ColumnLegend()
             }
             items(items = drafts, key = { it.id }) { draft ->
-                // animateItem() (Compose 1.7+) replaces the broken
-                // AnimatedVisibility(visible=true) — it animates row
-                // additions/removals at the LazyColumn level instead
-                // of inside a no-op visibility wrapper.
                 SpreadsheetRow(
-                    modifier = Modifier.animateItem(),
                     draft = draft,
                     onChange = { updated ->
                         val idx = drafts.indexOfFirst { it.id == draft.id }

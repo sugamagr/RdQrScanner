@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader';
+import { SkeletonCard } from '../components/Loader';
 import { fetchActivityFeed } from '../lib/queries';
 import type { ActivityKind, ActivityRow } from '../types/db';
 import { formatDateTime, formatNumber, formatRelativeTime } from '../lib/format';
@@ -273,13 +274,8 @@ function ActivityItem({ row }: { row: ActivityRow }) {
 
 function ActivitySkeletons() {
   return (
-    <div className="mt-6 space-y-2">
-      {Array.from({ length: 8 }).map((_, i) => (
-        <div
-          key={i}
-          className="h-16 animate-pulse rounded-xl border border-surface-border bg-surface-alt"
-        />
-      ))}
+    <div className="mt-6">
+      <SkeletonCard count={8} heightPx={64} rounded="xl" label="Loading activity" />
     </div>
   );
 }

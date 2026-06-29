@@ -5,36 +5,36 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.qrscanner.app.ui.theme.PrimaryOrange
 import com.qrscanner.app.ui.theme.PrimaryOrangeLight
 
 /**
  * Orange-gradient top bar with rounded bottom corners, matching the
- * visual chrome used by SessionHistoryScreen. The bar extends into the
- * system status bar area (via embedded statusBarsPadding) so the
- * gradient draws under the status bar's translucent overlay; callers
- * should NOT add their own statusBarsPadding to the parent.
+ * visual chrome used by SessionHistoryScreen exactly. Callers SHOULD
+ * have a `.statusBarsPadding()` on the parent Column (mirrors Session
+ * History at line 229) — this component intentionally does NOT
+ * statusBarsPadding itself so the parent's gradient background (often
+ * GradientPeach -> White -> GradientPeach) renders behind the status
+ * bar before this bar's rounded edge appears.
  *
  * Caller composes the bar's row content (back button, title, actions)
  * inside [content]. Keeps each screen free to vary its top-row layout
- * (e.g. selection mode swaps title for "N selected" + cancel + bulk
- * action) without forking this component.
+ * (selection mode title swap, bulk action icons) without forking the
+ * component.
  *
- * Contrast: white text on raw PrimaryOrange (#FF9F43) gradient stops
- * is 2.04-2.46:1 — fails WCAG AA. A Black @ 0.50f scrim above the
- * gradient brings the effective substrate luminance down to ≤0.26
- * across both stops, giving white-text contrast ≥3.2:1 (passes AA
- * for large text at 14sp+ bold, which titleMedium-Bold qualifies for).
- * The orange identity stays recognizable — the scrim darkens but
- * doesn't desaturate.
+ * Contrast tradeoff: white text on raw orange gradient is ~2.0-2.5:1,
+ * below WCAG AA 3.0:1 for large bold text. Prior version stacked a
+ * Black @ 0.50f scrim to pass AA but that produced the brown look the
+ * operator rejected. We match SessionHistoryScreen which uses the raw
+ * gradient — single-operator product, brand identity wins over AA on
+ * this header surface. Body text on white substrate everywhere else
+ * stays AA-compliant.
  *
  * displayCutoutPadding handles notched/punch-hole devices in
  * landscape orientation so content never renders under the cutout.
@@ -51,10 +51,9 @@ fun GradientTopBar(
             .background(
                 Brush.linearGradient(listOf(PrimaryOrange, PrimaryOrangeLight))
             )
-            .background(Color.Black.copy(alpha = 0.50f))
-            .statusBarsPadding()
             .displayCutoutPadding()
-            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .padding(16.dp)
+            .padding(bottom = 8.dp)
     ) {
         content()
     }
