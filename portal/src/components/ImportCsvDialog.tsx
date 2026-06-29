@@ -9,13 +9,34 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Download, FileSpreadsheet, Loader2, Upload, X } from 'lucide-react';
 import {
   bulkUpsertAccounts,
+  fetchExistingLastPaidThroughMap,
   type BulkUpsertResult,
 } from '../lib/queries';
 import {
   downloadAccountsCsvTemplate,
   parseAccountsCsv,
   type CsvParseResult,
+  type ParsedAccount,
 } from '../lib/csvParser';
+
+interface RegressionRow {
+  rdNumber: string;
+  name: string;
+  existing: string;
+  incoming: string;
+}
+
+/**
+ * Total months between two YYYY-MM tokens (later minus earlier). Both
+ * inputs are zero-padded YYYY-MM per the csvParser regex and the
+ * rd_accounts.last_paid_through cloud column contract. Used to rank
+ * regression rows by severity in the confirm modal.
+ */
+function monthsBackward(incoming: string, existing: string): number {
+  const [iy, im] = incoming.split('-').map(Number);
+  const [ey, em] = existing.split('-').map(Number);
+  return (ey - iy) * 12 + (em - im);
+}
 
 interface Props {
   ownerId: string;
@@ -39,6 +60,15 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
   const [parseResult, setParseResult] = useState<CsvParseResult | null>(null);
   const [showAllErrors, setShowAllErrors] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  // Regression-confirm state machine: idle → checking → (clean | needs-confirm).
+  // Only `confirmedRegressions` actually lets bulkUpsertAccounts run; the
+  // alternative is the operator hits Cancel and the dialog stays open.
+  const [regressionCheck, setRegressionCheck] = useState<
+    | { kind: 'idle' }
+    | { kind: 'checking' }
+    | { kind: 'needs-confirm'; rows: RegressionRow[] }
+  >({ kind: 'idle' });
+  const [checkError, setCheckError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeBtnRef = useRef<HTMLButtonElement>(null);
@@ -173,7 +203,84 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
   });
 
   const canUpload =
-    parseResult != null && parseResult.valid.length > 0 && !upload.isPending;
+    parseResult != null &&
+    parseResult.valid.length > 0 &&
+    !upload.isPending &&
+    regressionCheck.kind !== 'checking';
+
+  // Two-stage commit:
+  //   Stage 1 (here): if any row carries an explicit last_paid_through,
+  //   pre-flight fetch the existing values, compute the regression set,
+  //   and either stage the confirm modal or fall through to stage 2.
+  //   Stage 2: upload.mutate() — runs either directly when no overrides
+  //   exist / no regressions found, or after the operator confirms.
+  // Why split: regression detection is a READ that must precede the
+  // WRITE; doing it inside mutationFn would either skip the confirm UX
+  // or require throwing a typed error to drive UI state, which is
+  // strictly worse than keeping the read in a normal async handler.
+  const runImport = async (skipRegressionCheck: boolean) => {
+    if (!canUpload || uploadInFlightRef.current || !parseResult) return;
+    const rowsWithOverride = parseResult.valid.filter(
+      (r): r is ParsedAccount & { lastPaidThrough: string } =>
+        r.lastPaidThrough != null
+    );
+    if (rowsWithOverride.length === 0 || skipRegressionCheck) {
+      uploadInFlightRef.current = true;
+      upload.mutate(undefined, {
+        onSettled: () => {
+          uploadInFlightRef.current = false;
+        },
+      });
+      return;
+    }
+    setCheckError(null);
+    setRegressionCheck({ kind: 'checking' });
+    try {
+      const existing = await fetchExistingLastPaidThroughMap(
+        rowsWithOverride.map((r) => r.rdNumber)
+      );
+      if (!mountedRef.current) return;
+      const regressions: RegressionRow[] = [];
+      for (const row of rowsWithOverride) {
+        const prior = existing.get(row.rdNumber);
+        // Lexical < works because YYYY-MM is zero-padded — the regex in
+        // csvParser.ts enforces that exact shape. Null prior (new
+        // account or previously unset) is never a regression.
+        if (prior != null && row.lastPaidThrough < prior) {
+          regressions.push({
+            rdNumber: row.rdNumber,
+            name: row.name,
+            existing: prior,
+            incoming: row.lastPaidThrough,
+          });
+        }
+      }
+      if (regressions.length === 0) {
+        setRegressionCheck({ kind: 'idle' });
+        uploadInFlightRef.current = true;
+        upload.mutate(undefined, {
+          onSettled: () => {
+            uploadInFlightRef.current = false;
+          },
+        });
+        return;
+      }
+      // Sort by largest backward jump first so the worst offenders
+      // appear at the top of the confirm modal.
+      regressions.sort((a, b) => {
+        const ja = monthsBackward(a.incoming, a.existing);
+        const jb = monthsBackward(b.incoming, b.existing);
+        return jb - ja;
+      });
+      setRegressionCheck({ kind: 'needs-confirm', rows: regressions });
+    } catch (err) {
+      if (!mountedRef.current) return;
+      setRegressionCheck({ kind: 'idle' });
+      setCheckError(
+        err instanceof Error ? err.message : 'Failed to check existing accounts.'
+      );
+    }
+  };
 
   return (
     <div
@@ -194,9 +301,11 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
               Import accounts from CSV
             </h2>
             <p className="mt-0.5 text-xs text-ink-secondary">
-              Three required columns: <span className="font-mono">name</span>,{' '}
+              Columns: <span className="font-mono">name</span>,{' '}
               <span className="font-mono">rd_number</span>,{' '}
-              <span className="font-mono">monthly_amount</span>.
+              <span className="font-mono">monthly_amount</span>,{' '}
+              <span className="font-mono">last_paid_through</span>{' '}
+              <span className="text-ink-muted">(optional, YYYY-MM)</span>.
             </p>
           </div>
           <button
@@ -323,14 +432,94 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
                         <span className="truncate font-medium text-ink-primary">
                           {row.name}
                         </span>
-                        <span className="ml-2 shrink-0 font-mono text-ink-secondary">
-                          {row.rdNumber} · ₹{row.monthlyAmount}
+                        <span className="ml-2 flex shrink-0 items-baseline gap-1.5 font-mono text-ink-secondary">
+                          <span>{row.rdNumber}</span>
+                          <span className="text-ink-muted">·</span>
+                          <span>₹{row.monthlyAmount}</span>
+                          {row.lastPaidThrough && (
+                            <>
+                              <span className="text-ink-muted">·</span>
+                              <span className="text-accent-mint-ink">{row.lastPaidThrough}</span>
+                            </>
+                          )}
                         </span>
                       </li>
                     ))}
                   </ul>
                 </div>
               )}
+            </div>
+          )}
+
+          {regressionCheck.kind === 'needs-confirm' && (
+            <div
+              role="alertdialog"
+              aria-labelledby="regression-confirm-title"
+              className="rounded-xl border border-warn/30 bg-warn/5 px-3.5 py-3"
+            >
+              <p
+                id="regression-confirm-title"
+                className="text-xs font-semibold text-warn"
+              >
+                {regressionCheck.rows.length} account
+                {regressionCheck.rows.length === 1 ? '' : 's'} would move{' '}
+                <span className="font-mono">last_paid_through</span> backward
+              </p>
+              <p className="mt-1 text-[11px] text-ink-secondary">
+                The CSV sets an earlier month than the current value. The
+                paper book is the source of truth, so this is allowed — but
+                please confirm.
+              </p>
+              <ul className="mt-2 space-y-1 text-[11px]">
+                {regressionCheck.rows.slice(0, 5).map((r) => (
+                  <li
+                    key={r.rdNumber}
+                    className="flex items-center justify-between rounded-lg bg-surface px-2 py-1.5"
+                  >
+                    <span className="truncate font-medium text-ink-primary">
+                      {r.name}
+                    </span>
+                    <span className="ml-2 shrink-0 font-mono text-ink-secondary">
+                      <span className="text-ink-muted line-through">
+                        {r.existing}
+                      </span>
+                      {' \u2192 '}
+                      <span className="text-warn">{r.incoming}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {regressionCheck.rows.length > 5 && (
+                <p className="mt-1 text-[10px] text-ink-muted">
+                  +{regressionCheck.rows.length - 5} more
+                </p>
+              )}
+              <div className="mt-3 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setRegressionCheck({ kind: 'idle' })}
+                  className="rounded-pill px-3 py-1.5 text-xs font-medium text-ink-secondary hover:text-ink-primary"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRegressionCheck({ kind: 'idle' });
+                    void runImport(true);
+                  }}
+                  className="rounded-pill bg-warn px-3.5 py-1.5 text-xs font-semibold text-white shadow-card transition-colors hover:bg-warn/90"
+                >
+                  Yes, regress {regressionCheck.rows.length} account
+                  {regressionCheck.rows.length === 1 ? '' : 's'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {checkError && (
+            <div className="rounded-xl border border-danger/20 bg-danger/5 px-3 py-2 text-xs text-danger">
+              {checkError}
             </div>
           )}
 
@@ -374,23 +563,21 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
           <button
             type="button"
             onClick={() => {
-              if (!canUpload || uploadInFlightRef.current) return;
-              uploadInFlightRef.current = true;
-              upload.mutate(undefined, {
-                onSettled: () => {
-                  uploadInFlightRef.current = false;
-                },
-              });
+              void runImport(false);
             }}
             disabled={!canUpload}
             className="inline-flex items-center gap-1.5 rounded-pill bg-primary px-4 py-1.5 text-xs font-semibold text-white shadow-card transition-colors hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {upload.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            {(upload.isPending || regressionCheck.kind === 'checking') && (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            )}
             {upload.isPending
               ? 'Importing…'
-              : parseResult
-                ? `Import ${parseResult.valid.length} account${parseResult.valid.length === 1 ? '' : 's'}`
-                : 'Import'}
+              : regressionCheck.kind === 'checking'
+                ? 'Checking…'
+                : parseResult
+                  ? `Import ${parseResult.valid.length} account${parseResult.valid.length === 1 ? '' : 's'}`
+                  : 'Import'}
           </button>
         </footer>
       </div>

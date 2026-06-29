@@ -607,6 +607,48 @@ export interface BulkAccountInput {
   rdNumber: string;
   name: string;
   monthlyAmount: number;
+  /**
+   * Optional explicit override of `rd_accounts.last_paid_through`.
+   * `null` = leave existing cloud value untouched (writer omits the
+   * field from the upsert payload). Non-null = operator-authoritative
+   * write, NO monotonic guard — the caller is responsible for any
+   * regression-confirm UX before passing a value that lowers the
+   * existing one. Mirrors phone-side `setLastPaidThroughExplicit`.
+   */
+  lastPaidThrough: string | null;
+}
+
+/**
+ * Pre-import lookup: given a set of rd_numbers from a CSV, return the
+ * currently-stored last_paid_through for any of them that already
+ * exist (and aren't tombstoned). Used by ImportCsvDialog to compute
+ * the regression set BEFORE the actual upsert lands, so the operator
+ * can confirm or back out. Returns an empty map when the input is
+ * empty.
+ */
+export async function fetchExistingLastPaidThroughMap(
+  rdNumbers: ReadonlyArray<string>
+): Promise<Map<string, string | null>> {
+  if (rdNumbers.length === 0) return new Map();
+  const result = new Map<string, string | null>();
+  // Chunked to stay under PostgREST's IN-list URL-length limit. 500
+  // is well under Supabase's default 16 KB header cap (max 7 KB of
+  // 12-digit rd_numbers in one URL) and round-trip cost at small N is
+  // dwarfed by the upload itself.
+  const CHUNK = 500;
+  for (let i = 0; i < rdNumbers.length; i += CHUNK) {
+    const chunk = rdNumbers.slice(i, i + CHUNK);
+    const { data, error } = await supabase
+      .from('rd_accounts')
+      .select('rd_number, last_paid_through')
+      .in('rd_number', chunk)
+      .is('deleted_at', null);
+    if (error) throw error;
+    for (const row of (data ?? []) as Array<{ rd_number: string; last_paid_through: string | null }>) {
+      result.set(row.rd_number, row.last_paid_through);
+    }
+  }
+  return result;
 }
 
 export interface BulkUpsertResult {
@@ -652,7 +694,13 @@ export async function bulkUpsertAccounts(
     if (signal?.aborted) {
       throw new DOMException('bulkUpsertAccounts cancelled', 'AbortError');
     }
-    const payload = {
+    // last_paid_through is conditionally included: omitting the key
+    // entirely tells PostgREST to leave the existing column value
+    // alone on UPDATE. Including it with a value (or even null) would
+    // overwrite. The null/undefined distinction matters here — we
+    // build the object once and only attach the key when the CSV row
+    // carried an explicit value.
+    const payload: Record<string, unknown> = {
       rd_number: row.rdNumber,
       owner_id: ownerId,
       name: row.name,
@@ -666,6 +714,9 @@ export async function bulkUpsertAccounts(
       // to fetchAccounts() (which filters .is('deleted_at', null)).
       deleted_at: null,
     };
+    if (row.lastPaidThrough != null) {
+      payload.last_paid_through = row.lastPaidThrough;
+    }
     const { error } = await supabase
       .from('rd_accounts')
       .upsert(payload, { onConflict: 'owner_id,rd_number' });

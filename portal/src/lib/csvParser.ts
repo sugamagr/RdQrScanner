@@ -3,6 +3,16 @@ import Papa, { type ParseResult } from 'papaparse';
 const RD_NUMBER_REGEX = /^\d{9,15}$/;
 
 /**
+ * YYYY-MM token format used by `rd_accounts.last_paid_through`. Matches
+ * the phone-side [com.qrscanner.app.util.MonthYear] contract: lexical
+ * comparison must equal chronological comparison, which requires a
+ * zero-padded month and a 4-digit year. The regex rejects 2025-1,
+ * 25-01, 2025-13, etc. — anything that would break monotonic ordering
+ * downstream.
+ */
+const MONTH_TOKEN_REGEX = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+/**
  * Strip Excel formula prefixes from a name cell so a malicious CSV
  * with =cmd|'/c calc'!A1 (or similar) in the name field doesn't run
  * commands when the owner later re-exports to XLSX and opens in
@@ -29,12 +39,24 @@ interface RawCsvRow {
   name?: string;
   rd_number?: string;
   monthly_amount?: string;
+  last_paid_through?: string;
 }
 
 export interface ParsedAccount {
   rdNumber: string;
   name: string;
   monthlyAmount: number;
+  /**
+   * Optional 4th column. `null` means the CSV row left the cell blank
+   * (or the file omits the column entirely) — bulkUpsertAccounts will
+   * NOT include last_paid_through in the upsert payload, so the
+   * existing cloud value (if any) is preserved. A non-null value is
+   * an EXPLICIT operator override; the writer pushes it as-is, no
+   * monotonic guard. The dialog runs a regression check before
+   * commit and asks the operator to confirm if any row would lower
+   * an existing value.
+   */
+  lastPaidThrough: string | null;
 }
 
 export interface CsvRowError {
@@ -51,12 +73,22 @@ export interface CsvParseResult {
 /**
  * Strict CSV parse for the rd_accounts bulk-upload contract.
  *
- * Header row REQUIRED, exactly: name, rd_number, monthly_amount
- * (case-insensitive, surrounding whitespace stripped). Reject:
+ * Required header columns (any order, case-insensitive, whitespace
+ * stripped): name, rd_number, monthly_amount.
+ *
+ * Optional 4th column: last_paid_through (YYYY-MM token). When present
+ * and non-blank, the parsed value reaches cloud as an explicit operator
+ * override; when blank or absent, the cloud row's existing value is
+ * preserved (the writer omits the field from the upsert payload).
+ *
+ * Reject rules:
  *   - missing required field (any of name / rd_number / monthly_amount blank)
  *   - rd_number not matching ^\d{9,15}$
  *   - monthly_amount not a positive integer (rejects 0, negative, float, NaN)
  *   - in-file duplicate rd_number (keep first occurrence, drop the rest)
+ *   - last_paid_through present but not matching the YYYY-MM regex —
+ *     the WHOLE row is rejected because silently dropping a typoed
+ *     month would be worse than asking the operator to fix it.
  *
  * Row indices in errors are 1-indexed AND account for the header row,
  * so an error at "row 5" means line 5 of the file (line 1 = header,
@@ -123,8 +155,29 @@ export function parseAccountsCsv(file: File): Promise<CsvParseResult> {
             });
             return;
           }
+          // Optional column: empty string / absent column → null (skip).
+          // Non-empty must match YYYY-MM exactly; we reject the row on
+          // malformed input rather than silently dropping the value
+          // because the operator's intent was clearly to set it.
+          const lastPaidRaw = raw.last_paid_through ?? '';
+          let lastPaidThrough: string | null = null;
+          if (lastPaidRaw.length > 0) {
+            if (!MONTH_TOKEN_REGEX.test(lastPaidRaw)) {
+              errors.push({
+                row: lineNumber,
+                message: `Invalid last_paid_through "${lastPaidRaw}" (must be YYYY-MM, e.g. 2025-03)`,
+              });
+              return;
+            }
+            lastPaidThrough = lastPaidRaw;
+          }
           seenRdNumbers.add(rdNumber);
-          valid.push({ rdNumber, name: sanitizeFormulaPrefix(name), monthlyAmount: amount });
+          valid.push({
+            rdNumber,
+            name: sanitizeFormulaPrefix(name),
+            monthlyAmount: amount,
+            lastPaidThrough,
+          });
         });
 
         resolve({
@@ -144,12 +197,18 @@ export function parseAccountsCsv(file: File): Promise<CsvParseResult> {
   });
 }
 
-/** Triggers a CSV-template download via Blob + anchor click. */
+/**
+ * Triggers a CSV-template download via Blob + anchor click. The
+ * template includes the optional 4th column `last_paid_through` with
+ * one row populated and one row left blank so the operator sees both
+ * forms. Order of columns is not significant — the parser
+ * transformHeader keys by lowercased name.
+ */
 export function downloadAccountsCsvTemplate(): void {
   const sample =
-    'name,rd_number,monthly_amount\n' +
-    'Ramesh Kumar,123456789,500\n' +
-    'Sunita Devi,987654321012,1000\n';
+    'name,rd_number,monthly_amount,last_paid_through\n' +
+    'Ramesh Kumar,123456789,500,2025-03\n' +
+    'Sunita Devi,987654321012,1000,\n';
   const blob = new Blob([sample], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
