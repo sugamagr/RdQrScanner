@@ -32,8 +32,8 @@ android {
         // ~94% of active devices in 2026, acceptable per spec §15.
         minSdk = 30
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

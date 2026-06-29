@@ -165,19 +165,19 @@ fun AppInfoScreen(
                 
                 item {
                     VersionCard(
-                        version = "1.0.0",
-                        date = "January 2026",
+                        version = "1.1.0",
+                        date = "January 2026 (Cloud Sync)",
                         isLatest = true,
                         changes = listOf(
                             "Initial release of RD Book Scanner",
                             "Scan RD book QR codes with LOT management",
                             "Session-based scanning with sequential numbering",
-                            "Cloud sync across 2 to 5 phones with sub-second realtime updates",
+                            "Cloud sync across 2 to 5 phones with near-instant realtime updates",
                             "Companion web portal at rd-scanner-portal.pages.dev — Dashboard, Sessions, Accounts, Activity, Devices, Search",
                             "Bulk import accounts via 4-column CSV (name, rd_number, monthly_amount, last_paid_through)",
                             "Track defaulters automatically — months_paid > 1 means the holder is catching up",
                             "Paper book is truth — last paid month never auto-regresses, only operator can lower it explicitly",
-                            "Soft delete with 30-day undo window on sessions and accounts",
+                            "Soft delete with undo window on sessions and accounts",
                             "Share LOTs with image attachment for WhatsApp",
                             "Export sessions as XLSX or TXT",
                             "Generate QR code PDFs for RD numbers",

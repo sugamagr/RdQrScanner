@@ -286,16 +286,7 @@ export async function fetchDashboardStats(range: DashboardRange): Promise<Dashbo
   }
   const defaulterCount = defaulterSet.size;
 
-  // "Collected this month" = sum of monthly_amount for accounts whose
-  // last_paid_through ≥ current YYYY-MM. Lexical compare equals
-  // chronological compare per the MonthYear invariant.
   const currentMonth = monthKey(new Date().toISOString());
-  const totalCollectedThisMonth = accounts.reduce((sum, a) => {
-    if (a.last_paid_through != null && a.last_paid_through >= currentMonth) {
-      return sum + a.monthly_amount;
-    }
-    return sum;
-  }, 0);
 
   // Current vs default breakdown — uses last_paid_through across the
   // ACTIVE account roster, not the rd_numbers scans. "current" means
@@ -373,6 +364,16 @@ export async function fetchDashboardStats(range: DashboardRange): Promise<Dashbo
       moneyMonthDefaulter.set(key, (moneyMonthDefaulter.get(key) ?? 0) + weighted);
     }
   }
+
+  // QC R2 H1 — weighted money this month, not just monthly_amount of
+  // paid-up accounts. A defaulter catching up multiple months in a
+  // single session lands `monthly_amount × months_paid` in the cloud
+  // total for this period; the old formula would have under-counted
+  // those catch-ups and over-stated current-period collections only.
+  // Reads from the already-populated map; if currentMonth isn't in
+  // `seq` (range excludes current period), the lookup returns 0.
+  const totalCollectedThisMonth = moneyMonthTotal.get(currentMonth) ?? 0;
+
   const monthlySessionCounts = seq.map((m) => ({
     month: m,
     count: sessionMonthCounts.get(m) ?? 0,

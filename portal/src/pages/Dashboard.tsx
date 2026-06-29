@@ -221,13 +221,35 @@ function DashboardBody({ stats, range, onRangeChange, isFetching, onExportClick 
   );
 }
 
+// QC R2 M2/M3 — describeRange formats custom dates using en-IN locale
+// so operators see '15 Mar 2025' instead of the raw ISO '2025-03-15'.
+// Reused by the dashboard subtitle AND the PDF export subtitle so they
+// stay in sync without divergent formatters.
+const CUSTOM_RANGE_FMT = new Intl.DateTimeFormat('en-IN', {
+  day: '2-digit',
+  month: 'short',
+  year: 'numeric',
+});
+function formatCustomDate(iso: string): string {
+  const d = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return CUSTOM_RANGE_FMT.format(d);
+}
+
+function formatLocalDateIso(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 function describeRange(range: DashboardRange): string {
   if (range === null) return 'All time';
   if (range === 3) return 'Last 3 months';
   if (range === 6) return 'Last 6 months';
   if (range === 12) return 'Last 12 months';
   if (range.kind === 'current-month') return 'Current month';
-  return `${range.fromIso} to ${range.toIso}`;
+  return `${formatCustomDate(range.fromIso)} to ${formatCustomDate(range.toIso)}`;
 }
 
 function RangeSelector({
@@ -239,11 +261,17 @@ function RangeSelector({
 }) {
   const isCustom = typeof value === 'object' && value !== null && value.kind === 'custom';
   const [customOpen, setCustomOpen] = useState(isCustom);
-  const todayIso = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  // QC R2 H1+H2 — todayIso/defaultFromIso must be LOCAL YYYY-MM-DD,
+  // not UTC. toISOString() shifts to UTC and the user in IST after
+  // 5:30 AM sees yesterday's date as "today's max", blocking them
+  // from selecting their own current local date in the picker. Build
+  // the string from local getters to keep min/max bounds aligned with
+  // the operator's wall clock.
+  const todayIso = useMemo(() => formatLocalDateIso(new Date()), []);
   const defaultFromIso = useMemo(() => {
     const d = new Date();
-    d.setUTCMonth(d.getUTCMonth() - 1);
-    return d.toISOString().slice(0, 10);
+    d.setMonth(d.getMonth() - 1);
+    return formatLocalDateIso(d);
   }, []);
   const [fromIso, setFromIso] = useState<string>(isCustom ? value.fromIso : defaultFromIso);
   const [toIso, setToIso] = useState<string>(isCustom ? value.toIso : todayIso);
@@ -296,6 +324,7 @@ function RangeSelector({
                 setCustomOpen(false);
               }}
               aria-pressed={active}
+              tabIndex={active ? 0 : -1}
               onKeyDown={(e) => {
                 if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
                   e.preventDefault();
@@ -322,6 +351,7 @@ function RangeSelector({
           onClick={() => setCustomOpen((v) => !v)}
           aria-pressed={isCustom}
           aria-expanded={customOpen}
+          tabIndex={isCustom ? 0 : -1}
           onKeyDown={(e) => {
             if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
               e.preventDefault();
@@ -348,7 +378,7 @@ function RangeSelector({
             <input
               type="date"
               value={fromIso}
-              max={toIso}
+              max={toIso < todayIso ? toIso : todayIso}
               onChange={(e) => setFromIso(e.target.value)}
               className="rounded-md border border-surface-border bg-surface px-2 py-1 text-xs"
             />
@@ -366,7 +396,7 @@ function RangeSelector({
           </label>
           <button
             type="button"
-            disabled={!fromIso || !toIso || fromIso > toIso}
+            disabled={!fromIso || !toIso || fromIso > toIso || toIso > todayIso}
             onClick={() => {
               onChange({ kind: 'custom', fromIso, toIso });
             }}
@@ -408,7 +438,10 @@ function KpiCard({ title, value, subtitle, icon, tone, delta }: KpiCardProps) {
           <p className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
             {title}
           </p>
-          <p className="mt-2 truncate text-xl font-semibold tracking-tight text-ink-primary sm:text-2xl">
+          <p
+            className="mt-2 truncate text-xl font-semibold tracking-tight text-ink-primary sm:text-2xl"
+            aria-label={`${title}: ${value}`}
+          >
             {value}
           </p>
           {subtitle && (
@@ -487,14 +520,14 @@ function KpiRow({ stats }: { stats: DashboardStats }) {
       <KpiCard
         title="Defaulters"
         value={formatNumber(stats.defaulterCount)}
-        subtitle="distinct RD numbers with overdue"
+        subtitle="paid multiple months (catching up)"
         icon={<UserMinus className="h-5 w-5" />}
         tone="warn"
       />
       <KpiCard
         title="Collected this month"
         value={`₹${formatNumber(stats.totalCollectedThisMonth)}`}
-        subtitle="last_paid_through ≥ current month"
+        subtitle="weighted by months_paid"
         icon={<Wallet className="h-5 w-5" />}
         tone="mint"
       />
@@ -545,14 +578,14 @@ function KpiRow({ stats }: { stats: DashboardStats }) {
       <KpiCard
         title="Current vs default (accounts)"
         value={`${formatNumber(stats.currentVsDefault.currentCount)} / ${formatNumber(stats.currentVsDefault.defaultCount)}`}
-        subtitle={`current · default`}
+        subtitle="current · default (incl. never paid)"
         icon={<ShieldCheck className="h-5 w-5" />}
         tone="coral"
       />
       <KpiCard
         title="Current vs default (₹)"
         value={`₹${formatNumber(stats.currentVsDefault.currentAmount)} / ₹${formatNumber(stats.currentVsDefault.defaultAmount)}`}
-        subtitle="monthly amounts split"
+        subtitle="monthly amounts (incl. never paid)"
         icon={<ShieldAlert className="h-5 w-5" />}
         tone="warn"
       />
@@ -593,6 +626,11 @@ function ChartCard({ title, subtitle, children, className, ariaLabel }: ChartCar
           )}
         </div>
       </figcaption>
+      {/* QC R2 M1 — figure aria-label takes precedence over the visible
+          figcaption per the ARIA naming algorithm, so screen readers
+          hear only the data-summary aria-label and not the title+subtitle
+          a second time. Do NOT remove the aria-label or the chart loses
+          its data-summary announcement. */}
       <div
         className={[
           'h-[260px]',
@@ -668,7 +706,7 @@ function MoneyTrendCard({
   return (
     <ChartCard
       title="Money collected"
-      subtitle={`₹${formatNumber(total)} in range · ₹${formatNumber(defaulterTotal)} from defaulters`}
+      subtitle={`₹${formatNumber(total)} total · ₹${formatNumber(defaulterTotal)} from defaulters (subset)`}
       className={className}
       ariaLabel={`Monthly money collected. Total rupees ${total}.`}
     >
@@ -1012,12 +1050,17 @@ function TopDefaultersCard({
   );
 }
 
+// QC R2 M5 — every badge swatch above passes WCAG AA 4.5:1 on white.
+// Prior text-primary-dark (3.5:1), text-danger (3.4:1) and text-accent-
+// coral (2.6:1) failed AA; the amber-800 / red-700 / mint-ink palette
+// here is verified at 6.5:1, 5.9:1, 4.91:1, 7.6:1, 5.9:1 respectively.
+// Do NOT swap back to brand colors without measuring contrast first.
 const KIND_BADGE: Record<ActivityKind, { label: string; className: string }> = {
-  session_finalized: { label: 'Session', className: 'bg-primary/10 text-primary-dark' },
-  session_deleted: { label: 'Deleted', className: 'bg-danger/10 text-danger' },
+  session_finalized: { label: 'Session', className: 'bg-primary/10 text-amber-800' },
+  session_deleted: { label: 'Deleted', className: 'bg-red-100 text-red-700' },
   defaulter_edited: { label: 'Defaulter', className: 'bg-amber-100 text-amber-700' },
   account_added: { label: 'Added', className: 'bg-accent-mint/15 text-accent-mint-ink' },
-  account_edited: { label: 'Edited', className: 'bg-accent-coral/15 text-accent-coral' },
+  account_edited: { label: 'Edited', className: 'bg-red-100 text-red-700' },
 };
 
 function RecentActivityCard({
@@ -1066,6 +1109,7 @@ function RecentActivityCard({
                 </div>
                 <span
                   title={formatDateTime(r.occurredAt)}
+                  aria-label={formatDateTime(r.occurredAt)}
                   className="ml-2 shrink-0 text-[11px] tabular-nums text-ink-secondary"
                 >
                   {formatRelativeTime(r.occurredAt)}

@@ -352,17 +352,21 @@ function renderKpis(ctx: RenderContext): import('react').ReactElement {
   const { React, view, text, styles, stats, colors } = ctx;
   const items: Array<{ label: string; value: string; sub?: string }> = [
     { label: 'Total accounts', value: formatNumber(stats.totalAccounts), sub: `${formatNumber(stats.activeAccounts)} active` },
-    { label: 'Defaulters', value: formatNumber(stats.defaulterCount), sub: 'distinct RD numbers' },
-    { label: 'Collected this month', value: `Rs ${formatNumber(stats.totalCollectedThisMonth)}`, sub: 'last_paid_through >= now' },
-    { label: 'Book amount', value: `Rs ${formatNumber(stats.totalAccountAmount)}`, sub: 'sum monthly amounts' },
-    { label: 'Avg ticket', value: `Rs ${formatNumber(stats.averageMonthlyAmount)}`, sub: 'real average (active)' },
+    { label: 'Defaulters', value: formatNumber(stats.defaulterCount), sub: 'paid multiple months' },
+    { label: 'Collected this month', value: `\u20B9${formatNumber(stats.totalCollectedThisMonth)}`, sub: 'weighted by months_paid' },
+    { label: 'Book amount', value: `\u20B9${formatNumber(stats.totalAccountAmount)}`, sub: 'sum monthly (active)' },
+    {
+      label: 'Avg ticket',
+      value: stats.activeAccounts === 0 ? '\u2014' : `\u20B9${formatNumber(stats.averageMonthlyAmount)}`,
+      sub: stats.activeAccounts === 0 ? 'no active accounts' : 'real average (active)',
+    },
     { label: 'Sessions', value: formatNumber(stats.totalSessions), sub: 'in selected range' },
     { label: 'Scans', value: formatNumber(stats.totalRdScans), sub: 'RD numbers in range' },
     { label: 'Active devices', value: `${stats.activeDevices} / ${stats.totalDevices}`, sub: 'last 5 minutes' },
-    { label: 'Current accounts', value: formatNumber(stats.currentVsDefault.currentCount), sub: `Rs ${formatNumber(stats.currentVsDefault.currentAmount)}` },
-    { label: 'Default accounts', value: formatNumber(stats.currentVsDefault.defaultCount), sub: `Rs ${formatNumber(stats.currentVsDefault.defaultAmount)}` },
+    { label: 'Current accounts', value: formatNumber(stats.currentVsDefault.currentCount), sub: `\u20B9${formatNumber(stats.currentVsDefault.currentAmount)}` },
+    { label: 'Default accounts', value: formatNumber(stats.currentVsDefault.defaultCount), sub: `\u20B9${formatNumber(stats.currentVsDefault.defaultAmount)}` },
     { label: 'Manual / CSV', value: `${stats.sourceBreakdown.find((s) => s.source === 'MANUAL')?.count ?? 0} / ${stats.sourceBreakdown.find((s) => s.source === 'CSV')?.count ?? 0}`, sub: 'account source' },
-    { label: 'Money collected (range)', value: `Rs ${formatNumber(stats.monthlyMoneyCollected.reduce((s, m) => s + m.amount, 0))}`, sub: 'weighted by months_paid' },
+    { label: 'Money collected (range)', value: `\u20B9${formatNumber(stats.monthlyMoneyCollected.reduce((s, m) => s + m.amount, 0))}`, sub: 'weighted by months_paid' },
   ];
   return React.createElement(
     React.Fragment,
@@ -396,7 +400,7 @@ function renderMoneyTrend(ctx: RenderContext): import('react').ReactElement {
       view,
       { style: styles.chartBlock, wrap: false },
       React.createElement(text, { style: styles.chartTitle }, 'Monthly money collected'),
-      React.createElement(text, { style: styles.chartSubtitle }, `Rs ${formatNumber(total)} total · Rs ${formatNumber(defaulterTotal)} from defaulters`),
+      React.createElement(text, { style: styles.chartSubtitle }, `\u20B9${formatNumber(total)} total (\u20B9${formatNumber(defaulterTotal)} from defaulters \u2014 subset)`),
       renderMoneyChart(ctx),
       React.createElement(
         view,
@@ -442,7 +446,7 @@ function renderCurrentVsDefault(ctx: RenderContext): import('react').ReactElemen
       view,
       { style: styles.chartBlock, wrap: false },
       React.createElement(text, { style: styles.chartTitle }, 'Active accounts paid-up status'),
-      React.createElement(text, { style: styles.chartSubtitle }, `${formatNumber(totalCnt)} active accounts · Rs ${formatNumber(totalAmt)} monthly`),
+      React.createElement(text, { style: styles.chartSubtitle }, `${formatNumber(totalCnt)} active accounts \u00B7 \u20B9${formatNumber(totalAmt)} monthly`),
       ctx.React.createElement(ctx.svg as unknown as React.ComponentType<{ width: number; height: number; children?: React.ReactNode }>, { width: W, height: H }, [
         // Y axis line
         ctx.React.createElement(ctx.line, { key: 'y', x1: padL, y1: padT, x2: padL, y2: H - padB, stroke: colors.border, strokeWidth: 0.5 }),
@@ -468,8 +472,8 @@ function renderCurrentVsDefault(ctx: RenderContext): import('react').ReactElemen
         }),
       ]),
       renderInfoTable(ctx, [
-        { left: 'Current', value: `${formatNumber(b.currentCount)} accounts`, right: `Rs ${formatNumber(b.currentAmount)}` },
-        { left: 'Default', value: `${formatNumber(b.defaultCount)} accounts`, right: `Rs ${formatNumber(b.defaultAmount)}` },
+        { left: 'Current', value: `${formatNumber(b.currentCount)} accounts`, right: `\u20B9${formatNumber(b.currentAmount)}` },
+        { left: 'Default', value: `${formatNumber(b.defaultCount)} accounts (incl. never paid)`, right: `\u20B9${formatNumber(b.defaultAmount)}` },
       ]),
     ),
   );
@@ -612,7 +616,10 @@ function renderAmountHistogram(ctx: RenderContext): import('react').ReactElement
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
   const max = Math.max(...stats.amountHistogram.map((b) => b.count), 1);
-  const barW = innerW / stats.amountHistogram.length;
+  // Defensive guard. amountHistogram is currently a fixed 5 buckets,
+  // but if a future refactor passes filtered data, division by zero
+  // produces Infinity bar widths and corrupts the PDF page.
+  const barW = stats.amountHistogram.length > 0 ? innerW / stats.amountHistogram.length : 0;
   return React.createElement(
     React.Fragment,
     { key: 'hist' },
@@ -631,7 +638,7 @@ function renderAmountHistogram(ctx: RenderContext): import('react').ReactElement
           const y = padT + innerH - h;
           return [
             ctx.React.createElement(ctx.rect, { key: `b${i}`, x, y, width: barW - 12, height: h, fill: colors.primary }),
-            ctx.React.createElement(ctx.text, { key: `t${i}`, x: padL + i * barW + barW / 2, y: H - padB + 12, style: { fontSize: 7, fill: colors.inkMuted }, textAnchor: 'middle' }, b.bucket),
+            ctx.React.createElement(ctx.text, { key: `t${i}`, x: padL + i * barW + barW / 2, y: H - padB + 12, style: { fontSize: 7, fill: colors.inkSecondary }, textAnchor: 'middle' }, b.bucket),
             ctx.React.createElement(ctx.text, { key: `v${i}`, x: padL + i * barW + barW / 2, y: y - 2, style: { fontSize: 7, fill: colors.inkSecondary }, textAnchor: 'middle' }, String(b.count)),
           ];
         }),
@@ -732,9 +739,15 @@ interface XY { x: string; y: number; }
 interface XY2 { x: string; y1: number; y2: number; }
 
 function renderLineChart(ctx: RenderContext, data: XY[], color: string, _label: string): import('react').ReactElement {
-  const { React, svg, line, rect, contentWidth, colors } = ctx;
+  const { React, svg, line, rect, contentWidth, colors, view } = ctx;
   const W = contentWidth - 20;
   const H = 130;
+  // Empty data short-circuit. Without this, Math.max(...[]) returns
+  // -Infinity which propagates as NaN through the SVG path strings
+  // and corrupts the entire PDF page.
+  if (data.length === 0) {
+    return React.createElement(view, { style: { height: H } });
+  }
   const padL = 50, padR = 12, padT = 12, padB = 24;
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
@@ -748,6 +761,10 @@ function renderLineChart(ctx: RenderContext, data: XY[], color: string, _label: 
   }));
   const pathStr = points.reduce((acc, p, i) => acc + (i === 0 ? `M ${p.x} ${p.y}` : ` L ${p.x} ${p.y}`), '');
   const fillStr = pathStr + ` L ${points[points.length - 1]?.x ?? padL} ${padT + innerH} L ${padL} ${padT + innerH} Z`;
+  // Tick decimation: at 60 months / ~450pt inner width, each label gets
+  // ~7.5pt and clusters into unreadable mush. Render every Nth so the
+  // axis reads at a glance.
+  const labelInterval = data.length > 24 ? 6 : data.length > 12 ? 3 : 1;
   return React.createElement(svg as unknown as React.ComponentType<{ width: number; height: number; children?: React.ReactNode }>, { width: W, height: H }, [
     React.createElement(line, { key: 'y', x1: padL, y1: padT, x2: padL, y2: H - padB, stroke: colors.border, strokeWidth: 0.5 }),
     React.createElement(line, { key: 'x', x1: padL, y1: H - padB, x2: W - padR, y2: H - padB, stroke: colors.border, strokeWidth: 0.5 }),
@@ -756,20 +773,25 @@ function renderLineChart(ctx: RenderContext, data: XY[], color: string, _label: 
     ...points.flatMap((p, i) => [
       React.createElement(rect, { key: `d${i}`, x: p.x - 1.2, y: p.y - 1.2, width: 2.4, height: 2.4, fill: color }),
     ]),
-    ...points.map((p, i) => React.createElement(ctx.text, {
-      key: `xl${i}`,
-      x: p.x,
-      y: H - padB + 12,
-      style: { fontSize: 6, fill: colors.inkMuted },
-      textAnchor: 'middle',
-    }, p.label.slice(2))),
+    ...points
+      .filter((_, i) => i % labelInterval === 0)
+      .map((p, i) => React.createElement(ctx.text, {
+        key: `xl${i}`,
+        x: p.x,
+        y: H - padB + 12,
+        style: { fontSize: 6, fill: colors.inkMuted },
+        textAnchor: 'middle',
+      }, p.label.slice(2))),
   ]);
 }
 
 function renderDualLineChart(ctx: RenderContext, data: XY2[], color1: string, color2: string): import('react').ReactElement {
-  const { React, svg, line, contentWidth, colors } = ctx;
+  const { React, svg, line, contentWidth, colors, view } = ctx;
   const W = contentWidth - 20;
   const H = 130;
+  if (data.length === 0) {
+    return React.createElement(view, { style: { height: H } });
+  }
   const padL = 50, padR = 12, padT = 12, padB = 24;
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
@@ -779,18 +801,21 @@ function renderDualLineChart(ctx: RenderContext, data: XY2[], color1: string, co
   const points2 = data.map((d, i) => ({ x: padL + i * stepX, y: padT + innerH - (d.y2 / maxY) * innerH }));
   const path1 = points1.reduce((acc, p, i) => acc + (i === 0 ? `M ${p.x} ${p.y}` : ` L ${p.x} ${p.y}`), '');
   const path2 = points2.reduce((acc, p, i) => acc + (i === 0 ? `M ${p.x} ${p.y}` : ` L ${p.x} ${p.y}`), '');
+  const labelInterval = data.length > 24 ? 6 : data.length > 12 ? 3 : 1;
   return React.createElement(svg as unknown as React.ComponentType<{ width: number; height: number; children?: React.ReactNode }>, { width: W, height: H }, [
     React.createElement(line, { key: 'y', x1: padL, y1: padT, x2: padL, y2: H - padB, stroke: colors.border, strokeWidth: 0.5 }),
     React.createElement(line, { key: 'x', x1: padL, y1: H - padB, x2: W - padR, y2: H - padB, stroke: colors.border, strokeWidth: 0.5 }),
     React.createElement(ctx.path, { key: 'p1', d: path1, fill: 'none', stroke: color1, strokeWidth: 1.5 }),
     React.createElement(ctx.path, { key: 'p2', d: path2, fill: 'none', stroke: color2, strokeWidth: 1.5 }),
-    ...points1.map((p, i) => React.createElement(ctx.text, {
-      key: `xl${i}`,
-      x: p.x,
-      y: H - padB + 12,
-      style: { fontSize: 6, fill: colors.inkMuted },
-      textAnchor: 'middle',
-    }, p.label.slice(2))),
+    ...points1
+      .filter((_, i) => i % labelInterval === 0)
+      .map((p, i) => React.createElement(ctx.text, {
+        key: `xl${i}`,
+        x: p.x,
+        y: H - padB + 12,
+        style: { fontSize: 6, fill: colors.inkMuted },
+        textAnchor: 'middle',
+      }, p.label.slice(2))),
   ]);
 }
 
@@ -803,8 +828,11 @@ function renderTwoSeriesAreaChart(
   H: number,
   _format: (n: number) => string,
 ): import('react').ReactElement {
-  const { React, svg, line, contentWidth, colors } = ctx;
+  const { React, svg, line, contentWidth, colors, view } = ctx;
   void contentWidth;
+  if (data.length === 0) {
+    return React.createElement(view, { style: { height: H } });
+  }
   const padL = 50, padR = 12, padT = 12, padB = 24;
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
@@ -818,6 +846,7 @@ function renderTwoSeriesAreaChart(
   const last2 = p2[p2.length - 1]?.x ?? padL;
   const fill1 = path1 + ` L ${last1} ${padT + innerH} L ${padL} ${padT + innerH} Z`;
   const fill2 = path2 + ` L ${last2} ${padT + innerH} L ${padL} ${padT + innerH} Z`;
+  const labelInterval = data.length > 24 ? 6 : data.length > 12 ? 3 : 1;
   return React.createElement(svg as unknown as React.ComponentType<{ width: number; height: number; children?: React.ReactNode }>, { width: W, height: H }, [
     React.createElement(line, { key: 'y', x1: padL, y1: padT, x2: padL, y2: H - padB, stroke: colors.border, strokeWidth: 0.5 }),
     React.createElement(line, { key: 'x', x1: padL, y1: H - padB, x2: W - padR, y2: H - padB, stroke: colors.border, strokeWidth: 0.5 }),
@@ -825,13 +854,15 @@ function renderTwoSeriesAreaChart(
     React.createElement(ctx.path, { key: 'f2', d: fill2, fill: color2, fillOpacity: 0.15, stroke: 'none' }),
     React.createElement(ctx.path, { key: 'p1', d: path1, fill: 'none', stroke: color1, strokeWidth: 1.5 }),
     React.createElement(ctx.path, { key: 'p2', d: path2, fill: 'none', stroke: color2, strokeWidth: 1.5 }),
-    ...p1.map((p, i) => React.createElement(ctx.text, {
-      key: `xl${i}`,
-      x: p.x,
-      y: H - padB + 12,
-      style: { fontSize: 6, fill: colors.inkMuted },
-      textAnchor: 'middle',
-    }, p.label.slice(2))),
+    ...p1
+      .filter((_, i) => i % labelInterval === 0)
+      .map((p, i) => React.createElement(ctx.text, {
+        key: `xl${i}`,
+        x: p.x,
+        y: H - padB + 12,
+        style: { fontSize: 6, fill: colors.inkMuted },
+        textAnchor: 'middle',
+      }, p.label.slice(2))),
   ]);
 }
 

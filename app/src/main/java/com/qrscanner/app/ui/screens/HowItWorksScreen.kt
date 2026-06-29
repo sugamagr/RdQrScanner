@@ -378,7 +378,7 @@ private fun HindiContent() {
             FeatureItem(
                 icon = Icons.Default.FolderOpen,
                 title = "सेशन एक्सपोर्ट करें",
-                description = "रिकॉर्ड रखने या आगे की प्रक्रिया के लिए पूरे सेशन को XLSX या TXT फाइल के रूप में एक्सपोर्ट करें। सेशन डिलीट करने पर 30 दिन तक वापस लाने का विकल्प मिलता है।"
+                description = "रिकॉर्ड रखने या आगे की प्रक्रिया के लिए पूरे सेशन को XLSX या TXT फाइल के रूप में एक्सपोर्ट करें। डिलीट किए गए सेशन को बाद में वापस लाने का विकल्प भी मिलता है।"
             )
         }
 
@@ -576,7 +576,7 @@ private fun EnglishContent() {
             FeatureItem(
                 icon = Icons.Default.FolderOpen,
                 title = "Export Sessions",
-                description = "Export complete sessions as XLSX or TXT files for record-keeping or further processing. Deleted sessions can be restored within 30 days."
+                description = "Export complete sessions as XLSX or TXT files for record-keeping or further processing. Deleted sessions can be restored later from the recycle area."
             )
         }
 
