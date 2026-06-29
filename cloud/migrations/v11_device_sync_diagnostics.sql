@@ -69,8 +69,16 @@ create index if not exists devices_owner_last_push_idx
 --   -- expect: one row.
 --
 --   -- 4. RLS still locks down the table (no policy regression from
---   --    the alter table).
---   select count(*) as policy_count
+--   --    the alter table). The canonical schema defines exactly THREE
+--   --    policies on devices: owner-select, owner-insert, owner-update.
+--   --    There is intentionally NO delete policy — phones soft-delete
+--   --    via the deleted_at column (an UPDATE), they never hard-delete.
+--   --    Same pattern as every other syncable table in the schema.
+--   select policyname, cmd
 --     from pg_policies
---    where schemaname = 'public' and tablename = 'devices';
---   -- expect: policy_count >= 4 (select, insert, update, delete).
+--    where schemaname = 'public' and tablename = 'devices'
+--    order by policyname;
+--   -- expect: exactly 3 rows —
+--   --   devices: owner insert | INSERT
+--   --   devices: owner select | SELECT
+--   --   devices: owner update | UPDATE
