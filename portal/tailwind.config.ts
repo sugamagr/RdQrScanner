@@ -79,6 +79,30 @@ const config: Config = {
           '0%': { transform: 'translateX(-100%)' },
           '100%': { transform: 'translateX(100%)' },
         },
+        // Floating bubbles for the themed full-page loader. Each
+        // bubble uses a different keyframe so the path varies (eye
+        // sees individual motion instead of a synchronized swarm).
+        // translateY-only is GPU-cheap; opacity fade prevents the
+        // bubble from popping in/out at the bounds.
+        'bubble-a': {
+          '0%, 100%': { transform: 'translate3d(0,0,0) scale(1)', opacity: '0.55' },
+          '50%': { transform: 'translate3d(8px,-32px,0) scale(1.08)', opacity: '0.75' },
+        },
+        'bubble-b': {
+          '0%, 100%': { transform: 'translate3d(0,0,0) scale(1)', opacity: '0.42' },
+          '50%': { transform: 'translate3d(-12px,-44px,0) scale(0.92)', opacity: '0.6' },
+        },
+        'bubble-c': {
+          '0%, 100%': { transform: 'translate3d(0,0,0) scale(1)', opacity: '0.5' },
+          '50%': { transform: 'translate3d(14px,-24px,0) scale(1.04)', opacity: '0.7' },
+        },
+        // Background hue drift on the themed loader — extremely slow
+        // gradient position shift so the page feels alive without
+        // becoming distracting.
+        'gradient-drift': {
+          '0%, 100%': { backgroundPosition: '0% 50%' },
+          '50%': { backgroundPosition: '100% 50%' },
+        },
       },
       animation: {
         'csv-progress': 'csv-progress 1.2s ease-in-out infinite',
@@ -86,6 +110,10 @@ const config: Config = {
         'loader-spin-ccw': 'loader-spin-ccw 1.8s linear infinite',
         'loader-pulse': 'loader-pulse 1.4s ease-in-out infinite',
         'loader-shimmer': 'loader-shimmer 1.6s ease-in-out infinite',
+        'bubble-a': 'bubble-a 7s ease-in-out infinite',
+        'bubble-b': 'bubble-b 9s ease-in-out infinite',
+        'bubble-c': 'bubble-c 11s ease-in-out infinite',
+        'gradient-drift': 'gradient-drift 14s ease-in-out infinite',
       },
     },
   },

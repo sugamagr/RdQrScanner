@@ -88,19 +88,65 @@ function Orbit({ pixelSize }: OrbitProps) {
   );
 }
 
+/**
+ * Themed full-page loader: drifting orange/peach gradient backdrop,
+ * three floating bubbles (each on its own keyframe so the motion
+ * never looks synchronized), and the orbit + label hosted on a
+ * frosted card. Used for route loads and the auth-check spinner.
+ *
+ * The bubbles are absolutely positioned `aria-hidden` decorative
+ * blurs; they live behind the card so the page reads as branded
+ * without competing with the actual progress signal. `min-h-screen`
+ * + `overflow-hidden` keeps the bubbles clipped during their float
+ * even when the loader hosts inside a `<Suspense>` boundary that
+ * happens to sit below the AppShell header.
+ */
 export function FullPageLoader({ label = 'Loading' }: { label?: string }) {
   return (
     <div
       role="status"
       aria-live="polite"
-      className="flex min-h-screen flex-col items-center justify-center gap-4 bg-surface-alt"
+      className="relative flex min-h-[70vh] items-center justify-center overflow-hidden rounded-3xl bg-[length:200%_200%] bg-gradient-to-br from-primary/15 via-accent-coral/10 to-accent-mint/15 animate-gradient-drift"
     >
-      <Orbit pixelSize={56} />
-      <p className="text-sm font-medium tracking-wide text-ink-secondary">
-        {label}
-        <span className="sr-only">, please wait</span>
-      </p>
+      <Bubble
+        size={220}
+        className="left-[-60px] top-[10%] bg-primary/30 animate-bubble-a"
+      />
+      <Bubble
+        size={320}
+        className="right-[-100px] top-[55%] bg-accent-mint/25 animate-bubble-b"
+      />
+      <Bubble
+        size={180}
+        className="left-[35%] bottom-[-40px] bg-accent-coral/30 animate-bubble-c"
+      />
+
+      <div className="relative z-10 flex flex-col items-center gap-5 rounded-3xl border border-white/60 bg-white/70 px-10 py-9 shadow-elevated backdrop-blur-xl">
+        <Orbit pixelSize={72} />
+        <div className="text-center">
+          <p className="text-base font-semibold tracking-tight text-ink-primary">
+            {label}
+          </p>
+          <p className="mt-1 text-xs font-medium uppercase tracking-[0.18em] text-ink-muted">
+            One moment
+          </p>
+          <span className="sr-only">, please wait</span>
+        </div>
+      </div>
     </div>
+  );
+}
+
+function Bubble({ size, className }: { size: number; className: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={[
+        'pointer-events-none absolute rounded-full blur-3xl',
+        className,
+      ].join(' ')}
+      style={{ width: size, height: size }}
+    />
   );
 }
 
