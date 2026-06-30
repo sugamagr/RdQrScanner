@@ -23,6 +23,16 @@
 -- IDEMPOTENT: safe to re-run. Mirrors v10_round5_hardening.sql style.
 -- Paste verbatim into Supabase Studio SQL editor; the four sanity
 -- checks at the bottom should all return the expected counts.
+--
+-- TRANSACTION WRAPPED: begin/commit brackets the DDL so a crash or
+-- disconnect mid-migration rolls back partial state. ALTER TABLE +
+-- CREATE INDEX IF NOT EXISTS are both transactional in PostgreSQL so
+-- this is safe; without it, a partial apply could leave the columns
+-- present but the index missing (or vice versa) and the portal's
+-- "most recently pushed first" query would silently fall back to a
+-- sequential scan on every load (R6 oracle bg_c7a90c24 F19).
+
+begin;
 
 alter table public.devices
     add column if not exists last_sync_error text,
@@ -35,6 +45,8 @@ alter table public.devices
 -- canonical 2-5 phone scale).
 create index if not exists devices_owner_last_push_idx
     on public.devices (owner_id, last_push_at desc nulls last);
+
+commit;
 
 -- ---------------------------------------------------------------------
 -- SANITY CHECKS (run after applying; each must return what the comment

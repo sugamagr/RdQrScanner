@@ -3,6 +3,7 @@ import { PageHeader } from '../components/PageHeader';
 import { SkeletonCard } from '../components/Loader';
 import { fetchDevices } from '../lib/queries';
 import { formatDateTime, formatNumber, formatRelativeTime } from '../lib/format';
+import { useDocumentTitle } from '../lib/useDocumentTitle';
 import type { DeviceRow } from '../types/db';
 
 const ACTIVE_THRESHOLD_MS = 10 * 60 * 1000;
@@ -20,6 +21,7 @@ function syncHealth(device: DeviceRow): 'ok' | 'pending' | 'failing' {
 }
 
 export function DevicesPage() {
+  useDocumentTitle('Devices');
   const query = useQuery({
     queryKey: ['devices'],
     queryFn: fetchDevices,

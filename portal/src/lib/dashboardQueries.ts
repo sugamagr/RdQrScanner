@@ -212,11 +212,18 @@ export async function fetchDashboardStats(range: DashboardRange): Promise<Dashbo
   if (startIso != null) sessionsQuery.gte('end_time', startIso);
   if (endIso != null) sessionsQuery.lte('end_time', endIso);
 
+  // 50k row safety cap: the dashboard math allocates one Map entry
+  // per scanned rd_number row, and at the canonical 200 accounts/month
+  // scale even an All-Time range stays well under 10k. Cap protects
+  // against a pathological query (corrupt clock skew, accidental
+  // unbounded backfill) hanging the browser tab on a 100MB JSON
+  // response before the user can recover. R6 oracle bg_0d0dabca F4.
   const rdQuery = supabase
     .from('rd_numbers')
     .select('scanned_at, months_paid, number')
     .eq('owner_id', ownerId)
-    .is('deleted_at', null);
+    .is('deleted_at', null)
+    .limit(50000);
   if (startIso != null) rdQuery.gte('scanned_at', startIso);
   if (endIso != null) rdQuery.lte('scanned_at', endIso);
 

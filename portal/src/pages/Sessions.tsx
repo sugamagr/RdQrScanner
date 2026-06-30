@@ -9,8 +9,10 @@ import {
   type SessionsPage,
 } from '../lib/queries';
 import { formatDateTime, formatNumber, formatRelativeTime } from '../lib/format';
+import { useDocumentTitle } from '../lib/useDocumentTitle';
 
 export function SessionsPage() {
+  useDocumentTitle('Sessions');
   // Search state is persisted in URL ?q= so browser Back from
   // SessionDetail returns to the same filtered + scrolled view, and
   // the owner can bookmark or share a filtered link. Without this the

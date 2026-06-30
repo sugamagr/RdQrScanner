@@ -206,12 +206,25 @@ fun HomeScreen(
                         if (s == SyncPillState.SCHEMA_MISSING ||
                             s == SyncPillState.ERROR ||
                             s == SyncPillState.PENDING) {
+                            // On ERROR also surface the diagnostic cause
+                            // (truncated server message) so the operator
+                            // can distinguish weak-signal from auth-expired
+                            // from RLS-rejection without leaving Home.
+                            // Without this the pill says only "Sync error";
+                            // the actual reason was previously buried in
+                            // the Devices page diagnostics row.
+                            val reason = displayedSummary.lastErrorMessage
+                            val toastText = if (s == SyncPillState.ERROR && !reason.isNullOrBlank()) {
+                                "Retrying: ${reason.take(120)}"
+                            } else {
+                                "Retrying…"
+                            }
                             scope.launch {
                                 runCatching { app.syncScheduler.enqueuePush() }
                                     .onFailure { Log.w("HomeScreen", "enqueuePush failed on retry tap", it) }
                                 runCatching { app.syncScheduler.enqueuePull() }
                                     .onFailure { Log.w("HomeScreen", "enqueuePull failed on retry tap", it) }
-                                Toast.makeText(context, "Retrying…", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, toastText, Toast.LENGTH_LONG).show()
                             }
                         }
                     }

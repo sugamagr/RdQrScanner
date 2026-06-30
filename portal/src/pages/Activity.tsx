@@ -6,6 +6,7 @@ import { SkeletonCard } from '../components/Loader';
 import { fetchActivityFeed } from '../lib/queries';
 import type { ActivityKind, ActivityRow } from '../types/db';
 import { formatDateTime, formatNumber, formatRelativeTime } from '../lib/format';
+import { useDocumentTitle } from '../lib/useDocumentTitle';
 
 /**
  * Activity feed materialised client-side from scan_sessions, rd_numbers
@@ -66,6 +67,7 @@ const KIND_BADGE: Record<ActivityKind, { label: string; className: string }> = {
 };
 
 export function ActivityPage() {
+  useDocumentTitle('Activity');
   // Filter chips and page index live in the URL so browser Back from a
   // session-detail link returns to the same filtered view + page, and
   // the owner can deep-link to "Defaulters only, page 2" for triage.

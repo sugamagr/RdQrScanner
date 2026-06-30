@@ -190,7 +190,26 @@ fun AuthAwareRoot() {
                             // pushed first and then crashed, retry would generate a
                             // NEW UUID and produce an orphan cloud row that nothing
                             // ever cleans up (oracle round 6 WARNING #8).
-                            val cloudId = UUID.randomUUID().toString()
+                            //
+                            // Before generating a fresh UUID, ask the cloud if a
+                            // row already exists for (owner_id, device_model,
+                            // device_name). If yes, reuse its id so a re-install
+                            // on this same handset folds back into the original
+                            // device row instead of leaving a phantom. The lookup
+                            // is best-effort: a network failure falls through to
+                            // a fresh UUID rather than blocking first-run setup,
+                            // because the operator has no recourse to "fix" the
+                            // network from this screen and a duplicate row is
+                            // recoverable but a stuck first-run is not.
+                            // R6 oracle bg_0fe42fcd R6-01.
+                            val existingCloudId = runCatching {
+                                app.cloudClient.findExistingDevice(
+                                    ownerId = ownerId,
+                                    deviceModel = Build.MODEL,
+                                    deviceName = deviceName
+                                )?.id
+                            }.getOrNull()
+                            val cloudId = existingCloudId ?: UUID.randomUUID().toString()
                             val nowIso = IsoTime.fromEpochMillis(System.currentTimeMillis())
                             // Q3=B pre-release uses fallbackToDestructiveMigration which
                             // skips MIGRATION_5_6's device_settings row seed on fresh

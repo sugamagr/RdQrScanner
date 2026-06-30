@@ -1,0 +1,9 @@
+# Private single-owner portal behind Supabase auth.
+# We do not want search engines to crawl or index any surface
+# (including the sign-in page) because the URL space is intentionally
+# unlisted; indexing would attract probing without benefit.
+# Anything fetched here is either gated by Supabase Row Level Security
+# (no data leak risk) or is the public sign-in page (no useful content
+# to index).
+User-agent: *
+Disallow: /

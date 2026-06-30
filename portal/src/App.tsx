@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useAuth } from './lib/useAuth';
 import { useRealtimeSync } from './lib/useRealtimeSync';
 import { SignInPage } from './pages/SignIn';
@@ -31,12 +31,27 @@ export default function App() {
     return (
       <Routes>
         <Route path="/signin" element={<SignInPage />} />
-        <Route path="*" element={<Navigate to="/signin" replace />} />
+        <Route path="*" element={<DeepLinkSignInRedirect />} />
       </Routes>
     );
   }
 
   return <AuthedRoot />;
+}
+
+// Preserves the requested URL across the auth gate so a bookmarked
+// /sessions/<id> link returns the user to that detail page after
+// sign-in instead of dumping them at /sessions. SignIn.tsx already
+// reads location.state.from on successful auth.
+function DeepLinkSignInRedirect() {
+  const location = useLocation();
+  return (
+    <Navigate
+      to="/signin"
+      replace
+      state={{ from: `${location.pathname}${location.search}${location.hash}` }}
+    />
+  );
 }
 
 function AuthedRoot() {

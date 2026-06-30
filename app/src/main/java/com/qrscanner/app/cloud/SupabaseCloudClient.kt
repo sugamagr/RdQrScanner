@@ -12,6 +12,7 @@ import com.qrscanner.app.cloud.dto.ScanLotDto
 import com.qrscanner.app.cloud.dto.ScanSessionDto
 import com.russhwolf.settings.SharedPreferencesSettings
 import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.annotations.SupabaseInternal
 import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.auth.SessionManager
 import io.github.jan.supabase.auth.SettingsSessionManager
@@ -35,6 +36,7 @@ import io.github.jan.supabase.realtime.Realtime
 import io.github.jan.supabase.realtime.channel
 import io.github.jan.supabase.realtime.postgresChangeFlow
 import io.github.jan.supabase.realtime.realtime
+import io.ktor.client.plugins.HttpTimeout
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -90,10 +92,27 @@ class SupabaseCloudClient(
     // unsubscribe doesn't poison the next.
     private val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    @OptIn(SupabaseInternal::class)
     private val supabase: SupabaseClient = createSupabaseClient(
         supabaseUrl = supabaseUrl,
         supabaseKey = supabaseAnonKey
     ) {
+        // Bound the Ktor request lifecycle so a flaky cellular connection
+        // (the operator's normal field condition) can't hang a coroutine
+        // for 2+ minutes while the OS TCP stack waits out its default
+        // socket timeout. Without these caps a stuck upload pins the
+        // WorkManager job until the OS gives up, and the operator sees
+        // the pill stay on SYNCING indefinitely with no actionable
+        // signal. 30s request + 30s socket matches the spec §15.5.3
+        // "fail fast on weak signal so the retry path engages" intent.
+        // R6 oracle bg_cadc45d5 F1 verified missing.
+        httpConfig {
+            install(HttpTimeout) {
+                requestTimeoutMillis = 30_000
+                connectTimeoutMillis = 15_000
+                socketTimeoutMillis = 30_000
+            }
+        }
         install(Auth) {
             sessionManager = EncryptedSessionManager(context.applicationContext)
             autoLoadFromStorage = true
@@ -149,6 +168,38 @@ class SupabaseCloudClient(
                 select()
             }
             .decodeSingle()
+    }
+
+    override suspend fun findExistingDevice(
+        ownerId: String,
+        deviceModel: String?,
+        deviceName: String
+    ): DeviceDto? = runCloud {
+        // Match on (owner_id, device_model, device_name) so a re-install
+        // on the same physical handset (after an APK uninstall, factory
+        // reset, or process death + cold cache) reuses the original
+        // UUID instead of orphaning the prior row. We deliberately do
+        // NOT match on app_version or device_id (those change per-build
+        // and per-install respectively) — that would defeat the dedup.
+        // Soft-deleted phantoms are intentionally excluded so an
+        // operator who removed a phone from Devices doesn't have it
+        // silently resurrected by the next sign-in.
+        val rows = supabase.postgrest.from(TABLE_DEVICES)
+            .select {
+                filter {
+                    eq("owner_id", ownerId)
+                    eq("device_name", deviceName)
+                    if (deviceModel == null) {
+                        filter("device_model", FilterOperator.IS, null)
+                    } else {
+                        eq("device_model", deviceModel)
+                    }
+                    filter("deleted_at", FilterOperator.IS, null)
+                }
+                limit(1)
+            }
+            .decodeList<DeviceDto>()
+        rows.firstOrNull()
     }
 
     override suspend fun nextDisplayNumber(ownerId: String): Int = runCloud {

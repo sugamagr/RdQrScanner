@@ -8,12 +8,14 @@ import {
   fetchSession,
 } from '../lib/queries';
 import { formatDateTime, formatNumber, formatRelativeTime } from '../lib/format';
+import { useDocumentTitle } from '../lib/useDocumentTitle';
 import type { RdNumberRow, ScanLotRow, ScanSessionRow } from '../types/db';
 import { buildSessionXlsx, triggerDownload } from '../lib/xlsx';
 import { EditDefaulterDialog } from '../components/EditDefaulterDialog';
 
 export function SessionDetailPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
+  useDocumentTitle(sessionId ? `Session ${sessionId.slice(0, 8)}` : 'Session');
 
   const sessionQuery = useQuery({
     queryKey: ['session', sessionId],

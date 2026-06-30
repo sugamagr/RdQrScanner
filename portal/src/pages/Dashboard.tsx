@@ -44,6 +44,7 @@ import {
   type DashboardStats,
 } from '../lib/dashboardQueries';
 import { formatCompactCurrency, formatDateTime, formatNumber, formatRelativeTime } from '../lib/format';
+import { useDocumentTitle } from '../lib/useDocumentTitle';
 import type { ActivityKind } from '../types/db';
 
 const ExportPdfDialog = lazy(() =>
@@ -94,6 +95,7 @@ function rangeKey(r: DashboardRange): string {
 }
 
 export function DashboardPage() {
+  useDocumentTitle('Dashboard');
   const [range, setRange] = useState<DashboardRange>(12);
   const [exportOpen, setExportOpen] = useState(false);
   const { session } = useDashboardSession();

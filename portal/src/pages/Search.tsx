@@ -1,19 +1,50 @@
 import { useDeferredValue, useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader';
 import { searchRdNumbers, type RdSearchHit } from '../lib/queries';
 import { formatRelativeTime } from '../lib/format';
+import { useDocumentTitle } from '../lib/useDocumentTitle';
 
 export function SearchPage() {
-  const [input, setInput] = useState('');
+  useDocumentTitle('Search');
+  // URL is the source of truth for the query so a back-nav from
+  // /sessions/:id returns to the same filtered view and the result
+  // is bookmarkable/shareable. `input` lags `?q=` by the debounce
+  // window so per-keystroke renders don't push history entries.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlQuery = searchParams.get('q') ?? '';
+  const [input, setInput] = useState(urlQuery);
   const deferred = useDeferredValue(input);
-  const [debounced, setDebounced] = useState('');
+  const [debounced, setDebounced] = useState(urlQuery);
 
   useEffect(() => {
-    const handle = window.setTimeout(() => setDebounced(deferred.trim()), 220);
+    const handle = window.setTimeout(
+      () => setDebounced(deferred.trim()),
+      220,
+    );
     return () => window.clearTimeout(handle);
   }, [deferred]);
+
+  useEffect(() => {
+    setInput(urlQuery);
+    setDebounced(urlQuery);
+  }, [urlQuery]);
+
+  useEffect(() => {
+    const current = searchParams.get('q') ?? '';
+    if (debounced === current) return;
+    const next = new URLSearchParams(searchParams);
+    if (debounced.length >= 2) {
+      next.set('q', debounced);
+    } else {
+      next.delete('q');
+    }
+    // replace:true avoids one history entry per debounced keystroke;
+    // Back from the results must land at the prior route, not at an
+    // earlier letter of the query.
+    setSearchParams(next, { replace: true });
+  }, [debounced, searchParams, setSearchParams]);
 
   const query = useQuery({
     queryKey: ['rd-search', debounced],

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -21,12 +21,14 @@ import { ImportCsvDialog } from '../components/ImportCsvDialog';
 import { fetchAccounts, reactivateAccount } from '../lib/queries';
 import { useAuth } from '../lib/useAuth';
 import { formatNumber } from '../lib/format';
+import { useDocumentTitle } from '../lib/useDocumentTitle';
 import type { RdAccountRow } from '../types/db';
 
 type SortKey = 'name' | 'rd_number' | 'monthly_amount' | 'last_paid_through';
 type SortDir = 'asc' | 'desc';
 
 export function AccountsPage() {
+  useDocumentTitle('Accounts');
   const { user } = useAuth();
   const ownerId = user?.id ?? '';
   const qc = useQueryClient();
@@ -50,6 +52,12 @@ export function AccountsPage() {
   const reactivateInFlightRef = useRef(false);
 
   const [search, setSearch] = useState('');
+  // useDeferredValue lets React keep input typing on the high-priority
+  // render lane and re-run the filter+sort pipeline at low priority.
+  // Without it, every keystroke synchronously re-sorts every account
+  // (O(n log n) on full-table search) and visibly drops frames once
+  // the roster grows past a few hundred rows. Per R6 oracle bg_0d0dabca F2.
+  const deferredSearch = useDeferredValue(search);
   const [showInactive, setShowInactive] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
@@ -77,7 +85,7 @@ export function AccountsPage() {
   const inactiveCount = allAccounts.length - activeCount;
 
   const visibleAccounts = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = deferredSearch.trim().toLowerCase();
     const filtered = allAccounts.filter((account) => {
       if (!showInactive && !account.is_active) return false;
       if (!q) return true;
@@ -95,7 +103,7 @@ export function AccountsPage() {
       if (bv == null) return -1;
       return av > bv ? direction : -direction;
     });
-  }, [allAccounts, search, showInactive, sortKey, sortDir]);
+  }, [allAccounts, deferredSearch, showInactive, sortKey, sortDir]);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) {

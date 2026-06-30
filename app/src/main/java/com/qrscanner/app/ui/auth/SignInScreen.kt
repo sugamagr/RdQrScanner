@@ -36,6 +36,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -145,7 +148,15 @@ fun SignInScreen(
                 Text(
                     text = errorMessage,
                     style = MaterialTheme.typography.bodySmall.copy(color = ErrorRed),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        // liveRegion=Polite makes TalkBack announce the
+                        // freshly-rendered error without stealing focus
+                        // from the input the user just submitted. Without
+                        // this a low-vision user sees no audible feedback
+                        // after Submit; the silent re-enable of the CTA
+                        // is indistinguishable from a stalled request.
+                        .semantics { liveRegion = LiveRegionMode.Polite }
                 )
             }
 

@@ -47,6 +47,20 @@ interface CloudClient {
     suspend fun upsertDevice(device: DeviceDto): DeviceDto
 
     /**
+     * Looks up a non-deleted device row owned by [ownerId] matching the
+     * given [deviceModel] + [deviceName] pair. Used by first-run setup
+     * to dedup a re-install on the same physical handset (otherwise
+     * every sign-in spawns a fresh UUID row and the devices roster
+     * accumulates stale phantoms forever). Returns null when no match.
+     * Spec amendment: R6 oracle bg_0fe42fcd R6-01 device-row growth bound.
+     */
+    suspend fun findExistingDevice(
+        ownerId: String,
+        deviceModel: String?,
+        deviceName: String
+    ): DeviceDto?
+
+    /**
      * Server-assigned display number for a brand-new session. Wrapped in a
      * Postgres advisory lock so two concurrent phones can never collide.
      * Falls back to a local tentative number when offline — the push
