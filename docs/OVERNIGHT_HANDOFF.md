@@ -16,6 +16,8 @@ a97a229  feat(portal+phone): dashboard, designer loader, header polish
 4e8a3f8  feat(portal+phone): R1 QC fixes + dashboard rewrite + PDF export
 eb789c8  fix(qc-r2): money weighted formula, range UTC/local, a11y contrast, phone wording
 af9ce74  fix(qc-r3): owner_id sweep, TOCTOU race, empty-state CTAs, a11y polish
+242b9d0  fix(auth): cross-account cache leak on owner-swap + realtime setAuth on token refresh
+e3cacd2  fix(qc-r4): months_paid validation, retry buttons, Hindi accuracy + clip guard
 ```
 
 (All earlier commits from the cloud-sync / dashboard / activity / device
@@ -24,8 +26,9 @@ diagnostics waves are intact on the branch and remain the truth.)
 ### Live deploy
 
 - **Portal:** https://rd-scanner-portal.pages.dev
-  Latest deploy hash at handoff time: `6001eed3` (Cloudflare Pages).
-  Earlier deploys this wave: `43af8938`, `19d27bd1`, `b566c4b1`.
+  Latest deploy hash at handoff time: `bd1bef5c` (Cloudflare Pages).
+  Earlier deploys this wave: `43af8938`, `19d27bd1`, `b566c4b1`,
+  `6001eed3`, `be4a8666`.
 - **Phone APK:** Built at `app/build/outputs/apk/debug/app-debug.apk`.
   Wireless ADB was disconnected after a long gradle build, so the install
   needs to be done by you when you wake up — see the action list below.
@@ -206,43 +209,81 @@ and phone UI/UX polish. All triaged and shipped. Headline fixes:
   scan success ScanFeedbackCard now `scaleIn(0.6f, spring
   MediumBouncy)` for a satisfying punch-in microinteraction.
 
-### Round 4 (status: in flight, 5 oracles in parallel)
+### Round 4 (status: shipped — commits `242b9d0` + `e3cacd2`)
 
-Audit angles (different from R1-R3, no duplication):
-- Portal cache + signout + race conditions (`bg_1afddb5e`):
-  multi-tab signout, sign-back-in cross-owner cache leak, Suspense
-  + realtime race, refresh-token mid-session, visibility-change
-  dedup, AppShell title-click invalidate burst.
-- Phone scan path + camera lifecycle + memory (`bg_dca03041`):
-  CameraX bind/unbind across lifecycle, ML Kit barcode scanner
-  instance management, ImageProxy.close() leaks, bitmap pressure on
-  long sessions, coroutine scope leaks, AlertDialog / BottomSheet
-  rapid-fire races, SoundPool/Vibrator cleanup.
-- Cloud schema RLS deeper sweep (`bg_f9b79008`): RLS bypass via
-  JOIN/EXISTS/SECURITY DEFINER, cross-table INSERT policy
-  EXISTS check, clamp_updated_at on UPDATE not just INSERT,
-  next_display_number race under concurrent inserts, realtime
-  publication RLS interaction, search_path poisoning, JSON length
-  caps.
-- Observability + error UX (`bg_095fe139`): catch-block silence,
-  React error boundary, TanStack error surfaces, WorkManager
-  retry visibility, last_sync_error rendering, Toast verbosity,
-  console.log leakage, secondary-error shadowing.
-- Hindi typography + bilingual content depth (`bg_7c1cfb6c`):
-  Devanagari glyph coverage, conjuncts (युक्ताक्षर), Hindi line
-  spacing, tab label clipping on 360dp, Devanagari numerals vs
-  Latin in en-IN, TalkBack pronunciation, translation
-  naturalness audit of every Hindi bullet.
+Five oracles ran. Triaged and shipped. Headline fixes:
+- **Cross-account cache leak on owner-swap** (`242b9d0`): the
+  realtime channel kept its JWT static across token-refresh; if the
+  refresh succeeded mid-session the channel would silently go blind
+  for the full hour. Added an inner `onAuthStateChange` listener
+  that calls `supabase.realtime.setAuth(next.access_token)` on every
+  `TOKEN_REFRESHED`. Also closed a same-browser owner-swap window
+  in `auth.tsx` by tracking `user.id` (not `access_token`) so a
+  cross-tab storage swap forces `qc.clear()`.
+- **Cloud months_paid validation** (`e3cacd2`): cloud schema enforces
+  `CHECK (months_paid BETWEEN 1 AND 36)`, but a buggy local
+  mutation could produce 0 or 37 and the push would silently fail
+  with PostgrestException 23514, retrying 8× until SYNC_ABANDONED.
+  Added `require(monthsPaid in 1..36)` in `RdNumberMapper` for
+  both directions (toDto + toEntity).
+- **Hindi accuracy** (`e3cacd2`): `HowItWorksScreen` had two bugs.
+  The Hindi defaulter description leaked the code identifier
+  `(months_paid > 1)` (operators do not read column names), and
+  the Paper-book-is-truth bullet used the literal translation
+  `'पेपर बुक सत्य है'` instead of the idiom operators actually say
+  (`पासबुक ही असली रिकॉर्ड है`). Both replaced. Title gains
+  `maxLines=1 + TextOverflow.Ellipsis` to avoid clip on 360dp.
+- **Retry buttons** (`e3cacd2`): `Accounts.tsx`, `SessionDetail.tsx`,
+  and `Search.tsx` error states gained a Retry button with 44dp
+  touch target + danger-ring focus; matches the Devices.tsx pattern.
+  Eliminates "reload the page" as the only recovery path.
+- **Phone `HomeScreen` retry logging**: the sync-pill retry tap was
+  swallowing enqueue failures in two `catch (_: Throwable) {}` blocks.
+  Replaced with `runCatching {…}.onFailure { Log.w(…) }` so transient
+  failures land in logcat.
 
-Results will be triaged and shipped before morning.
+Documented FPs / scale-FPs / broader-scope items deferred to a future
+sprint: realtime channel-status banner (LOW at 1 portal owner),
+Devanagari font bundling, AppInfo Hindi tab, contentDescription
+stringResource sweep, Hindi Toast LENGTH_LONG, v12 text-length CHECK
+migration, CSV+realtime double-fetch (scale-FP), title-click
+invalidate burst (scale-FP). bg_dca03041 (Phone scan/camera) timed
+out in R4 and has been re-launched as part of R5.
 
-### Rounds 5-7
+### Round 5 (status: in flight, 5 oracles in parallel)
+
+Audit angles (different from R1-R4, no duplication):
+- Phone scan + camera + memory (`bg_b6ea6087` — re-launch of the
+  R4 task that timed out): CameraX bind/unbind, ML Kit BarcodeScanner
+  lifecycle, ImageProxy.close() leaks, bitmap pressure, coroutine
+  scope, AlertDialog rapid-fire, SoundPool cleanup, recompose cost
+  on scaleIn animation.
+- Phone Room migrations + data integrity (`bg_559ee8fc`): all
+  migrations 1→10, schema-export vs migration drift,
+  fallbackToDestructiveMigration policy, foreign-key cascade
+  alignment with cloud schema, composite-index coverage, mid-
+  migration crash recovery.
+- Portal dashboard PDF + Recharts deep edge (`bg_78192f17`):
+  empty/single-point chart degeneracy, Recharts in Suspense with
+  0×0 initial dimension, donut path math, react-pdf font subset
+  for ₹ glyph, very long account name overflow, Promise.all
+  partial failure, mobile Safari blob download.
+- Phone WorkManager + push retry + circuit breaker (`bg_2eaadc18`):
+  backoff math, NetworkType selection, 429 Retry-After, idempotency
+  keys, push order preservation, SYNC_ABANDONED recovery, auth-
+  token expiry mid-push, unique-work policy.
+- Portal forms + dialogs deep state machine (`bg_e2aaa5bf`): focus
+  trap across stacked modals, Enter-key submit on multi-line,
+  controlled-input optimistic flicker, monthly_amount input
+  validation, autocomplete attributes, CSV regression-confirm flow
+  back-button orphan, emoji/RTL in name field.
+
+### Rounds 6-7
 
 Will execute the same pattern. Planned angles:
-- R5: portal accessibility + reduced-motion + WCAG depth pass.
-- R6: phone migration test harness audit + data integrity invariants.
+- R6: phone Hindi a11y + TalkBack + bilingual deeper pass + portal i18n.
 - R7: cold-cache first-paint + final sweep over anything
-  surfaced in R4-R6.
+  surfaced in R5-R6.
 
 If a round flags a cloud schema change, the migration file appears
 in `cloud/migrations/vNN_*.sql` with a sanity-check block at the
