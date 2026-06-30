@@ -20,6 +20,8 @@ af9ce74  fix(qc-r3): owner_id sweep, TOCTOU race, empty-state CTAs, a11y polish
 e3cacd2  fix(qc-r4): months_paid validation, retry buttons, Hindi accuracy + clip guard
 ca91460  fix(qc-r5): PDF glyph + currency, dialog drag-release, abandon notify, camera unbind
 ad66b4e  fix(qc-r6): HTTP timeouts, device dedup, deep-link recovery, URL search, a11y, SEO
+72b5964  fix(qc-r7): scan a11y blocker, Back/Undo/Save/End localization, DeviceRow deleted_at, first-paint shell, edit-collision banner
+e8f2fc1  feat(cloud): v12 text-length CHECK + redundant index cleanup (optional, not gating R7)
 ```
 
 (All earlier commits from the cloud-sync / dashboard / activity / device
@@ -28,20 +30,26 @@ diagnostics waves are intact on the branch and remain the truth.)
 ### Live deploy
 
 - **Portal:** https://rd-scanner-portal.pages.dev
-  Latest deploy hash at handoff time: `debae220` (Cloudflare Pages).
-  Earlier deploys this wave: `dc22144a`, `bd1bef5c`, `43af8938`,
-  `19d27bd1`, `b566c4b1`, `6001eed3`, `be4a8666`.
+  Latest deploy hash at handoff time: `2852d67a` (Cloudflare Pages,
+  ships the R7 first-paint shell + AccountEditDialog stale banner
+  + DeviceRow deleted_at type).
+  Earlier deploys this wave: `debae220`, `dc22144a`, `bd1bef5c`,
+  `43af8938`, `19d27bd1`, `b566c4b1`, `6001eed3`, `be4a8666`.
 - **Phone APK:** Built at `app/build/outputs/apk/debug/app-debug.apk`.
   Wireless ADB was disconnected after a long gradle build, so the install
   needs to be done by you when you wake up — see the action list below.
 
 ### Cloud schema
 
-- No new SQL migrations were paste-required this wave. The v11 device
-  diagnostics SQL you applied yesterday is still the latest live schema.
-- If QC R7 uncovered any migration needs they would be in
-  `cloud/migrations/vNN_*.sql` with a header docstring telling you what to
-  paste. Check that directory for any new files before continuing.
+- No new SQL migrations are paste-required for R7. The v11 device
+  diagnostics SQL you applied yesterday is still the latest live
+  schema and nothing R7-shipped depends on a newer one.
+- `cloud/migrations/v12_text_length_index_hardening.sql` was drafted
+  in commit `e8f2fc1` and pushed, but is **OPTIONAL**. It banks two
+  R4/R6 deferred hardening items (text-length CHECKs + redundant
+  single-column owner_id index cleanup) so the paste-ready SQL
+  exists when you want it. Apply at your discretion; the live cloud
+  works correctly without it.
 
 ---
 
@@ -591,19 +599,24 @@ removed) so fresh installs match upgraded installs.
    - Click Export PDF → toggle a few sections → generate
    - Try every range chip including Custom
 
-3. **Check for new SQL migrations**:
+3. **OPTIONAL — apply v12 cloud hardening** (`e8f2fc1`):
    ```bash
-   ls -la /Users/apple/Documents/RdQrScanner/cloud/migrations/
+   cat /Users/apple/Documents/RdQrScanner/cloud/migrations/v12_text_length_index_hardening.sql
    ```
-   If any `v12_*.sql` or later is present, open it, read the header
-   comment for what it does, paste into Supabase Studio, and run the
-   sanity-check block at the bottom.
+   Paste the file into Supabase Studio's SQL editor and run. The
+   sanity-check block at the bottom verifies each new CHECK exists,
+   no existing row violates them, the 3 redundant single-column
+   owner_id indexes are gone, and the subsuming composite indexes
+   are still present. Idempotent — safe to re-paste. Skip if you
+   don't want to touch the live schema; nothing in R7 ship depends
+   on v12.
 
 4. **Check QC R2-R7 results**: stitched into commits already.
    Look at `git log --oneline feat/cloud-sync` for everything after
    `4e8a3f8` — those are the QC fix waves (eb789c8 R2, af9ce74 R3,
-   plus whatever R4-R7 land before morning). Each commit body
-   includes the oracle finding IDs (bg_*) and a short rationale.
+   e3cacd2 R4, ca91460 R5, ad66b4e R6, 72b5964 R7, e8f2fc1 v12).
+   Each commit body includes the oracle finding IDs (bg_*) and a
+   short rationale.
 
 5. **Audit deferred FPs**: every false-positive a round found is
    documented inline in this handoff or in the relevant commit
