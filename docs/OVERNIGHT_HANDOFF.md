@@ -18,6 +18,7 @@ eb789c8  fix(qc-r2): money weighted formula, range UTC/local, a11y contrast, pho
 af9ce74  fix(qc-r3): owner_id sweep, TOCTOU race, empty-state CTAs, a11y polish
 242b9d0  fix(auth): cross-account cache leak on owner-swap + realtime setAuth on token refresh
 e3cacd2  fix(qc-r4): months_paid validation, retry buttons, Hindi accuracy + clip guard
+ca91460  fix(qc-r5): PDF glyph + currency, dialog drag-release, abandon notify, camera unbind
 ```
 
 (All earlier commits from the cloud-sync / dashboard / activity / device
@@ -26,9 +27,9 @@ diagnostics waves are intact on the branch and remain the truth.)
 ### Live deploy
 
 - **Portal:** https://rd-scanner-portal.pages.dev
-  Latest deploy hash at handoff time: `bd1bef5c` (Cloudflare Pages).
-  Earlier deploys this wave: `43af8938`, `19d27bd1`, `b566c4b1`,
-  `6001eed3`, `be4a8666`.
+  Latest deploy hash at handoff time: `dc22144a` (Cloudflare Pages).
+  Earlier deploys this wave: `bd1bef5c`, `43af8938`, `19d27bd1`,
+  `b566c4b1`, `6001eed3`, `be4a8666`.
 - **Phone APK:** Built at `app/build/outputs/apk/debug/app-debug.apk`.
   Wireless ADB was disconnected after a long gradle build, so the install
   needs to be done by you when you wake up — see the action list below.
@@ -250,40 +251,165 @@ migration, CSV+realtime double-fetch (scale-FP), title-click
 invalidate burst (scale-FP). bg_dca03041 (Phone scan/camera) timed
 out in R4 and has been re-launched as part of R5.
 
-### Round 5 (status: in flight, 5 oracles in parallel)
+### Round 5 (status: shipped — commit `ca91460`)
 
-Audit angles (different from R1-R4, no duplication):
-- Phone scan + camera + memory (`bg_b6ea6087` — re-launch of the
-  R4 task that timed out): CameraX bind/unbind, ML Kit BarcodeScanner
-  lifecycle, ImageProxy.close() leaks, bitmap pressure, coroutine
-  scope, AlertDialog rapid-fire, SoundPool cleanup, recompose cost
-  on scaleIn animation.
-- Phone Room migrations + data integrity (`bg_559ee8fc`): all
-  migrations 1→10, schema-export vs migration drift,
-  fallbackToDestructiveMigration policy, foreign-key cascade
-  alignment with cloud schema, composite-index coverage, mid-
-  migration crash recovery.
-- Portal dashboard PDF + Recharts deep edge (`bg_78192f17`):
-  empty/single-point chart degeneracy, Recharts in Suspense with
-  0×0 initial dimension, donut path math, react-pdf font subset
-  for ₹ glyph, very long account name overflow, Promise.all
-  partial failure, mobile Safari blob download.
-- Phone WorkManager + push retry + circuit breaker (`bg_2eaadc18`):
-  backoff math, NetworkType selection, 429 Retry-After, idempotency
-  keys, push order preservation, SYNC_ABANDONED recovery, auth-
-  token expiry mid-push, unique-work policy.
-- Portal forms + dialogs deep state machine (`bg_e2aaa5bf`): focus
-  trap across stacked modals, Enter-key submit on multi-line,
-  controlled-input optimistic flicker, monthly_amount input
-  validation, autocomplete attributes, CSV regression-confirm flow
-  back-button orphan, emoji/RTL in name field.
+Five oracles ran across phone scan/camera, Room migrations, dashboard
+PDF + Recharts edges, WorkManager retry, and portal forms + dialogs.
+Headline fixes:
 
-### Rounds 6-7
+- **PDF currency glyph** (bg_78192f17 F10): Helvetica is one of the 14
+  standard PDF Type1 fonts and does not include `U+20B9` — every ₹ in
+  the export was rendering as a missing-glyph box. `pdfExport.ts` now
+  registers Noto Sans (latin-400 + latin-700) via Font.register with a
+  module-level latch so it only registers once. Font.registerHyphenation
+  Callback returns the word unsplit to avoid mid-word hyphenation.
+- **PDF donut full-circle degeneracy** (bg_78192f17 F8): when a single
+  source held 100% of the slice, the SVG arc start and end points
+  coincided and the slice collapsed to nothing. Capped fully-swept
+  fraction (>= 0.9999) at `rawEnd - 0.002` rad; the 0.002 rad gap is
+  invisible visually but breaks the degeneracy.
+- **PDF long account name overflow** (bg_78192f17 F11): the
+  top-defaulters table's flex:2 name cell was ~120pt at A4; a 100-char
+  name pushed the Months column off the page. `truncatePdfName`
+  caps at 40 chars with ellipsis.
+- **Dashboard money formula resilience** (bg_78192f17 F13): replaced
+  `Promise.all` with `Promise.allSettled` across all 6 parallel reads.
+  Two helpers (`unwrapCritical` for accounts + rdNumbers that drive
+  money math, `unwrapOptional` for devices + sessions + earliest +
+  activity feed) separate hard-failure from graceful-degradation paths.
+  Activity feed has a different return shape (ActivityRow[] direct, not
+  Supabase envelope) so handled inline.
+- **Compact ₹ on KPIs** (bg_78192f17 F6): KPI tiles `text-2xl` was
+  truncating `₹1,23,45,678` on 2-col mobile grid. New `format.ts`
+  helper `formatCompactCurrency(n)` collapses to lakh/crore: sub-lakh
+  full precision, ≥1L → `₹NL`, ≥1Cr → `₹NCr` with 2-decimal precision
+  preserved up to crore. 6 KPI tiles converted: Collected this month,
+  Book amount, Money collected (range), Avg ticket, Current vs default
+  (₹).
+- **Single-point chart quirk** (bg_78192f17 F1): Recharts AreaChart with
+  type="monotone" and exactly 1 data point produces a zero-width fill
+  that's invisible. New `ChartSingleValue` component renders a labeled
+  value card when `data.length === 1`. Wired into MoneyTrendCard +
+  SessionTrendCard between the empty branch and the AreaChart.
+- **MoneyTrend legend wording** (bg_78192f17 F18): "Total collected" /
+  "From defaulters" implied the two series didn't overlap. Renamed to
+  "All collections" / "Defaulter portion" with the subtitle
+  `subset` framing.
+- **5 dialog drag-release data-loss** (bg_e2aaa5bf F1): every dialog's
+  backdrop dismissed on `mouseup` if the user dragged a slider or
+  selected text and released over the backdrop. New `useBackdropClose`
+  hook tracks whether the mousedown originated on the backdrop and
+  only dismisses when BOTH mousedown AND click landed on the backdrop
+  element. Applied to EditDefaulterDialog, DeleteOrInactivateDialog,
+  ExportPdfDialog, ImportCsvDialog, AccountEditDialog.
+- **Nested alertdialog ARIA fix** (bg_e2aaa5bf F2): the
+  regression-confirm sub-block inside ImportCsvDialog used
+  `role="alertdialog"` inside an outer `role="dialog" aria-modal="true"`.
+  Nested modal semantics confuses screen readers. Changed to
+  `role="alert"` (live-region announcement without focus-trap conflict).
+- **AccountEditDialog validation a11y** (bg_e2aaa5bf F3): Name + Amount
+  inputs gained `aria-invalid` + `aria-describedby` wired to id'd
+  `<p id="account-edit-{field}-error">` elements so screen readers
+  announce validation errors when the input is focused.
+- **CameraX leak on rapid pop/push** (bg_b6ea6087 F1): RDScannerScreen
+  DisposableEffect was not calling `unbindAll()` on dispose. Rapid
+  screen pop/push triggered "Use case already bound" warnings + Preview
+  surface leak. Fixed with `cameraProviderFuture.get().unbindAll()`
+  in onDispose, and switched the inner ToneGenerator release to
+  `runCatching` for consistency.
+- **Permission permanent-denial dead-end** (bg_b6ea6087 F11): when the
+  operator denies camera permission permanently, Android suppresses the
+  system dialog entirely. The "Go Back" button gave no recovery path.
+  Replaced with "Open Settings" button that fires
+  `Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)` via
+  runCatching.
+- **rd_accounts.isActive default** (bg_559ee8fc F3): MIGRATION_5_6
+  added `DEFAULT 1`, but Room's fresh-install CREATE TABLE didn't,
+  causing schema-export hash drift. Added
+  `@ColumnInfo(defaultValue = "1")` to the field. KSP regenerated
+  10.json with the matching createSql.
+- **SYNC_ABANDONED operator notification** (bg_2eaadc18 F7): the
+  circuit-breaker silently dropped a row after 8 push failures with
+  no operator-visible cue. The pill returned to OK because no DIRTY
+  rows remained, but the abandoned row was permanently excluded from
+  the cloud cycle. New `notifier.notifySyncAbandoned(rowKind,
+  contextLabel)` fires on all 4 abandon sites (rd_account, scan_session,
+  scan_lot, rd_number) with BigTextStyle body. Distinct
+  `NOTIF_ID_ABANDONED` so it doesn't collapse with the transient
+  error notification. String resources in both en + hi.
+- **SyncStatus backoff cap docstring** (bg_2eaadc18 F1): SYNC_ERROR
+  docstring corrected from "capped at 4h" to "capped at
+  MAX_BACKOFF_MILLIS of 5h". The prior text was a common doc-error
+  citation; WorkManager's actual cap is 5h.
 
-Will execute the same pattern. Planned angles:
-- R6: phone Hindi a11y + TalkBack + bilingual deeper pass + portal i18n.
-- R7: cold-cache first-paint + final sweep over anything
-  surfaced in R5-R6.
+Documented FPs and scale-FPs (deferred per scale at 2-5 phones /
+30 sessions/year): bg_78192f17 F2/F3/F4/F5/F7/F9/F12/F14-F19 PASS,
+F20 (iOS Safari blob) deferred (operator is desktop-primary);
+bg_2eaadc18 F3 (no 429 Retry-After parsing — 23 writes/day vs
+500 req/day free tier), F12 (Room migration lock vs sync — Room
+guarantees migration-locked DB), F14 (retry/failure/abandoned not
+in sync_events — cross-system schema impact, deferred); bg_559ee8fc
+F1/F6 (missing schema exports 1.json + 5.json — FP at pre-release
+no-v1-installs-in-wild + Q3=B); bg_b6ea6087 F2-F10/F12-F18 PASS;
+bg_e2aaa5bf F4/F15/F16/F18 LOW polish skipped.
+
+### Round 6 (status: in flight, 5 oracles in parallel)
+
+Audit angles (different from R1-R5, no duplication):
+
+- Phone offline + connectivity (`bg_cadc45d5`): airplane mode mid-push,
+  no-network startup, weak signal partial response, DNS failure,
+  captive portal, network-type switch mid-operation, offline queue
+  durability, pull-during-offline, realtime channel reconnect, 5-min
+  poll backoff, WorkManager NetworkType.CONNECTED vs UNMETERED,
+  token refresh during offline, conflict resolution when device A
+  edited offline + device B edited same row online, HomeScreen +
+  Devices offline banner discoverability, sync_events table durability.
+- Portal large-data behavior (`bg_0d0dabca`): Sessions/SessionDetail
+  with 500+ sessions, Accounts with 10k+ rows, Activity 100+ events,
+  Dashboard with 60-month range, Search with 10k+ rd_numbers,
+  TanStack Query cache growth at scale, realtime invalidation cost
+  when 10k accounts cached, bundle re-execution cost, memory
+  footprint, sort+filter perf, pagination sizing, Recharts batching,
+  ImportCsvDialog with 5k-row CSV, ExportPdfDialog generation hang
+  risk.
+- Cloud migration safety + rollback (`bg_c7a90c24`): v11 idempotency
+  on accidental re-paste, live-migration ACCESS EXCLUSIVE lock
+  contention, ALTER TABLE add column NOT NULL DEFAULT rewrite cost,
+  Q3=B contract leakage in cloud-side semantics, RLS policy drift
+  across 5 tables, supabase_realtime publication scope + ops,
+  next_display_number race + owner-scoping, search_path safety in
+  SECURITY DEFINER functions, backup/restore FK preservation, v12
+  text-length CHECK readiness, timestamptz UTC, unused/missing
+  indexes, postgres_changes channel type correctness.
+- Phone auth + token + sign-out (`bg_0fe42fcd`): sign-in flow,
+  sign-out cleanup completeness across WorkManager + realtime + Room
+  + caches + Supabase SDK, token refresh strategy on 1h JWT expiry,
+  token storage hardness (Keystore vs SharedPreferences), process
+  death cold-start, token leak via logcat, multi-account on same
+  device, sign-out during in-flight push, biometric prompt,
+  recover-password, device row creation race, anonymous sign-in,
+  network errors during sign-in, sign-in screen a11y. User-accepted
+  behavior to verify intentional: same account signed in multiple
+  times creates new device entries (no reconciliation) — document
+  stale-device-row growth bound.
+- Portal SEO + meta + history (`bg_ee635610`): index.html title/
+  favicon/theme-color/viewport/lang/description, OG/Twitter card meta
+  for share, browser back button from /sessions/:id, AppShell title
+  click refetch vs back-button noop, URL persistence of dashboard
+  range, auth-gate deep-link UX, /sessions/<unknown-uuid> 404 UX,
+  catch-all behavior, favicons inventory, PWA-readiness manifest
+  theme-color, page transition FOUC, robots.txt/sitemap.xml private-
+  app stance, HTML lang + skip-to-main + landmark roles, useNavigate
+  replace vs push history pollution, Search URL state.
+
+### Round 7 (planned)
+
+Final cleanup pass. Will pick fresh angles based on what R5+R6
+surface to avoid duplication. Likely candidates:
+- Portal i18n readiness + phone Hindi a11y + TalkBack deep dive
+- Cold-cache first-paint + perceived-latency budget
+- Final regression sweep across R1-R6 patches
 
 If a round flags a cloud schema change, the migration file appears
 in `cloud/migrations/vNN_*.sql` with a sanity-check block at the
