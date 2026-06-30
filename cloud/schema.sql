@@ -36,7 +36,15 @@ create table if not exists public.devices (
     last_push_at    timestamptz,
     created_at      timestamptz not null default now(),
     updated_at      timestamptz not null default now(),
-    deleted_at      timestamptz
+    deleted_at      timestamptz,
+    -- v12 length caps: realistic operator input is <30 chars for both,
+    -- last_sync_error is truncated phone-side to 240 chars (DEVICE_ERROR_MESSAGE_MAX_CHARS).
+    -- 16x headroom catches corrupt pushes without ever firing on
+    -- a well-behaved phone.
+    constraint devices_device_name_max_len
+        check (char_length(device_name) <= 100),
+    constraint devices_last_sync_error_max_len
+        check (last_sync_error is null or char_length(last_sync_error) <= 4000)
 );
 -- Idempotent column adds for upgrades from earlier schema versions
 -- (v9 deleted_at, v11 sync diagnostics).
@@ -62,7 +70,9 @@ create table if not exists public.scan_sessions (
     default_count     int not null default 0,
     created_at        timestamptz not null default now(),
     updated_at        timestamptz not null default now(),
-    deleted_at        timestamptz
+    deleted_at        timestamptz,
+    constraint scan_sessions_operator_name_max_len
+        check (operator_name is null or char_length(operator_name) <= 100)
 );
 create index if not exists scan_sessions_owner_endtime_idx
     on public.scan_sessions (owner_id, end_time desc);
@@ -104,9 +114,10 @@ create table if not exists public.scan_lots (
 alter table public.scan_lots add column if not exists deleted_at timestamptz;
 create index if not exists scan_lots_session_lotnum_idx
     on public.scan_lots (session_id, lot_number);
-create index if not exists scan_lots_owner_idx
-    on public.scan_lots (owner_id);
 -- Same pull-cycle + deletion-filter rationale as scan_sessions above.
+-- The composite (owner_id, updated_at) also serves equality-only
+-- owner_id lookups, so no separate single-column owner_id index is
+-- needed (v12 cleanup).
 create index if not exists scan_lots_owner_updatedat_idx
     on public.scan_lots (owner_id, updated_at);
 create index if not exists scan_lots_owner_deletedat_idx
@@ -141,8 +152,9 @@ exception when undefined_column then null;
 end $$;
 create index if not exists rd_numbers_lot_position_idx
     on public.rd_numbers (lot_id, position);
-create index if not exists rd_numbers_owner_idx
-    on public.rd_numbers (owner_id);
+-- Composite (owner_id, updated_at) below covers equality-only
+-- owner_id lookups too; no separate single-column owner_id index
+-- needed (v12 cleanup).
 create index if not exists rd_numbers_owner_number_idx
     on public.rd_numbers (owner_id, number);
 -- Pull-cycle hot path + deletion filter. Same rationale as
@@ -412,11 +424,23 @@ create table if not exists public.rd_accounts (
     created_at              timestamptz not null default now(),
     updated_at              timestamptz not null default now(),
     deleted_at              timestamptz,
-    primary key (owner_id, rd_number)
+    primary key (owner_id, rd_number),
+    constraint rd_accounts_name_max_len
+        check (char_length(name) <= 200),
+    -- YYYY-MM strict format: lexical compare must equal chronological
+    -- for the `last_paid_through < currentMonth` guard in phone DAO
+    -- and portal dashboardQueries to stay correct. `2025-3` or `25-03`
+    -- would silently sort wrong and break monotonic last-paid math.
+    constraint rd_accounts_last_paid_through_format
+        check (
+            last_paid_through is null
+            or last_paid_through ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'
+        )
 );
 
-create index if not exists rd_accounts_owner_idx
-    on public.rd_accounts (owner_id);
+-- Composite (owner_id, updated_at) below covers equality-only
+-- owner_id lookups too; no separate single-column owner_id index
+-- needed (v12 cleanup).
 create index if not exists rd_accounts_owner_active_idx
     on public.rd_accounts (owner_id, is_active);
 create index if not exists rd_accounts_name_trgm_idx
