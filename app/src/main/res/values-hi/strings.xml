@@ -24,6 +24,8 @@
         <item quantity="one">%d सेशन अटका है · रिट्राई के लिए टैप करें</item>
         <item quantity="other">%d सेशन अटके हैं · रिट्राई के लिए टैप करें</item>
     </plurals>
+    <string name="notif_sync_abandoned_title">सिंक पर ध्यान दें</string>
+    <string name="notif_sync_abandoned_body">%2$s का एक %1$s कई कोशिशों के बाद भी सिंक नहीं हो पाया। ऐप खोलकर रिट्राई करें या सपोर्ट से संपर्क करें।</string>
     <plurals name="lotreview_months_label">
         <item quantity="one">%d महीना</item>
         <item quantity="other">%d महीने</item>

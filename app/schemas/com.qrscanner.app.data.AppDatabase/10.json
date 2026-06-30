@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 10,
-    "identityHash": "2fddb29165687fa6e32605dfbee8be71",
+    "identityHash": "40d101b6e071e3decb04324423453c69",
     "entities": [
       {
         "tableName": "scan_sessions",
@@ -567,7 +567,7 @@
       },
       {
         "tableName": "rd_accounts",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`rdNumber` TEXT NOT NULL, `name` TEXT NOT NULL, `monthlyAmount` INTEGER NOT NULL, `lastPaidThrough` TEXT, `source` TEXT NOT NULL, `isActive` INTEGER NOT NULL, `accountOpenedDate` TEXT, `accountClosingDate` TEXT, `ownerId` TEXT, `cloudId` TEXT, `syncStatus` TEXT NOT NULL, `updatedAt` INTEGER NOT NULL, `syncedAt` INTEGER, `lastSyncError` TEXT, `deletedAt` INTEGER, `retryCount` INTEGER NOT NULL, `lastEditorDeviceId` TEXT, PRIMARY KEY(`rdNumber`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`rdNumber` TEXT NOT NULL, `name` TEXT NOT NULL, `monthlyAmount` INTEGER NOT NULL, `lastPaidThrough` TEXT, `source` TEXT NOT NULL, `isActive` INTEGER NOT NULL DEFAULT 1, `accountOpenedDate` TEXT, `accountClosingDate` TEXT, `ownerId` TEXT, `cloudId` TEXT, `syncStatus` TEXT NOT NULL, `updatedAt` INTEGER NOT NULL, `syncedAt` INTEGER, `lastSyncError` TEXT, `deletedAt` INTEGER, `retryCount` INTEGER NOT NULL, `lastEditorDeviceId` TEXT, PRIMARY KEY(`rdNumber`))",
         "fields": [
           {
             "fieldPath": "rdNumber",
@@ -602,7 +602,8 @@
             "fieldPath": "isActive",
             "columnName": "isActive",
             "affinity": "INTEGER",
-            "notNull": true
+            "notNull": true,
+            "defaultValue": "1"
           },
           {
             "fieldPath": "accountOpenedDate",
@@ -730,7 +731,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '2fddb29165687fa6e32605dfbee8be71')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '40d101b6e071e3decb04324423453c69')"
     ]
   }
 }

@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Loader2, X } from 'lucide-react';
 import { markAccountInactive, softDeleteAccount } from '../lib/queries';
 import type { RdAccountRow } from '../types/db';
+import { useBackdropClose } from './useBackdropClose';
 
 interface Props {
   account: RdAccountRow;
@@ -102,13 +103,14 @@ export function DeleteOrInactivateDialog({ account, onClose }: Props) {
     });
   };
 
+  const backdropHandlers = useBackdropClose(onClose);
   return (
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="delete-or-inactivate-title"
       className="fixed inset-0 z-50 flex items-end justify-center bg-ink-primary/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
-      onClick={onClose}
+      {...backdropHandlers}
     >
       <div
         ref={dialogRef}

@@ -24,6 +24,8 @@
         <item quantity="one">%d session waiting · tap to retry</item>
         <item quantity="other">%d sessions waiting · tap to retry</item>
     </plurals>
+    <string name="notif_sync_abandoned_title">Sync needs attention</string>
+    <string name="notif_sync_abandoned_body">A %1$s on %2$s could not sync after many attempts. Open the app to retry or contact support.</string>
     <plurals name="lotreview_months_label">
         <item quantity="one">%d mo</item>
         <item quantity="other">%d mo</item>

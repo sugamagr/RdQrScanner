@@ -17,6 +17,22 @@ import { formatNumber } from './format';
  */
 type PdfStyles = Record<string, Style>;
 
+// Module-level latch: Font.register() must only be called once per
+// session — calling it repeatedly logs warnings AND silently leaks
+// memory inside @react-pdf's internal font cache. The cache itself is
+// process-global so module-level state is the correct scope.
+let fontsRegistered = false;
+
+// PDF table cells have hard horizontal bounds — `flex: 2` in a 4-col
+// table is ~120pt at A4 width. A 100-char account name overflows
+// horizontally, pushing the "Months" column off the page. We cap at
+// 40 chars with an ellipsis to keep the layout intact while still
+// showing enough to identify the customer at a glance. R5 oracle
+// bg_78192f17 F11 verified the overflow case.
+function truncatePdfName(name: string): string {
+  return name.length > 40 ? `${name.slice(0, 37)}...` : name;
+}
+
 export type PdfPaper = 'A4' | 'Letter';
 export type PdfTheme = 'light' | 'mono';
 export type PdfSection =
@@ -62,7 +78,28 @@ export interface GeneratePdfOptions {
 export async function generateDashboardPdf(opts: GeneratePdfOptions): Promise<void> {
   const reactPdf = await import('@react-pdf/renderer');
   const React = await import('react');
-  const { Document, Page, View, Text, StyleSheet, Svg, Path, Rect, Line, G, pdf } = reactPdf;
+  const { Document, Page, View, Text, StyleSheet, Svg, Path, Rect, Line, G, pdf, Font } = reactPdf;
+
+  // Register Noto Sans the first time generation runs. The built-in
+  // Helvetica that @react-pdf falls back to is one of the 14 Type1
+  // standard PDF fonts and DOES NOT include U+20B9 (Indian Rupee sign)
+  // — every \u20B9 in the document would render as a missing-glyph
+  // box, breaking every financial figure. Noto Sans Regular + Bold from
+  // Google's CDN cover the full Latin + currency block we use; the
+  // disabled hyphenation callback prevents @react-pdf from word-
+  // splitting account names (our table cells truncate already).
+  // R5 oracle bg_78192f17 F10 verified the missing glyph in output.
+  if (!fontsRegistered) {
+    Font.register({
+      family: 'Noto Sans',
+      fonts: [
+        { src: 'https://cdn.jsdelivr.net/fontsource/fonts/noto-sans@latest/latin-400-normal.ttf', fontWeight: 400 },
+        { src: 'https://cdn.jsdelivr.net/fontsource/fonts/noto-sans@latest/latin-700-normal.ttf', fontWeight: 700 },
+      ],
+    });
+    Font.registerHyphenationCallback((word: string) => [word]);
+    fontsRegistered = true;
+  }
 
   const colors = buildColors(opts.theme);
   const pageSize = opts.paper === 'A4'
@@ -77,7 +114,7 @@ export async function generateDashboardPdf(opts: GeneratePdfOptions): Promise<vo
 
   const styles: PdfStyles = StyleSheet.create({
     page: {
-      fontFamily: 'Helvetica',
+      fontFamily: 'Noto Sans',
       fontSize: 9,
       color: colors.inkPrimary,
       backgroundColor: colors.bg,
@@ -556,7 +593,13 @@ function renderSourceDonut(ctx: RenderContext): import('react').ReactElement {
     const fraction = total === 0 ? 0 : d.count / total;
     const start = acc * 2 * Math.PI - Math.PI / 2;
     acc += fraction;
-    const end = acc * 2 * Math.PI - Math.PI / 2;
+    // Cap fully-swept slices at 359.9 degrees. An exact 360-degree arc
+    // has the same start and end point, which SVG path renderers
+    // (including @react-pdf's) collapse to nothing — a 100% single-
+    // source donut would render empty. The 0.1-degree gap is invisible
+    // visually but breaks the degeneracy. R5 oracle bg_78192f17 F8.
+    const rawEnd = acc * 2 * Math.PI - Math.PI / 2;
+    const end = fraction >= 0.9999 ? rawEnd - 0.002 : rawEnd;
     return { d, start, end, fraction };
   });
   return React.createElement(
@@ -677,7 +720,7 @@ function renderTopDefaulters(ctx: RenderContext): import('react').ReactElement {
             view,
             { key: r.rdNumber, style: styles.tableRow },
             React.createElement(text, { style: { ...(styles.tableCell), flex: 0.5 } }, String(i + 1)),
-            React.createElement(text, { style: { ...(styles.tableCell), flex: 2 } }, r.name),
+            React.createElement(text, { style: { ...(styles.tableCell), flex: 2 } }, truncatePdfName(r.name)),
             React.createElement(text, { style: { ...(styles.tableCell), flex: 2 } }, r.maskedRdNumber),
             React.createElement(text, { style: { ...(styles.tableCell), flex: 1, textAlign: 'right', color: colors.defaulter, fontWeight: 700 } }, `${r.monthsOverdue}`),
           )),

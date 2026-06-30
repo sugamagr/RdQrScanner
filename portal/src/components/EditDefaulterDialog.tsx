@@ -16,6 +16,7 @@ import {
   updateRdNumberMonths,
 } from '../lib/queries';
 import type { RdNumberRow } from '../types/db';
+import { useBackdropClose } from './useBackdropClose';
 
 const MONTHS_MIN = 1;
 const MONTHS_MAX = 36;
@@ -188,13 +189,14 @@ export function EditDefaulterDialog({ rd, lotTimestamp, onClose }: Props) {
     ? `${formatExport(selected[selected.length - 1])} – ${formatExport(selected[0])}`
     : '';
 
+  const backdropHandlers = useBackdropClose(onClose);
   return (
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="defaulter-dialog-title"
       className="fixed inset-0 z-50 flex items-end justify-center bg-ink-primary/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
-      onClick={onClose}
+      {...backdropHandlers}
     >
       <div
         ref={dialogRef}

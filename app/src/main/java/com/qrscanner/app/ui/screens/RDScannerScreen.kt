@@ -1,7 +1,10 @@
 package com.qrscanner.app.ui.screens
 
 import android.Manifest
+import android.content.Intent
 import android.media.AudioManager
+import android.net.Uri
+import android.provider.Settings
 import android.media.ToneGenerator
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -171,11 +174,24 @@ fun RDScannerScreen(
             )
         }
         else -> {
+            // Permanent denial: rationale flag is false because Android has
+            // stopped offering the system permission dialog. The ONLY recovery
+            // path is Settings > Apps > QRScanner > Permissions. Without this
+            // deep-link the user is trapped — tapping "Grant Permission" would
+            // be a no-op (system suppresses the dialog) so we route them
+            // directly to the right screen instead.
+            val deniedContext = LocalContext.current
             PermissionScreen(
                 title = "Camera Access Denied",
-                message = "Please enable camera permission in your device settings.",
-                buttonText = "Go Back",
-                onButtonClick = onNavigateBack
+                message = "Camera permission was denied. Open Settings to grant it, then return here.",
+                buttonText = "Open Settings",
+                onButtonClick = {
+                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = Uri.fromParts("package", deniedContext.packageName, null)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    runCatching { deniedContext.startActivity(intent) }
+                }
             )
         }
     }
@@ -814,13 +830,17 @@ private fun RDCameraScreen(
     
     DisposableEffect(Unit) {
         onDispose {
+            // Explicit unbindAll defends against rapid screen pop/push: the
+            // outgoing lifecycle may not have fully stopped before the new
+            // composition rebinds, in which case CameraX leaks the old
+            // Preview surface and logs "Use case already bound" warnings.
+            // bindToLifecycle's lifecycle-driven cleanup is correct in the
+            // common case but doesn't cover this race; explicit unbindAll
+            // here makes the cleanup deterministic regardless of timing.
+            runCatching { cameraProviderFuture.get().unbindAll() }
             executor.shutdown()
             barcodeScanner.close()
-            try {
-                toneGenerator?.release()
-            } catch (e: Exception) {
-                // Ignore
-            }
+            runCatching { toneGenerator?.release() }
         }
     }
 

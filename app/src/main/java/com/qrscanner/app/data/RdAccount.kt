@@ -1,5 +1,6 @@
 package com.qrscanner.app.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -81,7 +82,13 @@ data class RdAccount(
      * any LOT auto-flips back to true (silent + DIRTY + toast).
      * Blocks creation of a new account at the same rdNumber — operator
      * must reactivate, or hard-delete first.
+     *
+     * `@ColumnInfo(defaultValue = "1")` keeps fresh-install CREATE TABLE
+     * aligned with the MIGRATION_*_* ALTER TABLE ... DEFAULT 1, so the
+     * schema-export hash matches and Room never falls back to destructive
+     * migration on a v10 fresh install. Validated by R5 oracle bg_559ee8fc F3.
      */
+    @ColumnInfo(defaultValue = "1")
     val isActive: Boolean = true,
 
     /**

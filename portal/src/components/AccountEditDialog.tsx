@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Loader2, X } from 'lucide-react';
 import { updateAccount } from '../lib/queries';
 import type { RdAccountRow } from '../types/db';
+import { useBackdropClose } from './useBackdropClose';
 
 interface Props {
   account: RdAccountRow;
@@ -102,13 +103,14 @@ export function AccountEditDialog({ account, onClose }: Props) {
     });
   };
 
+  const backdropHandlers = useBackdropClose(onClose);
   return (
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="account-edit-title"
       className="fixed inset-0 z-50 flex items-end justify-center bg-ink-primary/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
-      onClick={onClose}
+      {...backdropHandlers}
     >
       <div
         ref={dialogRef}
@@ -147,6 +149,8 @@ export function AccountEditDialog({ account, onClose }: Props) {
               onChange={(e) => setName(e.target.value)}
               autoComplete="off"
               maxLength={80}
+              aria-invalid={!!name && !nameValid}
+              aria-describedby={name && !nameValid ? 'account-edit-name-error' : undefined}
               className={`mt-1 w-full rounded-xl border bg-surface-alt px-3.5 py-2.5 text-sm text-ink-primary placeholder:text-ink-muted ${
                 name && !nameValid
                   ? 'border-danger/60 focus:border-danger'
@@ -155,7 +159,7 @@ export function AccountEditDialog({ account, onClose }: Props) {
               placeholder="Ramesh Kumar"
             />
             {name && !nameValid && (
-              <p className="mt-1 text-[11px] text-danger">
+              <p id="account-edit-name-error" className="mt-1 text-[11px] text-danger">
                 Name must be 1–60 characters.
               </p>
             )}
@@ -169,6 +173,8 @@ export function AccountEditDialog({ account, onClose }: Props) {
               value={amount}
               onChange={(e) => setAmount(e.target.value.replace(/\D/g, ''))}
               autoComplete="off"
+              aria-invalid={!!amount && !amountValid}
+              aria-describedby={amount && !amountValid ? 'account-edit-amount-error' : undefined}
               className={`mt-1 w-full rounded-xl border bg-surface-alt px-3.5 py-2.5 text-sm text-ink-primary placeholder:text-ink-muted ${
                 amount && !amountValid
                   ? 'border-danger/60 focus:border-danger'
@@ -177,7 +183,9 @@ export function AccountEditDialog({ account, onClose }: Props) {
               placeholder="500"
             />
             {amount && !amountValid && (
-              <p className="mt-1 text-[11px] text-danger">Amount must be a positive integer.</p>
+              <p id="account-edit-amount-error" className="mt-1 text-[11px] text-danger">
+                Amount must be a positive integer.
+              </p>
             )}
           </label>
 

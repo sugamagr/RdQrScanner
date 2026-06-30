@@ -202,6 +202,37 @@ class SyncNotifier(private val context: Context) {
         runCatching { manager.cancel(NOTIF_ID_ERROR) }
     }
 
+    /**
+     * Fires when a row crosses the SYNC_ABANDONED threshold (default 8
+     * consecutive push failures). Distinct from the transient SYNC_ERROR
+     * notification because abandoned rows are EXCLUDED from
+     * [SyncRepository.getDirtyForPush] forever after — the operator
+     * must take manual action (re-finalize the session, contact support)
+     * or the row sits as silent local-only data. Without this tray nudge
+     * the operator never learns a row was permanently dropped from the
+     * cloud cycle; the pill goes back to OK because no DIRTY rows remain.
+     *
+     * Channel = sync_error (operator-attention class). Distinct
+     * notification id so it doesn't collapse with the transient-error
+     * spinner.
+     */
+    @SuppressLint("MissingPermission") // canPostNotifications() gate inside
+    fun notifySyncAbandoned(rowKind: String, contextLabel: String) {
+        if (!canPostNotifications()) return
+        val title = context.getString(R.string.notif_sync_abandoned_title)
+        val body = context.getString(R.string.notif_sync_abandoned_body, rowKind, contextLabel)
+        val notification = NotificationCompat.Builder(context, QRScannerApp.CHANNEL_SYNC_ERROR)
+            .setSmallIcon(android.R.drawable.stat_notify_error)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setAutoCancel(true)
+            .setContentIntent(buildOpenAppIntent(requestCode = NOTIF_ID_ABANDONED))
+            .build()
+        runCatching { manager.notify(NOTIF_ID_ABANDONED, notification) }
+    }
+
     private fun buildOpenAppIntent(requestCode: Int): PendingIntent {
         val launch = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -225,6 +256,7 @@ class SyncNotifier(private val context: Context) {
         const val BULK_SUMMARY_THRESHOLD = 5
         private const val NOTIF_ID_ERROR = 9001
         private const val NOTIF_ID_BULK_SUCCESS = 9002
+        private const val NOTIF_ID_ABANDONED = 9003
         private const val NOTIF_ID_SUCCESS_BASE = 10_000
         private const val NOTIF_ID_REMOTE_EDIT_BASE = 20_000
     }

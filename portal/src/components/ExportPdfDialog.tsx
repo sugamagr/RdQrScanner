@@ -9,6 +9,7 @@ import {
 import { Loader2, X } from 'lucide-react';
 import type { DashboardRange, DashboardStats } from '../lib/dashboardQueries';
 import { generateDashboardPdf, type PdfTheme, type PdfPaper, type PdfSection } from '../lib/pdfExport';
+import { useBackdropClose } from './useBackdropClose';
 
 interface Props {
   stats: DashboardStats;
@@ -142,13 +143,14 @@ export function ExportPdfDialog({ stats, range, onClose }: Props) {
     }
   }, [enabled, paper, theme, range, stats, title, subtitle, onClose]);
 
+  const backdropHandlers = useBackdropClose(onClose);
   return (
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="pdf-export-title"
       className="fixed inset-0 z-50 flex items-end justify-center bg-ink-primary/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
-      onClick={onClose}
+      {...backdropHandlers}
     >
       <div
         ref={dialogRef}

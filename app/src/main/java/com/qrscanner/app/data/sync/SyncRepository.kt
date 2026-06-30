@@ -393,6 +393,7 @@ class SyncRepository(
                         "SyncRepository",
                         "rd_account ${acct.rdNumber} abandoned after ${current.retryCount} push failures"
                     )
+                    runCatching { notifier.notifySyncAbandoned("account", "RD ${acct.rdNumber}") }
                 }
             }
         }
@@ -423,6 +424,7 @@ class SyncRepository(
                         "SyncRepository",
                         "scan_session ${sess.id} abandoned after ${currentSess.retryCount} push failures"
                     )
+                    runCatching { notifier.notifySyncAbandoned("session", "Session #${sess.displayNumber}") }
                 }
                 continue
             }
@@ -739,6 +741,7 @@ class SyncRepository(
                         "SyncRepository",
                         "scan_lot ${lot.id} abandoned after ${current.retryCount} push failures"
                     )
+                    runCatching { notifier.notifySyncAbandoned("LOT", "LOT ${lot.id} in session") }
                 }
                 throw e
             }
@@ -854,6 +857,7 @@ class SyncRepository(
                     "SyncRepository",
                     "rd_number ${rd.id} abandoned after ${current.retryCount} push failures"
                 )
+                runCatching { notifier.notifySyncAbandoned("scan", "RD ${rd.number}") }
             }
             false
         }

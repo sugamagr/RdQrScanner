@@ -76,8 +76,9 @@ enum class SyncStatus {
     /**
      * Last push failed. The error is recorded in the row's `lastSyncError`
      * column. The worker retries with exponential backoff (WorkManager
-     * BackoffPolicy.EXPONENTIAL, 30s initial, capped at 4h) until the
-     * push succeeds or the user signs out.
+     * BackoffPolicy.EXPONENTIAL, 30s initial, capped at WorkRequest's
+     * MAX_BACKOFF_MILLIS of 5h) until the push succeeds or the user
+     * signs out.
      */
     SYNC_ERROR,
 

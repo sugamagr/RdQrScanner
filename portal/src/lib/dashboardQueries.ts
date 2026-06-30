@@ -228,14 +228,22 @@ export async function fetchDashboardStats(range: DashboardRange): Promise<Dashbo
     .order('end_time', { ascending: true })
     .limit(1);
 
+  // Partial-failure tolerance: critical sources (accounts + rdNumbers
+  // drive every money KPI and every chart) must succeed or the
+  // dashboard is meaningless and we throw. Non-critical sources
+  // (devices, sessions count, earliest, activity feed) degrade
+  // gracefully to empty fixtures + console.warn so a transient 5xx on
+  // /devices does not blank the entire screen including critical
+  // financial figures. R5 oracle bg_78192f17 F13 verified the
+  // pre-change behaviour blanked everything on any single rejection.
   const [
-    accountsRes,
-    devicesRes,
-    sessionsRes,
-    rdRes,
-    earliestRes,
-    activityRes,
-  ] = await Promise.all([
+    accountsSettled,
+    devicesSettled,
+    sessionsSettled,
+    rdSettled,
+    earliestSettled,
+    activitySettled,
+  ] = await Promise.allSettled([
     supabase
       .from('rd_accounts')
       .select('rd_number, name, monthly_amount, last_paid_through, is_active, source')
@@ -252,17 +260,42 @@ export async function fetchDashboardStats(range: DashboardRange): Promise<Dashbo
     fetchActivityFeed({ limit: 8 }),
   ]);
 
-  if (accountsRes.error) throw accountsRes.error;
-  if (devicesRes.error) throw devicesRes.error;
-  if (sessionsRes.error) throw sessionsRes.error;
-  if (rdRes.error) throw rdRes.error;
-  if (earliestRes.error) throw earliestRes.error;
+  function unwrapCritical<T>(
+    settled: PromiseSettledResult<{ data: T[] | null; error: unknown }>,
+    _label: string,
+  ): T[] {
+    if (settled.status === 'rejected') throw settled.reason;
+    if (settled.value.error) throw settled.value.error;
+    return (settled.value.data ?? []) as T[];
+  }
 
-  const accounts = (accountsRes.data ?? []) as RdAccountStub[];
-  const devices = (devicesRes.data ?? []) as DeviceStub[];
-  const sessions = (sessionsRes.data ?? []) as SessionStub[];
-  const rdNumbers = (rdRes.data ?? []) as RdNumberStub[];
-  const earliestSessionAt = ((earliestRes.data ?? []) as SessionStub[])[0]?.end_time ?? null;
+  function unwrapOptional<T>(
+    settled: PromiseSettledResult<{ data: T[] | null; error: unknown }>,
+    label: string,
+  ): T[] {
+    if (settled.status === 'rejected') {
+      console.warn(`[dashboard] non-critical fetch failed (${label}); degrading to empty`, settled.reason);
+      return [];
+    }
+    if (settled.value.error) {
+      console.warn(`[dashboard] non-critical fetch returned error (${label}); degrading to empty`, settled.value.error);
+      return [];
+    }
+    return (settled.value.data ?? []) as T[];
+  }
+
+  const accounts = unwrapCritical<RdAccountStub>(accountsSettled, 'rd_accounts');
+  const rdNumbers = unwrapCritical<RdNumberStub>(rdSettled, 'rd_numbers');
+  const devices = unwrapOptional<DeviceStub>(devicesSettled, 'devices');
+  const sessions = unwrapOptional<SessionStub>(sessionsSettled, 'scan_sessions');
+  const earliestRows = unwrapOptional<SessionStub>(earliestSettled, 'earliest_session');
+  const earliestSessionAt = earliestRows[0]?.end_time ?? null;
+
+  // Activity feed returns ActivityRow[] directly (not a Supabase
+  // {data,error} envelope), so it can't reuse the unwrap helpers.
+  const activityRes: ActivityRow[] = activitySettled.status === 'fulfilled'
+    ? activitySettled.value
+    : (console.warn('[dashboard] activity feed degraded to empty', activitySettled.reason), []);
 
   const seq = resolveMonthSequence(range, earliestSessionAt);
 

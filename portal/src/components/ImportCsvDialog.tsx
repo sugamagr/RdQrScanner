@@ -18,6 +18,7 @@ import {
   type CsvParseResult,
   type ParsedAccount,
 } from '../lib/csvParser';
+import { useBackdropClose } from './useBackdropClose';
 
 interface RegressionRow {
   rdNumber: string;
@@ -295,13 +296,14 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
     }
   };
 
+  const backdropHandlers = useBackdropClose(onClose);
   return (
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="csv-import-title"
       className="fixed inset-0 z-50 flex items-end justify-center bg-ink-primary/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
-      onClick={onClose}
+      {...backdropHandlers}
     >
       <div
         ref={dialogRef}
@@ -466,7 +468,7 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
 
           {regressionCheck.kind === 'needs-confirm' && (
             <div
-              role="alertdialog"
+              role="alert"
               aria-labelledby="regression-confirm-title"
               className="rounded-xl border border-warn/30 bg-warn/5 px-3.5 py-3"
             >

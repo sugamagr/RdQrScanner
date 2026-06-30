@@ -43,7 +43,7 @@ import {
   type DashboardRange,
   type DashboardStats,
 } from '../lib/dashboardQueries';
-import { formatDateTime, formatNumber, formatRelativeTime } from '../lib/format';
+import { formatCompactCurrency, formatDateTime, formatNumber, formatRelativeTime } from '../lib/format';
 import type { ActivityKind } from '../types/db';
 
 const ExportPdfDialog = lazy(() =>
@@ -526,21 +526,21 @@ function KpiRow({ stats }: { stats: DashboardStats }) {
       />
       <KpiCard
         title="Collected this month"
-        value={`₹${formatNumber(stats.totalCollectedThisMonth)}`}
+        value={formatCompactCurrency(stats.totalCollectedThisMonth)}
         subtitle="weighted by months_paid"
         icon={<Wallet className="h-5 w-5" />}
         tone="mint"
       />
       <KpiCard
         title="Book amount"
-        value={`₹${formatNumber(stats.totalAccountAmount)}`}
+        value={formatCompactCurrency(stats.totalAccountAmount)}
         subtitle="sum of monthly amounts (active)"
         icon={<IndianRupee className="h-5 w-5" />}
         tone="primary"
       />
       <KpiCard
         title="Money collected (range)"
-        value={`₹${formatNumber(stats.monthlyMoneyCollected.reduce((s, m) => s + m.amount, 0))}`}
+        value={formatCompactCurrency(stats.monthlyMoneyCollected.reduce((s, m) => s + m.amount, 0))}
         subtitle="scans weighted by months_paid"
         icon={<Banknote className="h-5 w-5" />}
         tone="mint"
@@ -570,7 +570,7 @@ function KpiRow({ stats }: { stats: DashboardStats }) {
       />
       <KpiCard
         title="Avg ticket"
-        value={`₹${formatNumber(stats.averageMonthlyAmount)}`}
+        value={formatCompactCurrency(stats.averageMonthlyAmount)}
         subtitle="real average across active"
         icon={<Sparkles className="h-5 w-5" />}
         tone="primary"
@@ -584,7 +584,7 @@ function KpiRow({ stats }: { stats: DashboardStats }) {
       />
       <KpiCard
         title="Current vs default (₹)"
-        value={`₹${formatNumber(stats.currentVsDefault.currentAmount)} / ₹${formatNumber(stats.currentVsDefault.defaultAmount)}`}
+        value={`${formatCompactCurrency(stats.currentVsDefault.currentAmount)} / ${formatCompactCurrency(stats.currentVsDefault.defaultAmount)}`}
         subtitle="monthly amounts (incl. never paid)"
         icon={<ShieldAlert className="h-5 w-5" />}
         tone="warn"
@@ -712,6 +712,8 @@ function MoneyTrendCard({
     >
       {total === 0 ? (
         <ChartEmpty message="No collections recorded in this range" />
+      ) : data.length === 1 ? (
+        <ChartSingleValue label={data[0]!.month} value={formatCompactCurrency(data[0]!.amount)} />
       ) : (
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={data} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
@@ -738,7 +740,7 @@ function MoneyTrendCard({
             <Area
               type="monotone"
               dataKey="amount"
-              name="Total collected"
+              name="All collections"
               stroke="#0E8278"
               strokeWidth={2}
               fill="url(#moneyGradient)"
@@ -747,7 +749,7 @@ function MoneyTrendCard({
             <Area
               type="monotone"
               dataKey="defaulterAmount"
-              name="From defaulters"
+              name="Defaulter portion"
               stroke="#B45309"
               strokeWidth={2}
               fill="url(#defaulterMoneyGradient)"
@@ -834,6 +836,8 @@ function SessionTrendCard({
     >
       {total === 0 ? (
         <ChartEmpty message="No sessions in this range" />
+      ) : data.length === 1 ? (
+        <ChartSingleValue label={data[0]!.month} value={`${formatNumber(data[0]!.count)} sessions`} />
       ) : (
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
@@ -1138,6 +1142,21 @@ function ChartEmpty({ message }: { message: string }) {
     <div className="flex h-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-surface-border bg-surface-alt text-center">
       <Inbox className="h-6 w-6 text-ink-muted" aria-hidden="true" />
       <p className="px-6 text-xs text-ink-secondary">{message}</p>
+    </div>
+  );
+}
+
+// Single-point fallback for AreaChart / LineChart. Recharts renders a
+// 1-element dataset with type="monotone" as a stroke-only dot with a
+// zero-width fill — visually indistinguishable from broken. We swap to
+// a centred KPI-style callout so the operator clearly sees the one
+// data point with its month label. R5 oracle bg_78192f17 F1.
+function ChartSingleValue({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-1.5 rounded-xl border border-surface-border bg-surface-alt text-center">
+      <p className="text-[10px] font-medium uppercase tracking-wider text-ink-muted">{label}</p>
+      <p className="text-2xl font-semibold text-ink-primary">{value}</p>
+      <p className="text-[11px] text-ink-secondary">Only one period in range</p>
     </div>
   );
 }
