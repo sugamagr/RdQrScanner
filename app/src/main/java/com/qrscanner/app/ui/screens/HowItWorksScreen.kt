@@ -56,6 +56,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.qrscanner.app.ui.components.GradientTopBar
 import com.qrscanner.app.ui.theme.AccentCoral
@@ -109,7 +110,9 @@ fun HowItWorksScreen(
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         ),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -346,7 +349,7 @@ private fun HindiContent() {
             FeatureItem(
                 icon = Icons.Default.EditCalendar,
                 title = "डिफॉल्टर मार्क करें",
-                description = "एक LOT स्कैन करने के बाद, उन खातों को मार्क करें जिनके लिए एक से अधिक महीने का भुगतान हुआ है (months_paid > 1)। हर डिफॉल्टर के लिए कौन से महीने (जैसे जून, जुलाई 2024) हैं, यह भी चुनें — पोर्टल से मिलान करने में आसानी होगी। महीने LOT कार्ड और सभी एक्सपोर्ट में दिखेंगे।"
+                description = "एक LOT स्कैन करने के बाद, उन खातों को मार्क करें जिनके लिए एक से ज़्यादा महीने का भुगतान हुआ है। हर डिफ़ॉल्टर के लिए कौन से महीने (जैसे जून, जुलाई 2024) हैं, यह भी चुनें — पोर्टल से मिलान करने में आसानी होगी। महीने LOT कार्ड और सभी एक्सपोर्ट में दिखेंगे।"
             )
         }
 
@@ -370,7 +373,7 @@ private fun HindiContent() {
             FeatureItem(
                 icon = Icons.Default.Upload,
                 title = "CSV से थोक अपलोड",
-                description = "पोर्टल से 4 कॉलम (नाम, RD नंबर, मासिक राशि, अंतिम भुगतान महीना) वाली CSV अपलोड करें। मौजूदा खाते अपडेट हो जाएंगे; नए जुड़ जाएंगे। 'पेपर बुक सत्य है' — अंतिम भुगतान महीना केवल ऑपरेटर कम कर सकता है।"
+                description = "पोर्टल से 4 कॉलम (नाम, RD नंबर, मासिक राशि, आखिरी भुगतान महीना) वाली CSV अपलोड करें। मौजूदा खाते अपडेट हो जाएंगे; नए जुड़ जाएंगे। पासबुक ही असली रिकॉर्ड है — 'आखिरी भुगतान महीना' सिर्फ़ ऑपरेटर ही पीछे कर सकता है।"
             )
         }
 

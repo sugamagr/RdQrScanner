@@ -116,6 +116,7 @@ export function SessionDetailPage() {
               ? sessionQuery.error.message
               : 'Failed to load session.'
           }
+          onRetry={() => void sessionQuery.refetch()}
         />
       )}
 
@@ -305,10 +306,19 @@ function NotFound() {
   );
 }
 
-function ErrorBox({ message }: { message: string }) {
+function ErrorBox({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
-    <div className="mt-6 rounded-2xl border border-danger/20 bg-danger/5 p-6 text-center">
+    <div className="mt-6 flex flex-col items-center gap-3 rounded-2xl border border-danger/20 bg-danger/5 p-6 text-center">
       <p className="text-sm font-medium text-danger">{message}</p>
+      {onRetry && (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="inline-flex min-h-[44px] items-center justify-center rounded-pill border border-danger/30 bg-surface px-4 text-sm font-medium text-danger transition-colors hover:bg-danger/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40"
+        >
+          Retry
+        </button>
+      )}
     </div>
   );
 }

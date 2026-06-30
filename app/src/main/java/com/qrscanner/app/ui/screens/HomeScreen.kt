@@ -1,5 +1,6 @@
 package com.qrscanner.app.ui.screens
 
+import android.util.Log
 import android.widget.Toast
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -206,8 +207,10 @@ fun HomeScreen(
                             s == SyncPillState.ERROR ||
                             s == SyncPillState.PENDING) {
                             scope.launch {
-                                try { app.syncScheduler.enqueuePush() } catch (_: Throwable) {}
-                                try { app.syncScheduler.enqueuePull() } catch (_: Throwable) {}
+                                runCatching { app.syncScheduler.enqueuePush() }
+                                    .onFailure { Log.w("HomeScreen", "enqueuePush failed on retry tap", it) }
+                                runCatching { app.syncScheduler.enqueuePull() }
+                                    .onFailure { Log.w("HomeScreen", "enqueuePull failed on retry tap", it) }
                                 Toast.makeText(context, "Retrying…", Toast.LENGTH_SHORT).show()
                             }
                         }

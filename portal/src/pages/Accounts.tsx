@@ -173,8 +173,17 @@ export function AccountsPage() {
       </div>
 
       {query.isError && (
-        <div className="mt-6 rounded-2xl border border-danger/20 bg-danger/5 p-4 text-sm text-danger">
-          {query.error instanceof Error ? query.error.message : 'Failed to load accounts.'}
+        <div className="mt-6 flex flex-col gap-3 rounded-2xl border border-danger/20 bg-danger/5 p-4 text-sm text-danger sm:flex-row sm:items-center sm:justify-between">
+          <span className="break-words">
+            {query.error instanceof Error ? query.error.message : 'Failed to load accounts.'}
+          </span>
+          <button
+            type="button"
+            onClick={() => void query.refetch()}
+            className="inline-flex min-h-[44px] items-center justify-center rounded-pill border border-danger/30 bg-surface px-4 text-sm font-medium text-danger transition-colors hover:bg-danger/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/40"
+          >
+            Retry
+          </button>
         </div>
       )}
 

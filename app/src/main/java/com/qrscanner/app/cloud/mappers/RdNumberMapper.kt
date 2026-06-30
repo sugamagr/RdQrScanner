@@ -22,6 +22,15 @@ internal object RdNumberMapper {
         val cloudId = requireNotNull(rdNumber.cloudId) {
             "RdNumber.cloudId must be set before pushing (id=${rdNumber.id})"
         }
+        // Defense-in-depth: cloud schema enforces CHECK (months_paid BETWEEN 1 AND 36).
+        // If a buggy local migration or in-memory mutation produces 0 or 37, the push
+        // would silently fail with PostgrestException 23514 and the row would
+        // be retried until SYNC_ABANDONED (8 retries × WorkManager backoff = ~hours
+        // of wasted bandwidth + an opaque sync-error pill for the operator).
+        // Fail fast here with a precise message so the bug is caught at the seam.
+        require(rdNumber.monthsPaid in 1..36) {
+            "RdNumber.monthsPaid must be in 1..36, got ${rdNumber.monthsPaid} for cloudId=$cloudId"
+        }
         return RdNumberDto(
             id = cloudId,
             ownerId = "", // filled in by SyncRepository
@@ -38,8 +47,15 @@ internal object RdNumberMapper {
         )
     }
 
-    fun toEntity(dto: RdNumberDto): RdNumber =
-        RdNumber(
+    fun toEntity(dto: RdNumberDto): RdNumber {
+        // Inbound symmetry with toDto(): catch corrupt cloud rows (or future
+        // schema drift) at the seam instead of silently violating the local
+        // Room invariant — RdNumber.monthsPaid is consumed by MonthBar UI and
+        // by next_display_number style aggregations that assume 1..36 bounds.
+        require(dto.monthsPaid in 1..36) {
+            "RdNumberDto.monthsPaid must be in 1..36, got ${dto.monthsPaid} for cloudId=${dto.id}"
+        }
+        return RdNumber(
             id = 0,
             lotId = 0,
             number = dto.number,
@@ -55,4 +71,5 @@ internal object RdNumberMapper {
             deletedAt = IsoTime.toEpochMillisOrNull(dto.deletedAt),
             lastEditorDeviceId = dto.lastEditorDeviceId
         )
+    }
 }
