@@ -57,7 +57,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.qrscanner.app.R
 import com.qrscanner.app.ui.components.GradientTopBar
 import com.qrscanner.app.ui.theme.AccentCoral
 import com.qrscanner.app.ui.theme.AccentMint
@@ -99,7 +101,7 @@ fun HowItWorksScreen(
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
+                            contentDescription = stringResource(R.string.content_desc_back),
                             tint = Color.White
                         )
                     }

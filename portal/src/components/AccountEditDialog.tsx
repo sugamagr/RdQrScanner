@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Loader2, X } from 'lucide-react';
+import { AlertTriangle, Loader2, X } from 'lucide-react';
 import { updateAccount } from '../lib/queries';
 import type { RdAccountRow } from '../types/db';
 import { useBackdropClose } from './useBackdropClose';
@@ -61,6 +61,74 @@ export function AccountEditDialog({ account, onClose }: Props) {
       opener?.focus();
     };
   }, [onClose]);
+
+  // R7 F4 (bg_50bb21c1): external-update detection. Realtime sync
+  // (useRealtimeSync.ts) invalidates ['accounts'] whenever the phone
+  // pushes a row change for any account. If the operator was already
+  // editing this same account in the dialog, the form state (name,
+  // amount, isActive) is now silently stale - a naive save would
+  // overwrite the phone's edit with the pre-edit values. We snapshot
+  // the row's updated_at on mount and watch the query cache; if a
+  // fresher row for the same rd_number lands, surface a banner instead
+  // of silently swallowing the conflict. mountedUpdatedAtRef (not
+  // state) is the snapshot baseline so re-renders don't reset it.
+  const mountedUpdatedAtRef = useRef(account.updated_at);
+  const [externalUpdate, setExternalUpdate] = useState<RdAccountRow | null>(null);
+  const [dismissedExternal, setDismissedExternal] = useState(false);
+  useEffect(() => {
+    const cache = qc.getQueryCache();
+    const checkCache = () => {
+      const rows = qc.getQueryData<RdAccountRow[]>(['accounts']);
+      if (!rows) return;
+      const fresh = rows.find((r) => r.rd_number === account.rd_number);
+      if (!fresh) return;
+      if (fresh.updated_at !== mountedUpdatedAtRef.current) {
+        setExternalUpdate(fresh);
+      }
+    };
+    // Prime once in case the cache already changed between dialog open
+    // and the subscription attaching (race window: realtime event
+    // arrived after AccountsPage refetched but before useEffect ran).
+    checkCache();
+    const unsub = cache.subscribe((event) => {
+      if (event.type !== 'updated') return;
+      const key = event.query.queryKey;
+      if (!Array.isArray(key) || key[0] !== 'accounts') return;
+      checkCache();
+    });
+    return () => {
+      unsub();
+    };
+  }, [qc, account.rd_number]);
+
+  const acceptExternal = () => {
+    if (!externalUpdate) return;
+    setName(externalUpdate.name);
+    setAmount(String(externalUpdate.monthly_amount));
+    setIsActive(externalUpdate.is_active);
+    mountedUpdatedAtRef.current = externalUpdate.updated_at;
+    setExternalUpdate(null);
+    setDismissedExternal(false);
+  };
+  const keepLocalEdits = () => {
+    if (!externalUpdate) return;
+    // Operator chose to keep their typed values; advance the baseline
+    // so we don't re-prompt on the same revision. The save mutation
+    // will land last-write-wins (cloud rd_accounts has no optimistic
+    // concurrency token); that's the documented R5 conflict policy.
+    mountedUpdatedAtRef.current = externalUpdate.updated_at;
+    setExternalUpdate(null);
+    setDismissedExternal(true);
+  };
+
+  const externalDiffs = useMemo(() => {
+    if (!externalUpdate) return [] as string[];
+    const diffs: string[] = [];
+    if (externalUpdate.name !== account.name) diffs.push('name');
+    if (externalUpdate.monthly_amount !== account.monthly_amount) diffs.push('monthly amount');
+    if (externalUpdate.is_active !== account.is_active) diffs.push('active state');
+    return diffs;
+  }, [externalUpdate, account.name, account.monthly_amount, account.is_active]);
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -141,6 +209,46 @@ export function AccountEditDialog({ account, onClose }: Props) {
         </header>
 
         <form onSubmit={onSubmit} className="flex-1 space-y-5 overflow-y-auto px-5 py-5">
+          {externalUpdate && (
+            <div
+              role="alert"
+              className="flex items-start gap-3 rounded-xl border border-warn/30 bg-warn/5 px-3.5 py-3"
+            >
+              <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-warn" aria-hidden="true" />
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold text-ink-primary">
+                  This account was updated elsewhere
+                </p>
+                <p className="mt-0.5 text-[11px] text-ink-secondary">
+                  {externalDiffs.length > 0
+                    ? `A phone changed the ${externalDiffs.join(', ')} while you were editing.`
+                    : 'A phone updated this account while you were editing.'}{' '}
+                  Reload the latest values, or keep your edits and overwrite on save.
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={acceptExternal}
+                    className="rounded-pill bg-warn/15 px-3 py-1 text-[11px] font-semibold text-warn hover:bg-warn/25"
+                  >
+                    Reload latest
+                  </button>
+                  <button
+                    type="button"
+                    onClick={keepLocalEdits}
+                    className="rounded-pill px-3 py-1 text-[11px] font-medium text-ink-secondary hover:text-ink-primary"
+                  >
+                    Keep my edits
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          {dismissedExternal && !externalUpdate && (
+            <p className="text-[11px] text-ink-muted">
+              Keeping your edits. Saving will overwrite the other change.
+            </p>
+          )}
           <label className="block">
             <span className="text-xs font-medium text-ink-secondary">Customer name</span>
             <input

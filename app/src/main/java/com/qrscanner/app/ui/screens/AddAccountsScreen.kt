@@ -63,6 +63,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -72,6 +73,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import com.qrscanner.app.QRScannerApp
+import com.qrscanner.app.R
 import com.qrscanner.app.data.AccountSource
 import com.qrscanner.app.data.RdAccount
 import com.qrscanner.app.data.SyncEvent
@@ -431,7 +433,7 @@ private fun AddAccountsHeader(countLabel: String, onNavigateBack: () -> Unit) {
             ) {
                 Icon(
                     Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
+                        contentDescription = stringResource(R.string.content_desc_back),
                     tint = Color.White
                 )
             }

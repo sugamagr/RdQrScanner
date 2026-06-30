@@ -19,6 +19,7 @@ af9ce74  fix(qc-r3): owner_id sweep, TOCTOU race, empty-state CTAs, a11y polish
 242b9d0  fix(auth): cross-account cache leak on owner-swap + realtime setAuth on token refresh
 e3cacd2  fix(qc-r4): months_paid validation, retry buttons, Hindi accuracy + clip guard
 ca91460  fix(qc-r5): PDF glyph + currency, dialog drag-release, abandon notify, camera unbind
+ad66b4e  fix(qc-r6): HTTP timeouts, device dedup, deep-link recovery, URL search, a11y, SEO
 ```
 
 (All earlier commits from the cloud-sync / dashboard / activity / device
@@ -27,9 +28,9 @@ diagnostics waves are intact on the branch and remain the truth.)
 ### Live deploy
 
 - **Portal:** https://rd-scanner-portal.pages.dev
-  Latest deploy hash at handoff time: `dc22144a` (Cloudflare Pages).
-  Earlier deploys this wave: `bd1bef5c`, `43af8938`, `19d27bd1`,
-  `b566c4b1`, `6001eed3`, `be4a8666`.
+  Latest deploy hash at handoff time: `debae220` (Cloudflare Pages).
+  Earlier deploys this wave: `dc22144a`, `bd1bef5c`, `43af8938`,
+  `19d27bd1`, `b566c4b1`, `6001eed3`, `be4a8666`.
 - **Phone APK:** Built at `app/build/outputs/apk/debug/app-debug.apk`.
   Wireless ADB was disconnected after a long gradle build, so the install
   needs to be done by you when you wake up — see the action list below.
@@ -353,67 +354,222 @@ F1/F6 (missing schema exports 1.json + 5.json — FP at pre-release
 no-v1-installs-in-wild + Q3=B); bg_b6ea6087 F2-F10/F12-F18 PASS;
 bg_e2aaa5bf F4/F15/F16/F18 LOW polish skipped.
 
-### Round 6 (status: in flight, 5 oracles in parallel)
+### Round 6 (status: shipped — commit `ad66b4e`)
 
-Audit angles (different from R1-R5, no duplication):
+Headline fixes from R6 oracles (all 5 returned, triaged, fix non-FPs
+applied, FPs documented):
 
-- Phone offline + connectivity (`bg_cadc45d5`): airplane mode mid-push,
-  no-network startup, weak signal partial response, DNS failure,
-  captive portal, network-type switch mid-operation, offline queue
-  durability, pull-during-offline, realtime channel reconnect, 5-min
-  poll backoff, WorkManager NetworkType.CONNECTED vs UNMETERED,
-  token refresh during offline, conflict resolution when device A
-  edited offline + device B edited same row online, HomeScreen +
-  Devices offline banner discoverability, sync_events table durability.
-- Portal large-data behavior (`bg_0d0dabca`): Sessions/SessionDetail
-  with 500+ sessions, Accounts with 10k+ rows, Activity 100+ events,
-  Dashboard with 60-month range, Search with 10k+ rd_numbers,
-  TanStack Query cache growth at scale, realtime invalidation cost
-  when 10k accounts cached, bundle re-execution cost, memory
-  footprint, sort+filter perf, pagination sizing, Recharts batching,
-  ImportCsvDialog with 5k-row CSV, ExportPdfDialog generation hang
-  risk.
-- Cloud migration safety + rollback (`bg_c7a90c24`): v11 idempotency
-  on accidental re-paste, live-migration ACCESS EXCLUSIVE lock
-  contention, ALTER TABLE add column NOT NULL DEFAULT rewrite cost,
-  Q3=B contract leakage in cloud-side semantics, RLS policy drift
-  across 5 tables, supabase_realtime publication scope + ops,
-  next_display_number race + owner-scoping, search_path safety in
-  SECURITY DEFINER functions, backup/restore FK preservation, v12
-  text-length CHECK readiness, timestamptz UTC, unused/missing
-  indexes, postgres_changes channel type correctness.
-- Phone auth + token + sign-out (`bg_0fe42fcd`): sign-in flow,
-  sign-out cleanup completeness across WorkManager + realtime + Room
-  + caches + Supabase SDK, token refresh strategy on 1h JWT expiry,
-  token storage hardness (Keystore vs SharedPreferences), process
-  death cold-start, token leak via logcat, multi-account on same
-  device, sign-out during in-flight push, biometric prompt,
-  recover-password, device row creation race, anonymous sign-in,
-  network errors during sign-in, sign-in screen a11y. User-accepted
-  behavior to verify intentional: same account signed in multiple
-  times creates new device entries (no reconciliation) — document
-  stale-device-row growth bound.
-- Portal SEO + meta + history (`bg_ee635610`): index.html title/
-  favicon/theme-color/viewport/lang/description, OG/Twitter card meta
-  for share, browser back button from /sessions/:id, AppShell title
-  click refetch vs back-button noop, URL persistence of dashboard
-  range, auth-gate deep-link UX, /sessions/<unknown-uuid> 404 UX,
-  catch-all behavior, favicons inventory, PWA-readiness manifest
-  theme-color, page transition FOUC, robots.txt/sitemap.xml private-
-  app stance, HTML lang + skip-to-main + landmark roles, useNavigate
-  replace vs push history pollution, Search URL state.
+- **SupabaseCloudClient HTTP timeouts** (bg_cadc45d5 F1): added Ktor
+  HttpTimeout install via `httpConfig { install(HttpTimeout) { ... } }`
+  with 30s request / 15s connect / 30s socket. Without these, weak
+  cellular signal mid-push could hang the WorkManager job for the
+  2-min OS TCP default. Requires `@OptIn(SupabaseInternal::class)`
+  because supabase-kt 3.x marks the httpConfig block internal.
+- **NetworkCallback reconnect catch-up** (bg_cadc45d5 F2): MainActivity
+  registers a `ConnectivityManager.registerDefaultNetworkCallback` in
+  `onCreate` (outside lifecycleScope so it survives brief
+  backgrounding) that fires `enqueuePull()` the instant the OS hands
+  us a usable default network. Unregistered cleanly in `onDestroy`.
+  Without this, airplane-mode toggle catch-up waited for the 5-min
+  backstop poll or realtime self-reconnect (both lag the network event).
+- **Device dedup on re-install** (bg_0fe42fcd R6-01): CloudClient gains
+  `findExistingDevice(ownerId, deviceModel, deviceName): DeviceDto?`.
+  AuthAwareRoot FirstRunSetup looks up an existing devices row by
+  (owner_id, device_model, device_name) BEFORE generating a fresh
+  UUID. Respects `deleted_at IS NULL` so operator-tombstoned phantoms
+  are NOT silently resurrected. Six sign-ins from the same phone now
+  produce one row, not six.
+- **SignInScreen errorMessage liveRegion** (bg_0fe42fcd R6-16):
+  `Modifier.semantics { liveRegion = LiveRegionMode.Polite }` on the
+  error Text so TalkBack announces auth failures (WCAG 4.1.3).
+- **Pill ERROR tap enriches Toast** (bg_cadc45d5 F6): SyncPillState.ERROR
+  taps now show the truncated lastErrorMessage (≤120 chars) so
+  operators can distinguish weak-signal vs auth-expired vs
+  RLS-rejection failure modes.
+- **Accounts useDeferredValue** (bg_0d0dabca F2): per-keystroke renders
+  on the O(n log n) filter+sort pipeline now run at low priority via
+  `useDeferredValue(search)`; input stays controlled by `useState`.
+- **dashboardQueries safety cap** (bg_0d0dabca F4): `.limit(50000)` on
+  rd_numbers reads protects the browser tab from corrupt-clock-skew
+  pathological queries.
+- **Search URL persistence** (bg_ee635610): `useSearchParams` `?q=`
+  with `replace:true` so per-keystroke history pollution is avoided;
+  back-nav from a session-detail restores the filtered view.
+- **Deep-link auth recovery** (bg_ee635610): `DeepLinkSignInRedirect`
+  catch-all preserves `pathname + search + hash` via Navigate
+  `state.from` so unauthenticated deep links resume at the requested
+  page after sign-in (SignIn.tsx already read `location.state.from`).
+- **index.html meta + favicons** (bg_ee635610): added meta description,
+  `robots noindex, nofollow`, `apple-touch-icon`, alternate-icon link
+  tags; generated favicon-16/32 + favicon.ico + apple-touch-icon
+  (180×180) from existing favicon.svg via sips.
+- **robots.txt Disallow:/** (bg_ee635610): private portal hardening.
+- **Per-page document.title** (bg_ee635610): new
+  `portal/src/lib/useDocumentTitle.ts` hook wired to all 7 pages so
+  tab title + history + screen-reader landmark all reflect the
+  current page.
+- **v11 migration begin/commit wrapper** (bg_c7a90c24 F19): future
+  re-paste safety + crash-mid-migration partial-apply protection.
+  Idempotent so already-applied state needs no re-paste.
 
-### Round 7 (planned)
+Documented FPs / scale-FPs (intentionally NOT fixed):
 
-Final cleanup pass. Will pick fresh angles based on what R5+R6
-surface to avoid duplication. Likely candidates:
-- Portal i18n readiness + phone Hindi a11y + TalkBack deep dive
-- Cold-cache first-paint + perceived-latency budget
-- Final regression sweep across R1-R6 patches
+- Accounts virtualization at 10K rows (200 accounts/month scale-FP)
+- Accounts pagination (scale-FP)
+- SessionDetail unbounded chip rendering (scale-FP)
+- Search ilike trigram index (already documented as Phase 5 hardening)
+- iOS Safari Blob download quirk (operator on desktop primarily)
+- 5-min poll backoff during sustained offline (scale-FP)
+- Captive portal / DNS classification (low marginal value)
+- Redundant single-column owner_id indexes (v12 micro-opt)
+- Text-length CHECK constraints (v12 hardening)
+- Sign-out-everywhere / password recovery (design gaps, documented)
 
-If a round flags a cloud schema change, the migration file appears
-in `cloud/migrations/vNN_*.sql` with a sanity-check block at the
-bottom for you to paste in Supabase Studio.
+### Round 7 (status: shipped — commit pending push at handoff)
+
+Final cleanup pass. 5 oracles in parallel, all orthogonal to the prior
+6 rounds (zero topology overlap). 4 of 5 returned cleanly; the 5th
+(regression sweep) tripped the 200K-token prompt ceiling on first
+launch and was relaunched lean — both runs accounted for below.
+
+Headline fixes (all 4 non-FP findings + 1 BLOCKER, fix-then-verify):
+
+- **A11y BLOCKER fixed: ScanFeedbackCard had no live region**
+  (`bg_63210027` #17). The success/duplicate/invalid card that pops
+  on every scan was visually-only — a blind operator hears nothing
+  when a scan completes. RDScannerScreen now wires
+  `Modifier.semantics(mergeDescendants = true) { liveRegion =
+  LiveRegionMode.Assertive; contentDescription = "<title>,
+  <spoken-subtitle>" }` on the Card. The spoken subtitle joins the
+  12-digit RD number with spaces (`"1 2 3 4 ..."`) so TalkBack
+  reads it digit-by-digit instead of as a 12-billion-something
+  integer. Assertive (not Polite) because operators need immediate
+  feedback to decide whether to move on or rescan.
+
+- **A11y: 6 hardcoded English `contentDescription = "Back"`
+  localized** (`bg_63210027` #1, expanded from oracle's 4 sites to
+  the actual 6 found in the tree). AppInfoScreen, RDScannerScreen,
+  AddAccountsScreen, SessionDetailScreen, HowItWorksScreen,
+  AccountsScreen all now use `stringResource(R.string.content_desc_back)`
+  (existing key, already had Hindi value `वापस`). Hi-locale users
+  now hear the localized name in TalkBack instead of English "Back".
+
+- **A11y: 3 hardcoded English RDScanner action button labels
+  localized** (`bg_63210027` #2). The bottom-bar `weight(1f) × 3`
+  row's `Undo` / `Save` / `End` button text now uses
+  `stringResource(R.string.scanner_action_{undo,save,end})`. New
+  Hindi values `अनडू` / `सेव` / `बंद` (transliteration over the
+  Sanskrit-formal `पूर्ववत्` because mobile-UI familiarity matters
+  more, and reusing `वापस` for Undo would collide with the
+  back-button TalkBack reading).
+
+- **Wire contract: DeviceRow TS type missing `deleted_at`**
+  (`bg_1608a30c` F1). Portal's `RdAccountRow / ScanLotRow /
+  ScanSessionRow / RdNumberRow` all already carry `deleted_at`;
+  DeviceRow was the lone omission (cloud added it in the v9
+  soft-delete migration). No current portal code path reads it, but
+  the type is the canonical wire contract — future audit / join
+  consumers stay sound. Added with a paragraph documenting why it
+  stays on the type even with no current consumer.
+
+- **Cold-cache first-paint white flash + unstyled-spinner**
+  (`bg_c5ffb9ee` F1+F3). On a cold cache the portal had a
+  200-400ms white flash before the Tailwind CSS in the JS bundle
+  applied. `portal/index.html` now ships an inline `<style>` block
+  with the design-system tokens hand-mirrored from
+  `tailwind.config.ts` (surface.alt `#F9FAFB`, ink.primary
+  `#111827`, brand `#FF9F43`) plus a minimal CSS-only spinner shell
+  inside `#root` (auto-replaced when React mounts). The spinner
+  honours `prefers-reduced-motion`. Documented the token mirror so
+  a future palette change doesn't silently drift the first-paint
+  shell out of sync with the post-mount tree.
+
+- **Concurrency: AccountEditDialog stale-data silent overwrite**
+  (`bg_50bb21c1` F4). The dialog held form state in `useState`
+  initialized from the `account` prop at mount. If realtime sync
+  (`useRealtimeSync.ts:95`) invalidated `['accounts']` while the
+  operator was typing — because a phone pushed an edit to the same
+  account — the typed values would silently overwrite the phone's
+  edit on save. Now the dialog snapshots `account.updated_at` on
+  mount (in a ref to survive re-renders), subscribes to the
+  `['accounts']` query cache, and surfaces a `warn`-toned banner if
+  a fresher row for the same `rd_number` lands. Two affordances:
+  **Reload latest** (resets form state to cloud truth, advances
+  baseline) and **Keep my edits** (last-write-wins per documented
+  R5 conflict policy; advances baseline so the banner doesn't
+  re-prompt on the same revision). The banner also lists which
+  fields drifted (`"A phone changed the name, monthly amount while
+  you were editing."`).
+
+Deferred (handoff-tracked, not silently dropped):
+
+- bg_63210027 #4 (Toast-instead-of-LiveRegion for critical
+  feedback), #6 (FilterChip selected-state announcement), #5
+  (Hindi/Latin numeral reading-order on mixed-script labels), #14
+  (MonthBar selectable + range announcement) — polish-tier. None
+  block the core scanning workflow now that the
+  ScanFeedbackCard BLOCKER is fixed.
+- bg_c5ffb9ee F7 (Recharts modulepreload) — manifest-extraction
+  overhead exceeds the perceived gain at 1-portal-owner scale.
+- bg_50bb21c1 F1 (two-phone same-session LOT collision) — cloud's
+  `UNIQUE(session_id, lot_number)` rejects with 409, phone marks
+  `SYNC_ERROR`, the R5 `notifySyncAbandoned` notification path
+  fires after the abandon threshold. Defended end-to-end already;
+  no further fix needed.
+- The remaining ~15 oracle findings across the 4 deep runs were
+  empirical false positives (verified against actual code) and
+  correctly-by-design decisions (e.g. Dashboard intentionally
+  fetched post-auth for security, defaultCount mapper placeholder
+  intentional, font system stack is intentionally instant).
+
+Regression sweep (`bg_a859d85c` → relaunched as `bg_275e42c3`
+lean): **19/19 R1-R6 fixes VERIFIED in current HEAD, no
+regressions**. Items covered: GradientTopBar scrim removal + 7
+consumer `statusBarsPadding`, `totalCollectedThisMonth` weighted
+formula + `en-IN` locale, 21 `.eq('owner_id', ownerId)` calls
+in `queries.ts` + SyncRepository TOCTOU fix (getSessionById
+inside `withTransaction`), `require(monthsPaid in 1..36)` in both
+`toDto()` and `toEntity()`, 3 portal Retry buttons,
+`useBackdropClose` in 5 dialogs, Noto Sans font + Promise.allSettled
++ notifySyncAbandoned, HttpTimeout @OptIn + NetworkCallback
++ `findExistingDevice` ordering in AuthAwareRoot
++ useDocumentTitle in 7 pages + robots.txt + v11 begin/commit.
+
+### v12 cloud schema hardening (status: DRAFTED but NOT APPLIED)
+
+A `cloud/migrations/v12_text_length_index_hardening.sql` file was
+pre-drafted in the working tree to bank two deferred R4/R6 oracle
+items so the SQL is ready whenever you want to paste it. **It is
+NOT required for R7 ship** — no R7 finding gated on it. Apply at
+your discretion in Supabase Studio. Contents:
+
+1. **Text-length CHECK constraints** (R4 #15 deferred):
+   - `devices.device_name` ≤ 100
+   - `devices.last_sync_error` ≤ 4000 (16× headroom over phone's
+     240-char `DEVICE_ERROR_MESSAGE_MAX_CHARS` truncation)
+   - `scan_sessions.operator_name` ≤ 100
+   - `rd_accounts.name` ≤ 200
+   - `rd_accounts.last_paid_through` regex
+     `^[0-9]{4}-(0[1-9]|1[0-2])$` (locks the YYYY-MM
+     lexical=chronological invariant that the phone DAO
+     `WHERE lastPaidThrough < :newMonth` and portal
+     `dashboardQueries last_paid_through < currentMonth`
+     defaulter compute both depend on).
+
+2. **Redundant single-column `owner_id` index cleanup**
+   (R6 #15 deferred): drops `scan_lots_owner_idx`,
+   `rd_numbers_owner_idx`, `rd_accounts_owner_idx` (each subsumed
+   by the v10-added composite `(owner_id, updated_at)` index;
+   planner uses leftmost-prefix for equality-only `owner_id`
+   lookups). Preserves `devices_owner_idx` (different shape).
+
+Wrapped in `begin; ... commit;` with idempotent `do $$ ... if not
+exists ... end $$` guards on the constraints, and a sanity-check
+block at the bottom that verifies each constraint exists, no
+existing rows violate, dropped indexes are gone, and the subsuming
+composite indexes are still present. `cloud/schema.sql` already
+reflects the v12 state (constraints inlined, redundant indexes
+removed) so fresh installs match upgraded installs.
 
 ---
 

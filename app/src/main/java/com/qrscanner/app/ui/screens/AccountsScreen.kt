@@ -67,10 +67,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.qrscanner.app.QRScannerApp
+import com.qrscanner.app.R
 import com.qrscanner.app.data.AccountSource
 import com.qrscanner.app.data.RdAccount
 import com.qrscanner.app.ui.components.DeleteOrInactivateDialog
@@ -404,7 +406,7 @@ private fun AccountsHeader(
             ) {
                 Icon(
                     Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
+                        contentDescription = stringResource(R.string.content_desc_back),
                     tint = Color.White
                 )
             }

@@ -10,9 +10,56 @@
     <meta name="description" content="Private RD Book Scanner portal. Sessions, accounts, defaulters, and device sync diagnostics." />
     <meta name="robots" content="noindex, nofollow" />
     <title>RD Scanner — Portal</title>
+    <!--
+      Inline first-paint shell. Tailwind ships in the JS bundle, so on a
+      cold cache there is a 200-400ms window where the body has zero
+      background + the React tree has not mounted. Without this, owners
+      on hotel/cafe wifi see a white flash followed by an unstyled
+      spinner. The values mirror tailwind.config.ts:
+        surface.alt  = #F9FAFB
+        ink.primary  = #111827
+        brand        = #FF9F43
+      Keep this block in sync with those tokens; treat it as part of
+      the design system, not a one-off override.
+    -->
+    <style>
+      html, body { margin: 0; padding: 0; }
+      body {
+        background: #F9FAFB;
+        color: #111827;
+        font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+      .first-paint-shell {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .first-paint-shell__spinner {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        border: 2px solid rgba(255, 159, 67, 0.18);
+        border-top-color: #FF9F43;
+        animation: first-paint-spin 0.9s linear infinite;
+      }
+      @keyframes first-paint-spin {
+        to { transform: rotate(360deg); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .first-paint-shell__spinner { animation-duration: 2.4s; }
+      }
+    </style>
   </head>
   <body class="bg-surface-alt text-ink-primary font-sans antialiased">
-    <div id="root"></div>
+    <div id="root">
+      <div class="first-paint-shell" role="status" aria-label="Loading portal">
+        <div class="first-paint-shell__spinner" aria-hidden="true"></div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

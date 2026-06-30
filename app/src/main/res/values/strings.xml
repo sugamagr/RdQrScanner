@@ -183,4 +183,12 @@
     <!-- Generic content descriptions -->
     <string name="content_desc_back">Back</string>
     <string name="pill_a11y_description">Sync status: %1$s</string>
+
+    <!-- RDScanner bottom-bar action buttons. Kept short (1 word each)
+         because the row is weight(1f) x 3 on narrow phones; longer
+         labels wrap mid-word. Hindi values follow the same length
+         constraint. -->
+    <string name="scanner_action_undo">Undo</string>
+    <string name="scanner_action_save">Save</string>
+    <string name="scanner_action_end">End</string>
 </resources>

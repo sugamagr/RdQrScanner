@@ -21,6 +21,12 @@ export interface DeviceRow {
   last_push_at: string | null;
   created_at: string;
   updated_at: string;
+  // Soft-delete tombstone. Mirrors the cloud `deleted_at timestamptz`
+  // column added by the v9 soft-delete migration. The portal Devices
+  // page filters `is null` server-side, but any future code path that
+  // reads a raw DeviceRow (e.g. an audit log, or a join surfaced by a
+  // future view) must see the field on the type to stay sound.
+  deleted_at: string | null;
 }
 
 export interface ScanSessionRow {

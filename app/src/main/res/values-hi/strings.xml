@@ -183,4 +183,14 @@
 
     <!-- Generic content descriptions -->
     <string name="content_desc_back">वापस</string>
+
+    <!-- RDScanner bottom-bar action buttons. 1-word ceiling for the
+         weight(1f) x 3 row on narrow phones. "Undo" stays as the
+         transliteration (अनडू) - the literal Hindi (पूर्ववत्) is
+         Sanskrit-formal and unfamiliar in mobile UI, while वापस is
+         already content_desc_back so reusing it for undo would make
+         TalkBack speak both identically. -->
+    <string name="scanner_action_undo">अनडू</string>
+    <string name="scanner_action_save">सेव</string>
+    <string name="scanner_action_end">बंद</string>
 </resources>

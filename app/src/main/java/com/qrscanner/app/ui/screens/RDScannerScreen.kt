@@ -102,6 +102,10 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -968,7 +972,7 @@ private fun RDCameraScreen(
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
+                        contentDescription = stringResource(R.string.content_desc_back),
                         tint = Color.White
                     )
                 }
@@ -1162,7 +1166,7 @@ private fun RDCameraScreen(
                 ) {
                     Icon(Icons.AutoMirrored.Filled.Undo, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Undo", maxLines = 1)
+                    Text(stringResource(R.string.scanner_action_undo), maxLines = 1)
                 }
 
                 Button(
@@ -1177,7 +1181,7 @@ private fun RDCameraScreen(
                 ) {
                     Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Save", maxLines = 1)
+                    Text(stringResource(R.string.scanner_action_save), maxLines = 1)
                 }
 
                 Button(
@@ -1190,7 +1194,7 @@ private fun RDCameraScreen(
                 ) {
                     Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("End", maxLines = 1)
+                    Text(stringResource(R.string.scanner_action_end), maxLines = 1)
                 }
             }
         }
@@ -1788,30 +1792,55 @@ private fun ScanFeedbackCard(feedback: ScanFeedback) {
     val icon: ImageVector
     val title: String
     val subtitle: String
-    
+    val spokenSubtitle: String
+
     when (feedback) {
         is ScanFeedback.Success -> {
             bgColor = SuccessGreen
             icon = Icons.Default.CheckCircle
             title = "Scanned!"
             subtitle = feedback.number
+            // TalkBack reads a bare 12-digit string as one giant integer
+            // ("one hundred twenty-three billion..."), which is useless for
+            // confirming an RD number. Joining the digits with spaces forces
+            // digit-by-digit speech ("one two three four..."). Keep this in
+            // sync with the visual `subtitle` so the screen reading matches
+            // what the sighted operator sees.
+            spokenSubtitle = feedback.number.toCharArray().joinToString(" ")
         }
         is ScanFeedback.Duplicate -> {
             bgColor = WarningAmber
             icon = Icons.Default.Close
             title = "Duplicate"
             subtitle = feedback.message
+            spokenSubtitle = feedback.message
         }
         is ScanFeedback.Invalid -> {
             bgColor = ErrorRed
             icon = Icons.Default.Close
             title = "Invalid"
             subtitle = feedback.message
+            spokenSubtitle = feedback.message
         }
     }
-    
+
+    // BLOCKER fix (R7 a11y bg_63210027 #17): ScanFeedbackCard is the
+    // primary success/duplicate/invalid signal in the core scanning
+    // loop. Without LiveRegion.Assertive, a blind operator hears
+    // nothing when a scan completes - the workflow becomes unusable.
+    // Assertive (not Polite) because the operator needs immediate
+    // feedback to know whether to move to the next book or rescan;
+    // queuing the announcement would defeat the point. The merged
+    // contentDescription replaces the per-element reading so TalkBack
+    // speaks one coherent phrase ("Scanned, 1 2 3 4") rather than
+    // narrating the icon, title, and subtitle separately.
     Card(
-        modifier = Modifier.padding(horizontal = 32.dp),
+        modifier = Modifier
+            .padding(horizontal = 32.dp)
+            .semantics(mergeDescendants = true) {
+                liveRegion = LiveRegionMode.Assertive
+                contentDescription = "$title, $spokenSubtitle"
+            },
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = bgColor),
         elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
