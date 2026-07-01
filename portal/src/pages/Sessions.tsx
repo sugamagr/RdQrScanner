@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader';
 import { SkeletonCard } from '../components/Loader';
 import {
@@ -10,6 +10,7 @@ import {
 } from '../lib/queries';
 import { formatDateTime, formatNumber, formatRelativeTime } from '../lib/format';
 import { useDocumentTitle } from '../lib/useDocumentTitle';
+import type { ScanSessionRow } from '../types/db';
 
 export function SessionsPage() {
   useDocumentTitle('Sessions');
@@ -54,6 +55,22 @@ export function SessionsPage() {
   const rows = query.data?.pages.flatMap((page) => page.rows) ?? [];
   const isInitialLoad = query.isLoading;
   const isEmpty = !isInitialLoad && rows.length === 0;
+  const navigate = useNavigate();
+  // Whole-row navigation. Handler-on-<tr> pattern (with role=link +
+  // keyboard Enter/Space) instead of wrapping cells in <Link> because
+  // <a> cannot legally contain <td> per HTML spec — nested Link would
+  // render invalid markup that some screen readers linearize wrong.
+  const openSession = (id: string) => navigate(`/sessions/${id}`);
+  // Split the row list into segments per month so we can render
+  // a divider between segments. Uses end_time (finalization time)
+  // to match the row's own "Ended" column — a session that spans
+  // two months is grouped by when it ended so the divider matches
+  // the visible timestamp beside it. end_time can technically be
+  // null for a not-yet-finalized session but Sessions.tsx never
+  // renders those (fetchSessionsPage orders desc-nulls-last and
+  // the phone never uploads pre-finalize rows); the guard below
+  // is defensive.
+  const rowsByMonth = groupSessionsByMonth(rows);
 
   return (
     <div>
@@ -69,15 +86,14 @@ export function SessionsPage() {
             className="flex items-center gap-2"
           >
             <label className="contents">
-              <span className="sr-only">Search by session number</span>
+              <span className="sr-only">Search by session number or account name</span>
               <input
                 type="text"
-                inputMode="numeric"
-                placeholder="Search by session #"
-                aria-label="Search by session number"
+                placeholder="Search # or account name"
+                aria-label="Search by session number or account name"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
-                className="w-44 rounded-pill border border-surface-border bg-surface px-3.5 py-1.5 text-sm placeholder:text-ink-muted sm:w-56"
+                className="w-44 rounded-pill border border-surface-border bg-surface px-3.5 py-1.5 text-sm placeholder:text-ink-muted sm:w-64"
               />
             </label>
             {committedSearch && (
@@ -124,45 +140,13 @@ export function SessionsPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((session) => (
-                <tr
-                  key={session.id}
-                  className="border-b border-surface-border transition-colors duration-150 last:border-b-0 hover:bg-surface-alt"
-                >
-                  <td className="px-4 py-3 align-middle">
-                    <Link
-                      to={`/sessions/${session.id}`}
-                      className="font-semibold text-primary-dark hover:text-primary"
-                    >
-                      #{session.display_number}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3 align-middle text-ink-primary">
-                    {session.operator_name || (
-                      <span className="text-ink-muted">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 align-middle text-right font-mono tabular-nums text-ink-primary">
-                    {formatNumber(session.total_lots)}
-                  </td>
-                  <td className="px-4 py-3 align-middle text-right font-mono tabular-nums text-ink-primary">
-                    {formatNumber(session.total_rd_numbers)}
-                  </td>
-                  <td className="px-4 py-3 align-middle text-right">
-                    {session.default_count > 0 ? (
-                      <span className="inline-flex items-center rounded-pill bg-warn/15 px-2.5 py-0.5 text-xs font-semibold tabular-nums text-warn">
-                        {formatNumber(session.default_count)}
-                      </span>
-                    ) : (
-                      <span className="tabular-nums text-ink-muted">0</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 align-middle">
-                    <span title={formatDateTime(session.end_time)} className="text-ink-secondary">
-                      {formatRelativeTime(session.end_time)}
-                    </span>
-                  </td>
-                </tr>
+              {rowsByMonth.map((group) => (
+                <FragmentGroup
+                  key={group.monthKey}
+                  monthLabel={group.monthLabel}
+                  sessions={group.sessions}
+                  onOpen={openSession}
+                />
               ))}
             </tbody>
           </table>
@@ -200,14 +184,19 @@ function SessionSkeletons() {
 }
 
 function EmptyState({ search }: { search: string }) {
+  const isNumeric = search !== '' && Number.isInteger(Number(search));
   return (
     <div className="mt-6 rounded-2xl border border-dashed border-surface-border bg-surface p-12 text-center">
       <p className="text-sm font-medium text-ink-primary">
-        {search ? `No sessions match #${search}.` : 'No sessions yet.'}
+        {search
+          ? isNumeric
+            ? `No sessions match #${search}.`
+            : `No sessions include an account matching "${search}".`
+          : 'No sessions yet.'}
       </p>
       <p className="mt-1 text-xs text-ink-secondary">
         {search
-          ? 'Try a different number or clear the search.'
+          ? 'Try a different search term or clear the field.'
           : 'When a phone finalizes its first session it will appear here.'}
       </p>
     </div>
@@ -226,5 +215,124 @@ function ErrorState({ message, onRetry }: { message: string; onRetry: () => void
         Retry
       </button>
     </div>
+  );
+}
+
+type SessionGroup = {
+  monthKey: string;
+  monthLabel: string;
+  sessions: ScanSessionRow[];
+};
+
+const MONTH_LABEL_FMT = new Intl.DateTimeFormat(undefined, {
+  month: 'long',
+  year: 'numeric',
+});
+
+function groupSessionsByMonth(rows: ScanSessionRow[]): SessionGroup[] {
+  const groups: SessionGroup[] = [];
+  let current: SessionGroup | null = null;
+  for (const session of rows) {
+    const anchor = session.end_time ?? session.start_time;
+    if (!anchor) continue;
+    const d = new Date(anchor);
+    if (Number.isNaN(d.getTime())) continue;
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    if (!current || current.monthKey !== key) {
+      current = {
+        monthKey: key,
+        monthLabel: MONTH_LABEL_FMT.format(d),
+        sessions: [],
+      };
+      groups.push(current);
+    }
+    current.sessions.push(session);
+  }
+  return groups;
+}
+
+function FragmentGroup({
+  monthLabel,
+  sessions,
+  onOpen,
+}: {
+  monthLabel: string;
+  sessions: ScanSessionRow[];
+  onOpen: (id: string) => void;
+}) {
+  return (
+    <>
+      <tr className="bg-surface-alt/60">
+        <th
+          scope="colgroup"
+          colSpan={6}
+          className="px-4 py-2 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-secondary"
+        >
+          {monthLabel}
+        </th>
+      </tr>
+      {sessions.map((session) => (
+        <SessionRow key={session.id} session={session} onOpen={onOpen} />
+      ))}
+    </>
+  );
+}
+
+function SessionRow({
+  session,
+  onOpen,
+}: {
+  session: ScanSessionRow;
+  onOpen: (id: string) => void;
+}) {
+  // Whole-row link: role=link + keyboard Enter/Space activation. Uses
+  // a cursor-pointer + focus ring for discoverability. Nested Link is
+  // avoided (HTML: <a> cannot contain <td>). The visible #N is still
+  // rendered as the primary underlined label so the row LOOKS like a
+  // link on hover; the click surface just extends across all cells.
+  const handleKey = (e: React.KeyboardEvent<HTMLTableRowElement>) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onOpen(session.id);
+    }
+  };
+  return (
+    <tr
+      role="link"
+      tabIndex={0}
+      aria-label={`Open session #${session.display_number}`}
+      onClick={() => onOpen(session.id)}
+      onKeyDown={handleKey}
+      className="cursor-pointer border-b border-surface-border transition-colors duration-150 last:border-b-0 hover:bg-surface-alt focus:bg-surface-alt focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-inset"
+    >
+      <td className="px-4 py-3 align-middle">
+        <span className="font-semibold text-primary-dark">
+          #{session.display_number}
+        </span>
+      </td>
+      <td className="px-4 py-3 align-middle text-ink-primary">
+        {session.operator_name || <span className="text-ink-muted">—</span>}
+      </td>
+      <td className="px-4 py-3 align-middle text-right font-mono tabular-nums text-ink-primary">
+        {formatNumber(session.total_lots)}
+      </td>
+      <td className="px-4 py-3 align-middle text-right font-mono tabular-nums text-ink-primary">
+        {formatNumber(session.total_rd_numbers)}
+      </td>
+      <td className="px-4 py-3 align-middle text-right">
+        {session.default_count > 0 ? (
+          <span className="inline-flex items-center rounded-pill bg-warn/15 px-2.5 py-0.5 text-xs font-semibold tabular-nums text-warn">
+            {formatNumber(session.default_count)}
+          </span>
+        ) : (
+          <span className="tabular-nums text-ink-muted">0</span>
+        )}
+      </td>
+      <td className="px-4 py-3 align-middle">
+        <span title={formatDateTime(session.end_time)} className="text-ink-secondary">
+          {formatRelativeTime(session.end_time)}
+        </span>
+      </td>
+    </tr>
   );
 }

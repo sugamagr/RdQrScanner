@@ -165,6 +165,11 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
     }
   };
 
+  // Ref-based read of the "in-flight" state from inside the keydown
+  // handler below. Using a ref instead of adding upload.isPending to
+  // the effect's dep array avoids re-registering the window keydown
+  // listener on every render while the mutation is running.
+  const busyRef = useRef(false);
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
     closeBtnRef.current?.focus();
@@ -173,6 +178,12 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
+        // Suppress ESC-close when an upload or regression check is
+        // in flight. Aborting mid-request would leave the operator
+        // unsure whether the write partially succeeded — the correct
+        // affordance is the AbortController wired to the Cancel
+        // button, not a keyboard shortcut with no confirmation.
+        if (busyRef.current) return;
         onClose();
         return;
       }
@@ -308,7 +319,17 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
     }
   };
 
-  const backdropHandlers = useBackdropClose(onClose);
+  // Composite "in-flight" flag consumed by every dismissal path
+  // (backdrop, ESC, X button, bottom Close). Keep the three read
+  // sites deriving from ONE source so a future add of a fourth
+  // dismissal surface can't drift into skipping the guard.
+  const busy = upload.isPending || regressionCheck.kind === 'checking';
+  busyRef.current = busy;
+  // Backdrop click during import: swap the close handler for a
+  // no-op so a stray click outside the panel can't abort the write.
+  // The onClose contract is preserved when not busy, so focus-return
+  // and mounted-guard behaviour continue to hold.
+  const backdropHandlers = useBackdropClose(busy ? () => {} : onClose);
   return (
     <div
       role="dialog"
@@ -341,8 +362,10 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
             ref={closeBtnRef}
             type="button"
             onClick={onClose}
-            className="rounded-lg p-1 text-ink-secondary hover:bg-surface-alt hover:text-ink-primary"
-            aria-label="Close"
+            disabled={busy}
+            className="rounded-lg p-1 text-ink-secondary hover:bg-surface-alt hover:text-ink-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-ink-secondary"
+            aria-label={busy ? 'Close disabled while import is running' : 'Close'}
+            title={busy ? 'Wait for import to finish' : undefined}
           >
             <X className="h-5 w-5" />
           </button>
@@ -584,8 +607,10 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
           <button
             type="button"
             onClick={onClose}
-            disabled={upload.isPending}
-            className="rounded-pill px-3.5 py-1.5 text-xs font-medium text-ink-secondary hover:text-ink-primary"
+            disabled={busy}
+            className="rounded-pill px-3.5 py-1.5 text-xs font-medium text-ink-secondary hover:text-ink-primary disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label={busy ? 'Cancel disabled while import is running' : undefined}
+            title={busy ? 'Wait for import to finish' : undefined}
           >
             Cancel
           </button>

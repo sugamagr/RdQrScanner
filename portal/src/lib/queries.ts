@@ -62,6 +62,65 @@ export async function fetchSessionsPage(params: {
   const { offset, search } = params;
   const to = offset + SESSIONS_PAGE_SIZE - 1;
   const ownerId = await requireOwnerId();
+
+  const trimmed = search?.trim() ?? '';
+  const asNumber = trimmed ? Number(trimmed) : NaN;
+  const isPureInt = trimmed !== '' && !Number.isNaN(asNumber) && Number.isInteger(asNumber);
+
+  // Text-mode search (any non-numeric query) resolves session IDs
+  // through: rd_accounts.name ILIKE %q% → rd_number list →
+  // rd_numbers → scan_lots → scan_sessions.id. Chained client-side
+  // fetch instead of a Postgres RPC because owner-scale is ~30
+  // sessions/year × ~200 accounts; the four round-trips stay under
+  // ~500ms and the rewrite avoids a cloud migration (which would
+  // force a manual Supabase Studio paste for every operator on
+  // first upgrade). If scale ever grows past ~10k sessions, replace
+  // this with an RPC that runs the join server-side.
+  let sessionIdFilter: string[] | null = null;
+  if (trimmed !== '' && !isPureInt) {
+    // rd_accounts is indexed on lower(name) gin_trgm_ops — cheap
+    // ILIKE. Match ANY substring; users search "shikhil" or "gupta"
+    // not the whole name.
+    const escaped = trimmed.replace(/[%_\\]/g, (ch) => `\\${ch}`);
+    const accountsRes = await supabase
+      .from('rd_accounts')
+      .select('rd_number')
+      .eq('owner_id', ownerId)
+      .is('deleted_at', null)
+      .ilike('name', `%${escaped}%`);
+    if (accountsRes.error) throw accountsRes.error;
+    const rdNumbers = (accountsRes.data ?? []).map((r) => (r as { rd_number: string }).rd_number);
+    if (rdNumbers.length === 0) {
+      return { rows: [], nextOffset: null };
+    }
+    const lotIdsRes = await supabase
+      .from('rd_numbers')
+      .select('lot_id')
+      .eq('owner_id', ownerId)
+      .is('deleted_at', null)
+      .in('number', rdNumbers);
+    if (lotIdsRes.error) throw lotIdsRes.error;
+    const lotIds = Array.from(
+      new Set((lotIdsRes.data ?? []).map((r) => (r as { lot_id: string }).lot_id))
+    );
+    if (lotIds.length === 0) {
+      return { rows: [], nextOffset: null };
+    }
+    const sessionsRes = await supabase
+      .from('scan_lots')
+      .select('session_id')
+      .eq('owner_id', ownerId)
+      .is('deleted_at', null)
+      .in('id', lotIds);
+    if (sessionsRes.error) throw sessionsRes.error;
+    sessionIdFilter = Array.from(
+      new Set((sessionsRes.data ?? []).map((r) => (r as { session_id: string }).session_id))
+    );
+    if (sessionIdFilter.length === 0) {
+      return { rows: [], nextOffset: null };
+    }
+  }
+
   let query = supabase
     .from('scan_sessions')
     .select('*', { count: 'exact' })
@@ -70,12 +129,10 @@ export async function fetchSessionsPage(params: {
     .order('end_time', { ascending: false })
     .range(offset, to);
 
-  const trimmed = search?.trim();
-  if (trimmed) {
-    const asNumber = Number(trimmed);
-    if (!Number.isNaN(asNumber) && Number.isInteger(asNumber)) {
-      query = query.eq('display_number', asNumber);
-    }
+  if (isPureInt) {
+    query = query.eq('display_number', asNumber);
+  } else if (sessionIdFilter !== null) {
+    query = query.in('id', sessionIdFilter);
   }
 
   const { data, error, count } = await query;
@@ -624,6 +681,39 @@ export async function softDeleteAccount(rdNumber: string): Promise<void> {
     .eq('owner_id', ownerId)
     .is('deleted_at', null);
   if (error) throw error;
+}
+
+/**
+ * Bulk soft-delete for the portal's Accounts page bulk-select flow.
+ * Same semantics as softDeleteAccount but batched: one PostgREST
+ * round-trip per chunk. Chunked to stay under PostgREST's IN-list
+ * URL-length limit (see fetchExistingLastPaidThroughMap for the same
+ * 500 chunk convention). Returns the number of rows actually
+ * tombstoned (may be less than input if some were already deleted
+ * concurrently by another device — LWW via `is('deleted_at', null)`
+ * gate).
+ */
+export async function bulkSoftDeleteAccounts(
+  rdNumbers: ReadonlyArray<string>
+): Promise<number> {
+  if (rdNumbers.length === 0) return 0;
+  const ownerId = await requireOwnerId();
+  const now = new Date().toISOString();
+  const CHUNK = 500;
+  let deleted = 0;
+  for (let i = 0; i < rdNumbers.length; i += CHUNK) {
+    const chunk = rdNumbers.slice(i, i + CHUNK);
+    const { data, error } = await supabase
+      .from('rd_accounts')
+      .update({ deleted_at: now, last_editor_device_id: null })
+      .in('rd_number', chunk as string[])
+      .eq('owner_id', ownerId)
+      .is('deleted_at', null)
+      .select('rd_number');
+    if (error) throw error;
+    deleted += data?.length ?? 0;
+  }
+  return deleted;
 }
 
 export interface BulkAccountInput {

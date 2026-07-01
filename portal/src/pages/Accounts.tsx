@@ -2,6 +2,7 @@ import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  AlertTriangle,
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
@@ -9,6 +10,7 @@ import {
   Lock,
   MoreVertical,
   Search as SearchIcon,
+  Trash2,
   Upload,
   Users,
   X,
@@ -18,7 +20,7 @@ import { SkeletonCard } from '../components/Loader';
 import { AccountEditDialog } from '../components/AccountEditDialog';
 import { DeleteOrInactivateDialog } from '../components/DeleteOrInactivateDialog';
 import { ImportCsvDialog } from '../components/ImportCsvDialog';
-import { fetchAccounts, reactivateAccount } from '../lib/queries';
+import { bulkSoftDeleteAccounts, fetchAccounts, reactivateAccount } from '../lib/queries';
 import { useAuth } from '../lib/useAuth';
 import { formatNumber } from '../lib/format';
 import { useDocumentTitle } from '../lib/useDocumentTitle';
@@ -66,12 +68,53 @@ export function AccountsPage() {
   const [importing, setImporting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [overflowFor, setOverflowFor] = useState<string | null>(null);
+  // Set of rd_number keys the operator has ticked in the bulk-select
+  // column. Kept as a Set for O(1) toggle + O(1) visible-row-highlight
+  // during render. Cleared on successful bulk-delete + on filter/search
+  // change (see below) so a stale selection from a previous view can't
+  // survive into the current one.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [confirmingBulkDelete, setConfirmingBulkDelete] = useState(false);
+
+  const bulkDeleteMutation = useMutation({
+    mutationFn: (ids: string[]) => bulkSoftDeleteAccounts(ids),
+    onSuccess: (deleted, ids) => {
+      qc.invalidateQueries({ queryKey: ['accounts'] });
+      setSelectedIds(new Set());
+      setConfirmingBulkDelete(false);
+      const total = ids.length;
+      if (deleted === total) {
+        setToast(`${total} account${total === 1 ? '' : 's'} deleted.`);
+      } else {
+        setToast(
+          `Deleted ${deleted} of ${total}. ${total - deleted} were already removed elsewhere.`
+        );
+      }
+    },
+    onError: (err) => {
+      setConfirmingBulkDelete(false);
+      setToast(
+        err instanceof Error
+          ? `Bulk delete failed: ${err.message}`
+          : 'Bulk delete failed.'
+      );
+    },
+  });
 
   useEffect(() => {
     if (!toast) return;
     const t = window.setTimeout(() => setToast(null), 4000);
     return () => window.clearTimeout(t);
   }, [toast]);
+
+  // Auto-clear stale selection when the visible set changes. Without
+  // this, ticking three rows then typing a search that hides them
+  // leaves the "3 selected" bar dangling — and a stray click on the
+  // Delete button would tombstone rows the operator can no longer
+  // see. Cheap: runs only when the two filter inputs actually change.
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [deferredSearch, showInactive]);
 
   // C3-P6 NITPICK: stable memoized reference so the visibleAccounts
   // useMemo deps array doesn't see a new array identity on every render
@@ -113,6 +156,36 @@ export function AccountsPage() {
       setSortDir('asc');
     }
   };
+
+  const selectedCount = selectedIds.size;
+  const visibleSelectedCount = useMemo(
+    () => visibleAccounts.reduce((n, a) => (selectedIds.has(a.rd_number) ? n + 1 : n), 0),
+    [visibleAccounts, selectedIds]
+  );
+  const allVisibleSelected =
+    visibleAccounts.length > 0 && visibleSelectedCount === visibleAccounts.length;
+  const someVisibleSelected = visibleSelectedCount > 0;
+
+  const toggleSelectAllVisible = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        for (const a of visibleAccounts) next.delete(a.rd_number);
+      } else {
+        for (const a of visibleAccounts) next.add(a.rd_number);
+      }
+      return next;
+    });
+  };
+  const toggleSelectOne = (rdNumber: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(rdNumber)) next.delete(rdNumber);
+      else next.add(rdNumber);
+      return next;
+    });
+  };
+  const clearSelection = () => setSelectedIds(new Set());
 
   const isInitialLoad = query.isLoading;
 
@@ -211,6 +284,22 @@ export function AccountsPage() {
             <caption className="sr-only">RD Accounts list</caption>
             <thead className="border-b border-surface-border bg-surface-alt text-xs uppercase tracking-wide text-ink-secondary">
               <tr>
+                <th className="w-10 px-3 py-3 text-center">
+                  <input
+                    type="checkbox"
+                    aria-label={
+                      allVisibleSelected
+                        ? 'Deselect all visible accounts'
+                        : 'Select all visible accounts'
+                    }
+                    checked={allVisibleSelected}
+                    ref={(el) => {
+                      if (el) el.indeterminate = someVisibleSelected && !allVisibleSelected;
+                    }}
+                    onChange={toggleSelectAllVisible}
+                    className="h-4 w-4 cursor-pointer rounded border-surface-border text-primary focus:ring-primary/40"
+                  />
+                </th>
                 <SortableTh sortKey="name" current={sortKey} dir={sortDir} onClick={toggleSort}>
                   Name
                 </SortableTh>
@@ -243,13 +332,23 @@ export function AccountsPage() {
               {visibleAccounts.map((account) => {
                 const isCsv = account.source === 'CSV';
                 const muted = !account.is_active;
+                const isSelected = selectedIds.has(account.rd_number);
                 return (
                   <tr
                     key={account.rd_number}
                     className={`border-b border-surface-border transition-colors duration-150 last:border-b-0 hover:bg-surface-alt ${
                       muted ? 'opacity-60' : ''
-                    }`}
+                    } ${isSelected ? 'bg-primary/5' : ''}`}
                   >
+                    <td className="w-10 px-3 py-3 text-center align-middle">
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${account.name}`}
+                        checked={isSelected}
+                        onChange={() => toggleSelectOne(account.rd_number)}
+                        className="h-4 w-4 cursor-pointer rounded border-surface-border text-primary focus:ring-primary/40"
+                      />
+                    </td>
                     <td className="px-4 py-3 align-middle font-medium text-ink-primary">
                       {account.name}
                       {muted && (
@@ -353,11 +452,53 @@ export function AccountsPage() {
           onImported={(summary) => setToast(summary)}
         />
       )}
+      {selectedCount > 0 && (
+        <div
+          role="region"
+          aria-label={`${selectedCount} account${selectedCount === 1 ? '' : 's'} selected`}
+          className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center px-4"
+        >
+          <div className="pointer-events-auto flex items-center gap-2 rounded-2xl border border-surface-border bg-surface px-3 py-2 shadow-elevated sm:gap-3 sm:px-4">
+            <span className="text-xs font-semibold text-ink-primary sm:text-sm">
+              {formatNumber(selectedCount)} selected
+            </span>
+            <button
+              type="button"
+              onClick={clearSelection}
+              className="rounded-pill px-2.5 py-1 text-xs font-medium text-ink-secondary hover:bg-surface-alt hover:text-ink-primary"
+            >
+              Clear
+            </button>
+            <div className="mx-1 h-5 w-px bg-surface-border" aria-hidden="true" />
+            <button
+              type="button"
+              onClick={() => setConfirmingBulkDelete(true)}
+              className="inline-flex items-center gap-1.5 rounded-pill bg-danger px-3 py-1.5 text-xs font-semibold text-white shadow-card transition-colors hover:bg-danger/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger/50"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Delete {formatNumber(selectedCount)}
+            </button>
+          </div>
+        </div>
+      )}
+      {confirmingBulkDelete && (
+        <BulkDeleteConfirmDialog
+          count={selectedCount}
+          isPending={bulkDeleteMutation.isPending}
+          onCancel={() => {
+            if (bulkDeleteMutation.isPending) return;
+            setConfirmingBulkDelete(false);
+          }}
+          onConfirm={() => bulkDeleteMutation.mutate(Array.from(selectedIds))}
+        />
+      )}
       {toast && (
         <div
           role="status"
           aria-live="polite"
-          className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center"
+          className={`pointer-events-none fixed inset-x-0 z-40 flex justify-center ${
+            selectedCount > 0 ? 'bottom-24' : 'bottom-6'
+          }`}
         >
           <button
             type="button"
@@ -614,6 +755,73 @@ function formatPaidTill(yyyyMm: string): string {
   const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   return `${names[monthIdx]} ${year}`;
+}
+
+function BulkDeleteConfirmDialog({
+  count,
+  isPending,
+  onCancel,
+  onConfirm,
+}: {
+  count: number;
+  isPending: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="bulk-delete-title"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-ink-primary/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+      onClick={onCancel}
+    >
+      <div
+        className="flex w-full max-w-md flex-col overflow-hidden rounded-t-2xl bg-surface shadow-elevated sm:rounded-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start gap-3 px-5 py-5">
+          <div className="mt-0.5 flex h-10 w-10 flex-none items-center justify-center rounded-full bg-danger/10 text-danger">
+            <AlertTriangle className="h-5 w-5" />
+          </div>
+          <div className="flex-1">
+            <h2 id="bulk-delete-title" className="text-base font-semibold text-ink-primary">
+              Delete {formatNumber(count)} account{count === 1 ? '' : 's'}?
+            </h2>
+            <p className="mt-1 text-xs text-ink-secondary">
+              This soft-deletes the selected accounts. They will disappear from
+              scanning and from this list on every signed-in device. Phones that
+              have not synced recently may still show them until their next
+              pull; scans against a deleted account will be rejected.
+            </p>
+            <p className="mt-2 text-xs text-ink-muted">
+              Only the accounts you selected will be affected. Sessions,
+              lots, and scan history are not touched.
+            </p>
+          </div>
+        </div>
+        <footer className="flex items-center justify-end gap-2 border-t border-surface-border bg-surface-alt px-5 py-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={isPending}
+            className="rounded-pill px-3.5 py-1.5 text-xs font-medium text-ink-secondary hover:text-ink-primary disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={isPending}
+            className="inline-flex items-center gap-1.5 rounded-pill bg-danger px-4 py-1.5 text-xs font-semibold text-white shadow-card transition-colors hover:bg-danger/90 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            {isPending ? 'Deleting…' : `Delete ${formatNumber(count)}`}
+          </button>
+        </footer>
+      </div>
+    </div>
+  );
 }
 
 
