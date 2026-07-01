@@ -130,7 +130,12 @@ object XlsxExporter {
         sb.append("<cols>")
         sb.append("<col min=\"2\" max=\"2\" width=\"40\" customWidth=\"1\"/>")
         sb.append("<col min=\"5\" max=\"5\" width=\"30\" customWidth=\"1\"/>")
-        sb.append("<col min=\"6\" max=\"6\" width=\"50\" customWidth=\"1\"/>")
+        // P3 CROSS-FILE: column F now carries every RD number's month
+        // token(s) not just defaulters (see F cell writer below), so the
+        // width doubled from 50 to 80. Keeping the value in sync with the
+        // cell content is a soft invariant a linter can't catch — if F
+        // ever shrinks back to defaulters-only the width should drop too.
+        sb.append("<col min=\"6\" max=\"6\" width=\"80\" customWidth=\"1\"/>")
         sb.append("<col min=\"7\" max=\"7\" width=\"22\" customWidth=\"1\"/>")
         sb.append("</cols>")
         sb.append("<sheetData>")
@@ -141,7 +146,7 @@ object XlsxExporter {
         sb.append(strCell("C1", "Count", bold = true))
         sb.append(strCell("D1", "Default Count", bold = true))
         sb.append(strCell("E1", "Defaulters", bold = true))
-        sb.append(strCell("F1", "Default Months", bold = true))
+        sb.append(strCell("F1", "All Months", bold = true))
         sb.append(strCell("G1", "Timestamp", bold = true))
         sb.append("</row>")
 
@@ -156,7 +161,16 @@ object XlsxExporter {
             sb.append(numCell("C$rowNum", rows.size))
             sb.append(numCell("D$rowNum", defaulters.size))
             sb.append(strCell("E$rowNum", defaulters.joinToString("; ") { "${it.number}: ${it.monthsPaid}m" }))
-            sb.append(strCell("F$rowNum", defaulters.joinToString("; ") { rd ->
+            // P3 SEMANTIC: column F now enumerates EVERY row in the lot
+            // with its resolved month token(s), not just defaulters.
+            // resolveOrAuto returns [anchor] for the single-month case
+            // (monthsPaid == 1 || monthsList empty), so a non-defaulter
+            // renders as "<rd>: Jun-2026" — the same shape as a
+            // defaulter's multi-month token list. Column E still
+            // isolates defaulters for quick scanning; keeping both
+            // preserves the pre-existing report shape used by whoever
+            // has been consuming the exports.
+            sb.append(strCell("F$rowNum", rows.joinToString("; ") { rd ->
                 val months = MonthYear.resolveOrAuto(rd.monthsList, rd.monthsPaid, anchor)
                 "${rd.number}: " + months.joinToString(", ") { it.formatExport() }
             }))

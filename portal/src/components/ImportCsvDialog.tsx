@@ -29,6 +29,18 @@ interface RegressionRow {
 }
 
 /**
+ * Per-row override map for the regression-confirm modal. `true` (or
+ * absent) = regress this row (write the CSV's earlier month). `false`
+ * = keep the cloud's newer value (payload omits last_paid_through so
+ * PostgREST's UPDATE leaves the column alone; see bulkUpsertAccounts
+ * comment at queries.ts:827-832). This is per user's approval: the
+ * CSV/PDF from the DOP dashboard is authoritative but a per-row uncheck
+ * is a good guard for one-off cases where scan-derived credit is fresher
+ * than a batch export the operator just downloaded.
+ */
+type KeepCloudMap = Map<string, boolean>;
+
+/**
  * Total months between two YYYY-MM tokens (later minus earlier). Both
  * inputs are zero-padded YYYY-MM per the csvParser regex and the
  * rd_accounts.last_paid_through cloud column contract. Used to rank
@@ -83,6 +95,7 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
     | { kind: 'checking' }
     | { kind: 'needs-confirm'; rows: RegressionRow[] }
   >({ kind: 'idle' });
+  const [keepCloud, setKeepCloud] = useState<KeepCloudMap>(new Map());
   const [checkError, setCheckError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -97,6 +110,13 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
   const mountedRef = useRef(true);
   const abortRef = useRef<AbortController | null>(null);
   const uploadInFlightRef = useRef(false);
+  // Snapshot of keepCloud read inside mutationFn. Mutation closes over
+  // a specific React render's state; the operator can uncheck a row
+  // AFTER pressing "Regress N" but before the network hop finishes, and
+  // the freshest keep-cloud decision must still apply. Ref updated on
+  // every render below keeps mutationFn's read in sync without adding
+  // a mutation dependency array (useMutation doesn't have one).
+  const keepCloudRef = useRef<KeepCloudMap>(new Map());
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -221,8 +241,22 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
       if (!parseResult) throw new Error('Parse the file first');
       const ac = new AbortController();
       abortRef.current = ac;
+      // Apply per-row uncheck decisions: any regression row the
+      // operator kept-cloud gets its lastPaidThrough blanked so
+      // bulkUpsertAccounts omits the field from the payload
+      // (queries.ts:827-832 contract). Non-regression rows are
+      // untouched. Cloning avoids mutating parseResult which is
+      // still displayed in the preview list.
+      const keep = keepCloudRef.current;
+      const rows = keep.size === 0
+        ? parseResult.valid
+        : parseResult.valid.map((r) =>
+            keep.get(r.rdNumber) === true
+              ? { ...r, lastPaidThrough: null }
+              : r
+          );
       try {
-        return await bulkUpsertAccounts(parseResult.valid, ownerId, ac.signal);
+        return await bulkUpsertAccounts(rows, ownerId, ac.signal);
       } finally {
         if (abortRef.current === ac) abortRef.current = null;
       }
@@ -309,6 +343,12 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
         const jb = monthsBackward(b.incoming, b.existing);
         return jb - ja;
       });
+      // Reset keep-cloud map so a second regression-check pass (e.g.
+      // operator picked a different file after backing out once) starts
+      // from the "all rows will regress" default the modal contract
+      // promises. Without this reset, stale entries from the previous
+      // pass would silently persist and mis-target the fresh row set.
+      setKeepCloud(new Map());
       setRegressionCheck({ kind: 'needs-confirm', rows: regressions });
     } catch (err) {
       if (!mountedRef.current) return;
@@ -325,6 +365,7 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
   // dismissal surface can't drift into skipping the guard.
   const busy = upload.isPending || regressionCheck.kind === 'checking';
   busyRef.current = busy;
+  keepCloudRef.current = keepCloud;
   // Backdrop click during import: swap the close handler for a
   // no-op so a stray click outside the panel can't abort the write.
   // The onClose contract is preserved when not busy, so focus-return
@@ -503,71 +544,130 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
             </div>
           )}
 
-          {regressionCheck.kind === 'needs-confirm' && (
-            <div
-              role="alert"
-              aria-labelledby="regression-confirm-title"
-              className="rounded-xl border border-warn/30 bg-warn/5 px-3.5 py-3"
-            >
-              <p
-                id="regression-confirm-title"
-                className="text-xs font-semibold text-warn"
+          {regressionCheck.kind === 'needs-confirm' && (() => {
+            const rows = regressionCheck.rows;
+            // Derived tallies: any row not present in keepCloud with a
+            // `false` value counts as "will regress" (default is regress,
+            // matching the pre-existing bulk "Yes, regress N" action so
+            // muscle-memory operators get the same outcome without
+            // interacting with the checkboxes).
+            const willKeep = rows.filter((r) => keepCloud.get(r.rdNumber) === true).length;
+            const willRegress = rows.length - willKeep;
+            const allKept = willKeep === rows.length;
+            const toggleAll = () => {
+              const next = new Map<string, boolean>();
+              if (!allKept) {
+                for (const r of rows) next.set(r.rdNumber, true);
+              }
+              setKeepCloud(next);
+            };
+            const toggleOne = (rdNumber: string) => {
+              const next = new Map(keepCloud);
+              const cur = next.get(rdNumber) === true;
+              if (cur) next.delete(rdNumber);
+              else next.set(rdNumber, true);
+              setKeepCloud(next);
+            };
+            return (
+              <div
+                role="alert"
+                aria-labelledby="regression-confirm-title"
+                className="rounded-xl border border-warn/30 bg-warn/5 px-3.5 py-3"
               >
-                {regressionCheck.rows.length} account
-                {regressionCheck.rows.length === 1 ? '' : 's'} would move{' '}
-                <span className="font-mono">last_paid_through</span> backward
-              </p>
-              <p className="mt-1 text-[11px] text-ink-secondary">
-                The CSV sets an earlier month than the current value. The
-                paper book is the source of truth, so this is allowed — but
-                please confirm.
-              </p>
-              <ul className="mt-2 space-y-1 text-[11px]">
-                {regressionCheck.rows.slice(0, 5).map((r) => (
-                  <li
-                    key={r.rdNumber}
-                    className="flex items-center justify-between rounded-lg bg-surface px-2 py-1.5"
-                  >
-                    <span className="truncate font-medium text-ink-primary">
-                      {r.name}
-                    </span>
-                    <span className="ml-2 shrink-0 font-mono text-ink-secondary">
-                      <span className="text-ink-muted line-through">
-                        {r.existing}
-                      </span>
-                      {' \u2192 '}
-                      <span className="text-warn">{r.incoming}</span>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-              {regressionCheck.rows.length > 5 && (
-                <p className="mt-1 text-[10px] text-ink-muted">
-                  +{regressionCheck.rows.length - 5} more
+                <p
+                  id="regression-confirm-title"
+                  className="text-xs font-semibold text-warn"
+                >
+                  {rows.length} account
+                  {rows.length === 1 ? '' : 's'} would move{' '}
+                  <span className="font-mono">last_paid_through</span> backward
                 </p>
-              )}
-              <div className="mt-3 flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setRegressionCheck({ kind: 'idle' })}
-                  className="rounded-pill px-3 py-1.5 text-xs font-medium text-ink-secondary hover:text-ink-primary"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRegressionCheck({ kind: 'idle' });
-                    void runImport(true);
-                  }}
-                  className="rounded-pill bg-warn px-3.5 py-1.5 text-xs font-semibold text-white shadow-card transition-colors hover:bg-warn/90"
-                >
-                  Yes, regress {regressionCheck.rows.length} account
-                  {regressionCheck.rows.length === 1 ? '' : 's'}
-                </button>
+                <p className="mt-1 text-[11px] text-ink-secondary">
+                  The DOP CSV is authoritative, so this is allowed. Uncheck
+                  any row to keep the existing (newer) value for it — useful
+                  when a phone scan credited months after the export was
+                  generated.
+                </p>
+                <div className="mt-2 flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={toggleAll}
+                    className="text-[11px] font-medium text-ink-secondary underline decoration-dotted underline-offset-2 hover:text-ink-primary"
+                  >
+                    {allKept ? 'Regress all' : 'Keep all existing'}
+                  </button>
+                  <span className="text-[10px] text-ink-muted">
+                    {willRegress} regress · {willKeep} keep existing
+                  </span>
+                </div>
+                <ul className="mt-2 max-h-52 space-y-1 overflow-y-auto text-[11px]">
+                  {rows.map((r) => {
+                    const keep = keepCloud.get(r.rdNumber) === true;
+                    return (
+                      <li
+                        key={r.rdNumber}
+                        className="flex items-center gap-2 rounded-lg bg-surface px-2 py-1.5"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={!keep}
+                          onChange={() => toggleOne(r.rdNumber)}
+                          aria-label={
+                            keep
+                              ? `Regress ${r.name} to ${r.incoming}`
+                              : `Keep ${r.name} at ${r.existing}`
+                          }
+                          className="h-3.5 w-3.5 shrink-0 cursor-pointer accent-warn"
+                        />
+                        <span
+                          className={`min-w-0 flex-1 truncate font-medium ${
+                            keep ? 'text-ink-muted' : 'text-ink-primary'
+                          }`}
+                        >
+                          {r.name}
+                        </span>
+                        <span className="ml-2 shrink-0 font-mono text-ink-secondary">
+                          <span className="text-ink-muted line-through">
+                            {r.existing}
+                          </span>
+                          {' \u2192 '}
+                          <span className={keep ? 'text-ink-muted line-through' : 'text-warn'}>
+                            {r.incoming}
+                          </span>
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+                <div className="mt-3 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRegressionCheck({ kind: 'idle' });
+                      setKeepCloud(new Map());
+                    }}
+                    className="rounded-pill px-3 py-1.5 text-xs font-medium text-ink-secondary hover:text-ink-primary"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRegressionCheck({ kind: 'idle' });
+                      void runImport(true);
+                    }}
+                    className="rounded-pill bg-warn px-3.5 py-1.5 text-xs font-semibold text-white shadow-card transition-colors hover:bg-warn/90 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {willRegress === 0
+                      ? `Import (keep all ${willKeep} existing)`
+                      : willKeep === 0
+                        ? `Regress all ${willRegress}`
+                        : `Regress ${willRegress}, keep ${willKeep}`}
+                  </button>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {checkError && (
             <div className="rounded-xl border border-danger/20 bg-danger/5 px-3 py-2 text-xs text-danger">
