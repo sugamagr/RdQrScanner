@@ -421,6 +421,13 @@ create table if not exists public.rd_accounts (
     account_opened_date     date,
     account_closing_date    date,
     last_editor_device_id   uuid references public.devices(id) on delete set null,
+    -- R3: stamped by bulkUpsertAccounts on every CSV/PDF import row.
+    -- Read by phone R3 session-delete cascade to decide whether a
+    -- session's contribution to last_paid_through should be reverted
+    -- (scan after CSV = revert) or dropped silently (CSV newer than
+    -- scan = DOP portal wins). NULL for accounts never touched by CSV.
+    -- v13 migration adds this to existing installs.
+    csv_imported_at         timestamptz,
     created_at              timestamptz not null default now(),
     updated_at              timestamptz not null default now(),
     deleted_at              timestamptz,

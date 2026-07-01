@@ -840,6 +840,21 @@ export async function bulkUpsertAccounts(
     );
   }
   const result: BulkUpsertResult = { inserted: 0, updated: 0, failed: 0, errors: [] };
+  // R3 CSV-authority anchor. ONE snapshot per upload — every row in
+  // this batch carries the same csv_imported_at so the phone-side
+  // session-delete guard (session.endTime > account.csvImportedAt
+  // means "session is newer, revert its contribution") treats all
+  // rows in one CSV as landing at a single logical moment. Snapshot
+  // OUTSIDE the loop: per-row timestamps would drift by the loop
+  // duration and let a fast session-scan sneak between two rows'
+  // effective CSV times, breaking the guard's ordering.
+  //
+  // DELIBERATELY distinct from updated_at (a maintained-by-trigger
+  // column reflecting any write to the row, including cloud pulls
+  // and portal name-edits). csv_imported_at must specifically track
+  // "when did authoritative CSV data last stamp this row" so the
+  // cascade can compare session date against CSV import date.
+  const csvImportedAt = new Date().toISOString();
   for (const row of rows) {
     // P6γ MEDIUM cancellation: check the signal before each per-row
     // upsert so closing the import dialog mid-upload aborts the
@@ -868,6 +883,9 @@ export async function bulkUpsertAccounts(
       // updates the row but leaves deleted_at set, making it invisible
       // to fetchAccounts() (which filters .is('deleted_at', null)).
       deleted_at: null,
+      // R3 cascade anchor — see loop-preamble comment for why this
+      // is a single snapshot, and why we don't reuse updated_at.
+      csv_imported_at: csvImportedAt,
     };
     if (row.lastPaidThrough != null) {
       payload.last_paid_through = row.lastPaidThrough;

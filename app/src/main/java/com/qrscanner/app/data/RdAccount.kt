@@ -114,5 +114,24 @@ data class RdAccount(
     /** See [ScanSession.retryCount]. */
     val retryCount: Int = 0,
     /** See [RdNumber.lastEditorDeviceId] — Phase 5 T5.6 attribution. */
-    val lastEditorDeviceId: String? = null
+    val lastEditorDeviceId: String? = null,
+
+    /**
+     * Epoch millis of the most-recent CSV/PDF import that touched this
+     * row via portal `bulkUpsertAccounts`. Null on rows never touched
+     * by CSV (MANUAL-only accounts).
+     *
+     * Read by [com.qrscanner.app.data.sync.SyncRepository.softDeleteSession]
+     * (R3 cascade) to decide whether the deleted session's contribution
+     * to [lastPaidThrough] should be reverted or dropped silently. If
+     * the session's end_time > csvImportedAt (or csvImportedAt is
+     * null), the scan is newer than the import so the revert applies.
+     * Otherwise the CSV is authoritative and the session drops.
+     *
+     * DELIBERATELY distinct from [updatedAt]: updatedAt reflects last
+     * write of any kind (name edits, defaulter dialogs), so a portal
+     * name-edit after a CSV import would silently mask the real CSV
+     * time and break the R3 guard's comparison anchor.
+     */
+    val csvImportedAt: Long? = null
 )

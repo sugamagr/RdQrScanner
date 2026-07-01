@@ -27,6 +27,7 @@ internal object RdAccountMapper {
             accountOpenedDate = account.accountOpenedDate,
             accountClosingDate = account.accountClosingDate,
             lastEditorDeviceId = editorDeviceCloudId,
+            csvImportedAt = IsoTime.fromEpochMillisOrNull(account.csvImportedAt),
             createdAt = IsoTime.fromEpochMillis(account.updatedAt),
             updatedAt = IsoTime.fromEpochMillis(account.updatedAt),
             deletedAt = IsoTime.fromEpochMillisOrNull(account.deletedAt)
@@ -51,7 +52,8 @@ internal object RdAccountMapper {
             lastSyncError = null,
             deletedAt = IsoTime.toEpochMillisOrNull(dto.deletedAt),
             retryCount = 0,
-            lastEditorDeviceId = dto.lastEditorDeviceId
+            lastEditorDeviceId = dto.lastEditorDeviceId,
+            csvImportedAt = IsoTime.toEpochMillisOrNull(dto.csvImportedAt)
         )
 
     /**

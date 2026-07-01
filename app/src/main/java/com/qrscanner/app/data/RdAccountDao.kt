@@ -47,6 +47,9 @@ interface RdAccountDao {
     @Query("SELECT * FROM rd_accounts WHERE rdNumber = :rdNumber AND deletedAt IS NULL LIMIT 1")
     suspend fun findByRdNumber(rdNumber: String): RdAccount?
 
+    @Query("SELECT * FROM rd_accounts WHERE rdNumber = :rdNumber AND deletedAt IS NULL LIMIT 1")
+    fun observeByRdNumber(rdNumber: String): Flow<RdAccount?>
+
     /**
      * Lookup INCLUDING tombstones. Used by the bulk CSV upload path
      * to decide between INSERT-vs-resurrect: a tombstoned row with the

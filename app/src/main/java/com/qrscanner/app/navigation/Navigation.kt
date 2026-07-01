@@ -22,6 +22,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.qrscanner.app.QRScannerApp
+import com.qrscanner.app.ui.screens.AccountHistoryScreen
 import com.qrscanner.app.ui.screens.AccountsScreen
 import com.qrscanner.app.ui.screens.AddAccountsScreen
 import com.qrscanner.app.ui.screens.AppInfoScreen
@@ -42,6 +43,9 @@ sealed class Screen(val route: String) {
     }
     data object AddAccounts : Screen("add_accounts")
     data object Accounts : Screen("accounts")
+    data object AccountHistory : Screen("account_history/{rdNumber}") {
+        fun createRoute(rdNumber: String) = "account_history/$rdNumber"
+    }
     data object HowItWorks : Screen("how_it_works")
     data object AppInfo : Screen("app_info")
     data object Settings : Screen("settings")
@@ -126,9 +130,28 @@ fun QRScannerNavigation(
             AccountsScreen(
                 onNavigateBack = { navController.popBackStack() },
                 onNavigateToAddAccount = { navController.navigate(Screen.AddAccounts.route) },
+                onNavigateToAccountHistory = { rdNumber ->
+                    navController.navigate(Screen.AccountHistory.createRoute(rdNumber))
+                },
             )
         }
-        
+
+        composable(
+            route = Screen.AccountHistory.route,
+            arguments = listOf(
+                navArgument("rdNumber") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val rdNumber = backStackEntry.arguments?.getString("rdNumber") ?: ""
+            AccountHistoryScreen(
+                rdNumber = rdNumber,
+                onNavigateBack = { navController.popBackStack() },
+                onOpenSession = { sessionId ->
+                    navController.navigate(Screen.SessionDetail.createRoute(sessionId))
+                }
+            )
+        }
+
         composable(Screen.HowItWorks.route) {
             HowItWorksScreen(
                 onNavigateBack = { navController.popBackStack() }

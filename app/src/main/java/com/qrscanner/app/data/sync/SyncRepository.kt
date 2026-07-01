@@ -255,6 +255,7 @@ class SyncRepository(
         // SQLite WAL contract). bg_f0d47c71 R3 F1.
         database.withTransaction {
             val session = sessionDao.getSessionById(sessionId) ?: return@withTransaction
+            applyR3RevertCascade(session, now)
             if (session.cloudId == null) {
                 rdNumberDao.deleteForSession(sessionId)
                 lotDao.deleteLotsForSession(sessionId)
@@ -263,6 +264,84 @@ class SyncRepository(
                 rdNumberDao.softDeleteForSession(sessionId, now)
                 lotDao.softDeleteForSession(sessionId, now)
                 sessionDao.softDelete(sessionId, now)
+            }
+        }
+    }
+
+    /**
+     * R3 revert-cascade: on session delete, roll back the session's
+     * contribution to each affected [com.qrscanner.app.data.RdAccount.lastPaidThrough]
+     * BUT ONLY when the session is newer than the last authoritative
+     * CSV import for that account. If the CSV came AFTER the session
+     * (session.endTime <= account.csvImportedAt), the CSV is
+     * authoritative and the session is dropped silently — that scan
+     * predated the current CSV truth and cannot regress it.
+     *
+     * Algorithm per user's rule:
+     *   1. Group session's rd_numbers by rd_number.
+     *   2. For each affected account:
+     *      a. Look up account. Skip if missing (rd_number scanned but
+     *         no account row — nothing to revert).
+     *      b. Guard: if csvImportedAt != null && session.endTime <=
+     *         csvImportedAt, skip. CSV wins.
+     *      c. Recompute lastPaidThrough from ALL surviving scans
+     *         (excluding this session, tombstones filtered). Max
+     *         resolved month wins; if no survivors, NULL.
+     *      d. Apply the recomputed value via setLastPaidThroughExplicit
+     *         (non-null) or clearLastPaidThrough (null). Both mark
+     *         DIRTY so the change propagates to cloud + other devices.
+     *
+     * MUST run inside the same transaction that tombstones the
+     * session's rd_numbers. Recomputing after the tombstone (but before
+     * the transaction commits) means the DAO read sees a consistent
+     * "post-delete" view: the excluded-session-id filter is a defence-
+     * in-depth guard even if the tombstones landed first.
+     *
+     * Sync propagation: the writes here mark rd_accounts DIRTY. The
+     * next runPush cycle sends them to cloud; realtime broadcasts the
+     * update to other devices. Cross-device consistency is thereby
+     * eventual, not instant — matches every other Room->cloud path.
+     */
+    private suspend fun applyR3RevertCascade(session: ScanSession, now: Long) {
+        val rdRows = rdNumberDao.getAllRowsInSession(session.id)
+        if (rdRows.isEmpty()) return
+        val affectedRdNumbers = rdRows.filter { it.deletedAt == null }
+            .map { it.number }
+            .distinct()
+        if (affectedRdNumbers.isEmpty()) return
+        val sessionAnchor = session.endTime ?: session.startTime
+        for (rdNumber in affectedRdNumbers) {
+            val account = rdAccountDao.findByRdNumberIncludingDeleted(rdNumber) ?: continue
+            val csvStamp = account.csvImportedAt
+            if (csvStamp != null && sessionAnchor <= csvStamp) continue
+            val survivors = rdNumberDao.getSurvivingScansForRdNumberExcludingSession(
+                rdNumber = rdNumber,
+                excludeSessionId = session.id
+            )
+            val lotIdsInPlay = survivors.map { it.lotId }.distinct()
+            val anchorsByLotId: Map<Long, com.qrscanner.app.util.MonthYear> = if (lotIdsInPlay.isEmpty()) {
+                emptyMap()
+            } else {
+                lotIdsInPlay.mapNotNull { lotId ->
+                    val lot = lotDao.findById(lotId) ?: return@mapNotNull null
+                    lotId to com.qrscanner.app.util.MonthYear.fromEpochMillis(lot.timestamp)
+                }.toMap()
+            }
+            val recomputedToken: String? = survivors
+                .filter { it.monthsPaid >= 1 }
+                .mapNotNull { scan ->
+                    val anchor = anchorsByLotId[scan.lotId]
+                        ?: com.qrscanner.app.util.MonthYear.current()
+                    com.qrscanner.app.util.MonthYear
+                        .resolveOrAuto(scan.monthsList, scan.monthsPaid, anchor)
+                        .firstOrNull()
+                        ?.toToken()
+                }
+                .maxOrNull()
+            if (recomputedToken != null) {
+                rdAccountDao.setLastPaidThroughExplicit(rdNumber, recomputedToken, now)
+            } else {
+                rdAccountDao.clearLastPaidThrough(rdNumber, now)
             }
         }
     }
@@ -283,6 +362,7 @@ class SyncRepository(
         database.withTransaction {
             for (id in sessionIds) {
                 val session = sessionDao.getSessionById(id) ?: continue
+                applyR3RevertCascade(session, now)
                 if (session.cloudId == null) {
                     rdNumberDao.deleteForSession(id)
                     lotDao.deleteLotsForSession(id)

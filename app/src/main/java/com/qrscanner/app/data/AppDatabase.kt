@@ -17,7 +17,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SyncEvent::class,
         RdAccount::class
     ],
-    version = 11,
+    version = 12,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -388,6 +388,29 @@ abstract class AppDatabase : RoomDatabase() {
         // Fresh installs are unaffected: MIGRATION_7_8 already emits
         // DEFAULT 1 on the CREATE TABLE, so their Found already matches
         // Expected.
+        // v11 -> v12: adds `csvImportedAt INTEGER DEFAULT NULL` to
+        // rd_accounts for the R3 session-delete cascade CSV-authority
+        // guard. Read contract: session.endTime > account.csvImportedAt
+        // (or csvImportedAt IS NULL) means the scan post-dates the last
+        // CSV import and its contribution to lastPaidThrough should be
+        // reverted on session delete. Otherwise the CSV is authoritative
+        // (came from the live DOP portal) and the session is dropped
+        // silently. Writer is portal bulkUpsertAccounts only; scan-flow
+        // never touches this column. Deliberately distinct from
+        // updatedAt because updatedAt reflects the last write of ANY
+        // kind (rename, tombstone, cloud pull) whereas csvImportedAt
+        // must specifically track "when was authoritative CSV data last
+        // stamped over this row". Existing rows backfill to NULL which
+        // reads as "no CSV ever imported" — the safe default that
+        // reverts every session on delete.
+        private val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `rd_accounts` ADD COLUMN `csvImportedAt` INTEGER DEFAULT NULL"
+                )
+            }
+        }
+
         private val MIGRATION_10_11 = object : Migration(10, 11) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("PRAGMA legacy_alter_table = ON")
@@ -578,7 +601,8 @@ abstract class AppDatabase : RoomDatabase() {
                         MIGRATION_7_8,
                         MIGRATION_8_9,
                         MIGRATION_9_10,
-                        MIGRATION_10_11
+                        MIGRATION_10_11,
+                        MIGRATION_11_12
                     )
                     .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()

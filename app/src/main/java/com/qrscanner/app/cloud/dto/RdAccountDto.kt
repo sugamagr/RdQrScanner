@@ -47,6 +47,13 @@ data class RdAccountDto(
     @EncodeDefault @SerialName("account_opened_date") val accountOpenedDate: String? = null,
     @EncodeDefault @SerialName("account_closing_date") val accountClosingDate: String? = null,
     @EncodeDefault @SerialName("last_editor_device_id") val lastEditorDeviceId: String? = null,
+    // R3: portal-stamped ISO timestamp of the most-recent CSV import
+    // that touched this row. Cloud v13 column. Null on rows that have
+    // never been imported. @EncodeDefault forces upsert payloads to
+    // include the null case, matching the last_paid_through pattern
+    // above — see class KDoc for the null-drop trap this avoids.
+    // Phone R3 delete-cascade reads this via [RdAccount.csvImportedAt].
+    @EncodeDefault @SerialName("csv_imported_at") val csvImportedAt: String? = null,
     @SerialName("created_at") val createdAt: String,
     @SerialName("updated_at") val updatedAt: String,
     @EncodeDefault @SerialName("deleted_at") val deletedAt: String? = null

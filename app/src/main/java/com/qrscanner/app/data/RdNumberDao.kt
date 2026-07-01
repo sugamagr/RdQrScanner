@@ -53,6 +53,40 @@ interface RdNumberDao {
     @Query("SELECT * FROM rd_numbers WHERE lotId = :lotId AND deletedAt IS NULL ORDER BY position DESC LIMIT 1")
     suspend fun getMostRecentForLot(lotId: Long): RdNumber?
 
+    /**
+     * AccountHistoryScreen data source. Returns one row per scan of the
+     * given rd_number across the whole session ledger, filtering out
+     * tombstoned rd_numbers, tombstoned LOTs, and tombstoned sessions
+     * per R3 discussion (History hides deleted sessions to stay
+     * consistent with SessionHistoryScreen). Ordered newest-session
+     * first so the operator's most recent activity is at the top of
+     * the list. Column aliases MUST stay in lockstep with
+     * [AccountHistoryRow] field names — Room binds by name.
+     */
+    @Query("""
+        SELECT rn.id AS rdNumberId,
+               rn.monthsPaid AS monthsPaid,
+               rn.monthsList AS monthsList,
+               rn.scannedAt AS scannedAt,
+               sl.id AS lotId,
+               sl.lotNumber AS lotNumber,
+               sl.timestamp AS lotTimestamp,
+               ss.id AS sessionId,
+               ss.displayNumber AS sessionNumber,
+               ss.startTime AS sessionStart,
+               ss.endTime AS sessionEnd,
+               ss.operatorName AS operatorName
+        FROM rd_numbers rn
+        INNER JOIN scan_lots sl ON rn.lotId = sl.id
+        INNER JOIN scan_sessions ss ON sl.sessionId = ss.id
+        WHERE rn.number = :rdNumber
+          AND rn.deletedAt IS NULL
+          AND sl.deletedAt IS NULL
+          AND ss.deletedAt IS NULL
+        ORDER BY ss.endTime DESC, ss.startTime DESC, sl.lotNumber ASC
+    """)
+    fun observeHistoryForRdNumber(rdNumber: String): Flow<List<AccountHistoryRow>>
+
     @Query("SELECT COALESCE(MAX(position), -1) + 1 FROM rd_numbers WHERE lotId = :lotId AND deletedAt IS NULL")
     suspend fun getNextPosition(lotId: Long): Int
 
@@ -166,4 +200,34 @@ interface RdNumberDao {
 
     @Query("UPDATE rd_numbers SET syncStatus = 'DIRTY', updatedAt = :updatedAt WHERE id = :id")
     suspend fun markDirty(id: Long, updatedAt: Long)
+
+    /**
+     * R3 revert-cascade read path. Returns every rd_number row for
+     * [rdNumber] that would still be visible if [excludeSessionId]
+     * were tombstoned: filters out (a) rows whose lot lives in the
+     * excluded session, (b) row-level tombstones, (c) lot-level
+     * tombstones, (d) session-level tombstones from OTHER already-
+     * deleted sessions.
+     *
+     * Used by [com.qrscanner.app.data.sync.SyncRepository.softDeleteSession]
+     * to recompute lastPaidThrough post-delete: the max month resolved
+     * across these survivors becomes the new value (NULL if empty).
+     * MUST be called inside the same transaction that tombstones the
+     * session, otherwise a concurrent scan could land between the read
+     * and the write and be silently overwritten.
+     */
+    @Query("""
+        SELECT rn.* FROM rd_numbers rn
+        INNER JOIN scan_lots sl ON rn.lotId = sl.id
+        INNER JOIN scan_sessions ss ON sl.sessionId = ss.id
+        WHERE rn.number = :rdNumber
+          AND ss.id != :excludeSessionId
+          AND rn.deletedAt IS NULL
+          AND sl.deletedAt IS NULL
+          AND ss.deletedAt IS NULL
+    """)
+    suspend fun getSurvivingScansForRdNumberExcludingSession(
+        rdNumber: String,
+        excludeSessionId: Long
+    ): List<RdNumber>
 }
