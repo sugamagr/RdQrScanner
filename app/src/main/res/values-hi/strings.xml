@@ -183,6 +183,15 @@
 
     <!-- Generic content descriptions -->
     <string name="content_desc_back">वापस</string>
+    <string name="content_desc_exit_selection">चयन बंद करें</string>
+
+    <!-- Accounts screen top-bar action.
+         Same 12-char pill-width ceiling as the English value. "क्यूआर बनाएं"
+         is the Devanagari transliteration of "QR" plus the imperative "make",
+         which is the standard rendering in Indian mobile UI (Paytm, PhonePe,
+         BHIM all use it) rather than the more formal "क्यूआर कोड उत्पन्न करें"
+         which would overflow the pill and read as government-form Hindi. -->
+    <string name="acc_action_generate_qr">क्यूआर बनाएं</string>
 
     <!-- RDScanner bottom-bar action buttons. 1-word ceiling for the
          weight(1f) x 3 row on narrow phones. "Undo" stays as the

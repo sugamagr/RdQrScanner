@@ -49,7 +49,13 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -398,15 +404,23 @@ private fun AccountsHeader(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Primary nav slot carries the "escape hatch" of the current
+            // mode: ArrowBack when browsing (back stack), Close when in
+            // selection mode (exit selection). Keeping ONE escape control
+            // avoids two synonymous buttons on the same screen. Icon +
+            // action must stay coupled — swapping only the icon while
+            // keeping the back-stack callback is a footgun.
             IconButton(
-                onClick = onNavigateBack,
+                onClick = if (selectionMode) onCancelSelection else onNavigateBack,
                 modifier = Modifier
                     .size(44.dp)
                     .background(Color.White.copy(alpha = 0.2f), CircleShape)
             ) {
                 Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = stringResource(R.string.content_desc_back),
+                    imageVector = if (selectionMode) Icons.Default.Close
+                        else Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = if (selectionMode) stringResource(R.string.content_desc_exit_selection)
+                        else stringResource(R.string.content_desc_back),
                     tint = Color.White
                 )
             }
@@ -420,15 +434,12 @@ private fun AccountsHeader(
                     ),
                     modifier = Modifier.weight(1f)
                 )
-                IconButton(
-                    onClick = onCancelSelection,
-                    modifier = Modifier
-                        .size(44.dp)
-                        .background(Color.White.copy(alpha = 0.2f), CircleShape)
-                ) {
-                    Icon(Icons.Default.Close, contentDescription = "Cancel", tint = Color.White)
-                }
-                Spacer(modifier = Modifier.width(8.dp))
+                // Generate-QR affordance in selection mode: icon-only here
+                // because the row already shows "N selected" + the count
+                // dynamically shrinks the available label width. The
+                // adjacent text label pattern (see normal mode below) is
+                // used ONLY where there's room without pushing the count
+                // text off-screen on narrow devices.
                 IconButton(
                     onClick = onGenerateBulk,
                     enabled = selectedCount > 0,
@@ -441,7 +452,7 @@ private fun AccountsHeader(
                 ) {
                     Icon(
                         Icons.Default.QrCode2,
-                        contentDescription = "Generate QR PDF",
+                        contentDescription = stringResource(R.string.acc_action_generate_qr),
                         tint = Color.White.copy(alpha = if (selectedCount > 0) 1f else 0.6f)
                     )
                 }
@@ -461,21 +472,37 @@ private fun AccountsHeader(
                         color = Color.White.copy(alpha = 0.85f)
                     )
                 }
-                IconButton(
+                // Icon + literal "Generate QR" label. The icon alone is not
+                // discoverable — new operators hover on the QR icon expecting
+                // a scanner. The text label locks the affordance's meaning
+                // (bulk-print → generate → QR) as a Dribbble-style pill
+                // rather than an ambiguous glyph. Localized string so the
+                // Hindi build shows "क्यूआर बनाएं" per the strings-hi entry.
+                Surface(
                     onClick = onEnterSelection,
                     enabled = activeCount > 0,
-                    modifier = Modifier
-                        .size(44.dp)
-                        .background(
-                            Color.White.copy(alpha = if (activeCount > 0) 0.2f else 0.18f),
-                            CircleShape
-                        )
+                    shape = CircleShape,
+                    color = Color.White.copy(alpha = if (activeCount > 0) 0.2f else 0.18f)
                 ) {
-                    Icon(
-                        Icons.Default.QrCode2,
-                        contentDescription = "Bulk QR",
-                        tint = Color.White.copy(alpha = if (activeCount > 0) 1f else 0.6f)
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.QrCode2,
+                            contentDescription = null,
+                            tint = Color.White.copy(alpha = if (activeCount > 0) 1f else 0.6f),
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = stringResource(R.string.acc_action_generate_qr),
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White.copy(alpha = if (activeCount > 0) 1f else 0.6f)
+                            )
+                        )
+                    }
                 }
             }
         }
@@ -562,7 +589,18 @@ private fun AccountRow(
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (selectionMode) {
+            // Selection checkbox slides in from the left (fadeIn +
+            // expandHorizontally) rather than popping instantly. 220ms
+            // FastOutSlowIn tween matches Material 3's list-item
+            // affordance timing so the animation composes with the
+            // Row's implicit re-layout instead of racing it.
+            AnimatedVisibility(
+                visible = selectionMode,
+                enter = fadeIn(animationSpec = tween(220)) +
+                    expandHorizontally(animationSpec = tween(220)),
+                exit = fadeOut(animationSpec = tween(180)) +
+                    shrinkHorizontally(animationSpec = tween(180))
+            ) {
                 Checkbox(
                     checked = selected,
                     onCheckedChange = { onToggleSelection() },
@@ -571,7 +609,11 @@ private fun AccountRow(
                         uncheckedColor = TextTertiary
                     )
                 )
-            } else {
+            }
+            if (!selectionMode) {
+                // Per-row Generate-QR chip. Hidden entirely in selection
+                // mode because bulk-generate lives in the top bar and the
+                // row's click surface is already claimed by toggle-select.
                 // 44dp outer wrapper owns the click + tap area (WCAG);
                 // 40dp inner Box owns the visual circle. This is the
                 // wrap-pattern used throughout the app for chip-sized
@@ -591,7 +633,7 @@ private fun AccountRow(
                     ) {
                         Icon(
                             Icons.Default.QrCode2,
-                            contentDescription = "Generate QR",
+                            contentDescription = stringResource(R.string.acc_action_generate_qr),
                             tint = PrimaryOrange.copy(alpha = mutedAlpha),
                             modifier = Modifier.size(22.dp)
                         )

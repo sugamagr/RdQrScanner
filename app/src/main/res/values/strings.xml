@@ -182,7 +182,14 @@
 
     <!-- Generic content descriptions -->
     <string name="content_desc_back">Back</string>
+    <string name="content_desc_exit_selection">Exit selection</string>
     <string name="pill_a11y_description">Sync status: %1$s</string>
+
+    <!-- Accounts screen top-bar action.
+         Ceiling: ~12 chars so the pill fits alongside the "Accounts / N active"
+         title stack on narrow phones (Pixel 4a min width). Longer copy pushes
+         the title into ellipsis. Hindi value follows the same width budget. -->
+    <string name="acc_action_generate_qr">Generate QR</string>
 
     <!-- RDScanner bottom-bar action buttons. Kept short (1 word each)
          because the row is weight(1f) x 3 on narrow phones; longer
