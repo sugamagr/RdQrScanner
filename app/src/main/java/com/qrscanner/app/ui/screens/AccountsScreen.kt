@@ -33,6 +33,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.People
@@ -123,9 +124,18 @@ enum class SortKey { NAME, LAST_PAID, AMOUNT, RECENT }
  * filter modes here only touch active-set accounts unless noted.
  *
  * - [ALL]         reset — no filter beyond active/inactive base
- * - [DEFAULTERS]  lastPaidThrough < currentMonth (YYYY-MM) AND active
- * - [NEVER_PAID]  lastPaidThrough == null AND active — brand-new
- *                 accounts distinct from lapsed defaulters
+ * - [DEFAULTERS]  lastPaidThrough != currentMonth (YYYY-MM) AND active
+ *                 Covers underpaid (last_paid_through < currentMonth),
+ *                 never-paid (last_paid_through == null), AND forward-
+ *                 paid (last_paid_through > currentMonth — they paid
+ *                 for a future month but not for the current one).
+ *                 Per user's operational definition: "if it is current
+ *                 month account, then it is not default. Every other
+ *                 condition means a default account." (R2 discussion.)
+ * - [NEVER_PAID]  lastPaidThrough == null AND active — a strict subset
+ *                 of DEFAULTERS but kept as a separate data-slice
+ *                 filter so the operator can drill down to brand-new
+ *                 accounts distinct from lapsed/forward-paid rows.
  * - [MANUAL]      source == MANUAL — phone-added accounts
  * - [CSV]         source == CSV — portal-imported accounts
  */
@@ -156,6 +166,7 @@ enum class FilterMode { ALL, DEFAULTERS, NEVER_PAID, MANUAL, CSV }
 fun AccountsScreen(
     onNavigateBack: () -> Unit,
     onNavigateToAddAccount: () -> Unit,
+    onNavigateToAccountHistory: (rdNumber: String) -> Unit,
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as QRScannerApp
@@ -213,9 +224,13 @@ fun AccountsScreen(
                     !account.rdNumber.contains(q)) return@filter false
                 when (filterMode) {
                     FilterMode.ALL -> true
+                    // R2 SEMANTIC: defaulter = "not exactly current month"
+                    // (equality, not < comparison). Covers null / < / >
+                    // in one expression. See FilterMode KDoc above for
+                    // rationale. Must stay in sync with portal's
+                    // dashboardQueries.ts computeAccountStatus.
                     FilterMode.DEFAULTERS -> account.isActive &&
-                        account.lastPaidThrough != null &&
-                        account.lastPaidThrough < currentMonth
+                        account.lastPaidThrough != currentMonth
                     FilterMode.NEVER_PAID -> account.isActive &&
                         account.lastPaidThrough == null
                     FilterMode.MANUAL -> account.source == AccountSource.MANUAL
@@ -366,6 +381,10 @@ fun AccountsScreen(
                             onMarkInactive = {
                                 overflowFor = null
                                 deleting = account
+                            },
+                            onViewHistory = {
+                                overflowFor = null
+                                onNavigateToAccountHistory(account.rdNumber)
                             }
                         )
                     }
@@ -589,12 +608,19 @@ private fun FilterBar(
             value = query,
             onValueChange = onQueryChange,
             placeholder = { Text("Search by name or RD number", color = TextTertiary) },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = null,
+                    tint = PrimaryOrange
+                )
+            },
             singleLine = true,
             shape = RoundedCornerShape(12.dp),
             modifier = Modifier.fillMaxWidth(),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = PrimaryOrange,
-                unfocusedBorderColor = SurfaceWhite,
+                unfocusedBorderColor = PrimaryOrange,
                 focusedContainerColor = SurfaceWhite,
                 unfocusedContainerColor = SurfaceWhite
             )
@@ -645,7 +671,8 @@ private fun AccountRow(
     onOverflowOpen: () -> Unit,
     onOverflowDismiss: () -> Unit,
     overflowOpen: Boolean,
-    onMarkInactive: () -> Unit
+    onMarkInactive: () -> Unit,
+    onViewHistory: () -> Unit
 ) {
     val mutedAlpha = if (account.isActive) 1f else 0.6f
     Surface(
@@ -800,6 +827,10 @@ private fun AccountRow(
                                     expanded = overflowOpen,
                                     onDismissRequest = onOverflowDismiss
                                 ) {
+                                    DropdownMenuItem(
+                                        text = { Text("View history", color = TextPrimary) },
+                                        onClick = onViewHistory
+                                    )
                                     DropdownMenuItem(
                                         text = { Text("Mark inactive / Delete", color = TextPrimary) },
                                         onClick = onMarkInactive

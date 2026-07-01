@@ -158,5 +158,67 @@ data class MonthYear(val year: Int, val month: Int) : Comparable<MonthYear> {
             }
             return result
         }
+
+        /**
+         * Per-account status classifier. Single source of truth for the
+         * R2 defaulter semantic locked with user: an account is
+         * "current" iff [lastPaidThrough] EQUALS the current month
+         * token exactly. Any other value (null, earlier, or later) is a
+         * defaulter. Forward-paid accounts additionally carry positive
+         * credit (months paid ahead) so surfaces like a per-account
+         * badge can show 'Paid ahead N months' instead of hiding the
+         * credit inside the defaulter bucket.
+         *
+         * Cross-file contract: the portal mirror lives in
+         * portal/src/lib/dashboardQueries.ts computeAccountStatus.
+         * Any change here must land there too — pre-R2 the two
+         * surfaces drifted (portal used >=, phone used <) and the
+         * user hit UX inconsistency between phone and portal defaulter
+         * views. Do not re-introduce that drift.
+         *
+         * currentMonth defaults to today's local YYYY-MM (matches the
+         * anchor MonthYear.current() uses) so callers don't have to
+         * thread the current-month value through every call site.
+         */
+        fun computeAccountStatus(
+            lastPaidThrough: String?,
+            currentMonth: String = current().toToken()
+        ): AccountStatusResult {
+            if (lastPaidThrough == currentMonth) {
+                return AccountStatusResult(AccountStatus.CURRENT, creditMonths = 0)
+            }
+            val credit = if (lastPaidThrough != null && lastPaidThrough > currentMonth) {
+                monthDiffPositive(lastPaidThrough, currentMonth)
+            } else 0
+            return AccountStatusResult(AccountStatus.DEFAULTER, credit)
+        }
+
+        /**
+         * Returns the count of months from [earlier] to [later] as a
+         * non-negative Int. Both inputs are YYYY-MM tokens. Returns 0
+         * when [later] <= [earlier] or when either input fails to
+         * parse — same defense-in-depth stance as the portal mirror in
+         * dashboardQueries.ts monthDiffPositive.
+         */
+        private fun monthDiffPositive(later: String, earlier: String): Int {
+            val laterMy = parseToken(later) ?: return 0
+            val earlierMy = parseToken(earlier) ?: return 0
+            val diff = monthsBetween(earlierMy, laterMy)
+            return if (diff > 0) diff else 0
+        }
     }
 }
+
+enum class AccountStatus { CURRENT, DEFAULTER }
+
+/**
+ * Result shape for [MonthYear.computeAccountStatus]. Kept as a
+ * top-level data class rather than nested so it can be imported and
+ * destructured without pulling in the whole MonthYear namespace.
+ * [creditMonths] is 0 for CURRENT and for DEFAULTER-underpaid; only
+ * DEFAULTER-forward-paid carries a positive count.
+ */
+data class AccountStatusResult(
+    val status: AccountStatus,
+    val creditMonths: Int
+)

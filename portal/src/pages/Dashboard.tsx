@@ -32,6 +32,7 @@ import {
   ShieldCheck,
   ShieldAlert,
   Sparkles,
+  TrendingUp,
   UserMinus,
   Users,
   Wallet,
@@ -580,16 +581,29 @@ function KpiRow({ stats }: { stats: DashboardStats }) {
       <KpiCard
         title="Current vs default (accounts)"
         value={`${formatNumber(stats.currentVsDefault.currentCount)} / ${formatNumber(stats.currentVsDefault.defaultCount)}`}
-        subtitle="current · default (incl. never paid)"
+        subtitle="paid exactly this month · everyone else"
         icon={<ShieldCheck className="h-5 w-5" />}
         tone="coral"
       />
+      {/* R2 SEMANTIC (locked with user): Arrears = money still to
+          collect for accounts paid BEFORE current month. Paid ahead =
+          credit already collected for future months. Rendered as two
+          separate cards (warn + accent-mint) so the operationally
+          different quantities don't merge into one signal. See
+          dashboardQueries.ts CurrentVsDefaultBreakdown docstring. */}
       <KpiCard
-        title="Current vs default (₹)"
-        value={`${formatCompactCurrency(stats.currentVsDefault.currentAmount)} / ${formatCompactCurrency(stats.currentVsDefault.defaultAmount)}`}
-        subtitle="monthly amounts (incl. never paid)"
+        title="Arrears"
+        value={`${formatCompactCurrency(stats.currentVsDefault.defaultAmount - stats.currentVsDefault.creditAmount)}`}
+        subtitle={`${formatNumber(stats.currentVsDefault.defaultCount - stats.currentVsDefault.creditCount)} accounts behind`}
         icon={<ShieldAlert className="h-5 w-5" />}
         tone="warn"
+      />
+      <KpiCard
+        title="Paid ahead"
+        value={`${formatCompactCurrency(stats.currentVsDefault.creditAmount)}`}
+        subtitle={`${formatNumber(stats.currentVsDefault.creditCount)} accounts · ${formatNumber(stats.currentVsDefault.creditMonths)} months credit`}
+        icon={<TrendingUp className="h-5 w-5" />}
+        tone="mint"
       />
       <KpiCard
         title="Account mix"

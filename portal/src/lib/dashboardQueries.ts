@@ -45,14 +45,34 @@ export interface MonthlyMoneyPoint {
 }
 
 export interface CurrentVsDefaultBreakdown {
-  /** Active accounts paid up to or beyond current month. */
+  /** Active accounts whose last_paid_through EQUALS current month. */
   currentCount: number;
-  /** Active accounts whose last_paid_through is null OR < current month. */
+  /**
+   * Active accounts whose last_paid_through is not exactly the current
+   * month. Covers null (never paid), < currentMonth (underpaid), AND
+   * > currentMonth (forward-paid: they paid for a future month but
+   * skipped the current month). R2 semantic locked with user: "if it
+   * is current month account, then it is not default. Every other
+   * condition means a default account."
+   */
   defaultCount: number;
   /** Sum of monthly_amount across currentCount accounts. */
   currentAmount: number;
   /** Sum of monthly_amount across defaultCount accounts. */
   defaultAmount: number;
+  /**
+   * Subset of defaultCount that is forward-paid (last_paid_through
+   * strictly > currentMonth). These accounts have positive credit —
+   * money already collected for future months. Tracked separately so
+   * the Dashboard can surface it as "paid ahead" instead of hiding
+   * it inside the defaulter bucket. Sum of monthly_amount lives in
+   * [creditAmount]; sum of the credit months lives in [creditMonths]
+   * for the Dashboard's arithmetic ("₹X across N accounts / M months
+   * paid ahead").
+   */
+  creditCount: number;
+  creditAmount: number;
+  creditMonths: number;
 }
 
 export interface DashboardStats {
@@ -122,6 +142,67 @@ function monthKey(iso: string): string {
   const d = new Date(iso);
   const m = `${d.getUTCMonth() + 1}`.padStart(2, '0');
   return `${d.getUTCFullYear()}-${m}`;
+}
+
+/**
+ * Returns the number of months from [earlier] to [later] as a
+ * non-negative integer. Both inputs are YYYY-MM tokens (schema regex
+ * `^\d{4}-(0[1-9]|1[0-2])$` guarantees zero-padded form so lexical
+ * sort matches chronological). Returns 0 when [later] <= [earlier] or
+ * when either input fails to parse — the caller checks strict ordering
+ * BEFORE calling, so a 0 return here is only reachable via malformed
+ * input, which we treat as "no credit" (defense-in-depth against a
+ * future schema regression that would let a bad token through).
+ */
+function monthDiffPositive(later: string, earlier: string): number {
+  const [ly, lm] = later.split('-').map(Number);
+  const [ey, em] = earlier.split('-').map(Number);
+  if (
+    !Number.isFinite(ly) || !Number.isFinite(lm) ||
+    !Number.isFinite(ey) || !Number.isFinite(em)
+  ) {
+    return 0;
+  }
+  const diff = (ly - ey) * 12 + (lm - em);
+  return diff > 0 ? diff : 0;
+}
+
+/**
+ * Per-account status classifier. Single source of truth for the R2
+ * defaulter semantic locked with user: an account is "current" iff
+ * last_paid_through EQUALS the current month. Any other value (null /
+ * < currentMonth / > currentMonth) is a defaulter. Forward-paid
+ * accounts additionally carry positive credit (months paid ahead).
+ *
+ * Callers: Dashboard cards, Accounts list badge, PDF/Excel exports.
+ * The phone mirror lives in AccountsScreen.kt FilterMode.DEFAULTERS
+ * — any change here must land there too or the two surfaces will
+ * disagree on which accounts are defaulters, which was the exact
+ * pre-R2 bug the user asked us to fix.
+ *
+ * currentMonth defaults to today's YYYY-MM in UTC so callers don't
+ * have to thread the current-month value through every call site.
+ * Tests / historical reports pass an explicit anchor.
+ */
+export type AccountStatus = 'current' | 'defaulter';
+
+export interface AccountStatusResult {
+  status: AccountStatus;
+  /** Positive when forward-paid, 0 otherwise. */
+  creditMonths: number;
+}
+
+export function computeAccountStatus(
+  lastPaidThrough: string | null,
+  currentMonth: string = monthKey(new Date().toISOString())
+): AccountStatusResult {
+  if (lastPaidThrough === currentMonth) {
+    return { status: 'current', creditMonths: 0 };
+  }
+  const credit = lastPaidThrough != null && lastPaidThrough > currentMonth
+    ? monthDiffPositive(lastPaidThrough, currentMonth)
+    : 0;
+  return { status: 'defaulter', creditMonths: credit };
 }
 
 /**
@@ -328,22 +409,38 @@ export async function fetchDashboardStats(range: DashboardRange): Promise<Dashbo
 
   const currentMonth = monthKey(new Date().toISOString());
 
-  // Current vs default breakdown — uses last_paid_through across the
-  // ACTIVE account roster, not the rd_numbers scans. "current" means
-  // operator has acknowledged payment up to (or beyond) this month per
-  // spec D22 'paper book is truth'. "default" means either no payment
-  // recorded yet (null) or last_paid_through < current month.
+  // R2 SEMANTIC (locked with user): current iff last_paid_through
+  // EQUALS currentMonth exactly. Any other state — null, past,
+  // future — is a defaulter. Forward-paid accounts are surfaced
+  // separately as "credit" so the Dashboard can show them as
+  // paid-ahead without hiding them from the defaulter total.
+  // Must stay in sync with phone AccountsScreen.kt FilterMode.
   let currentCount = 0;
   let defaultCount = 0;
   let currentAmount = 0;
   let defaultAmount = 0;
+  let creditCount = 0;
+  let creditAmount = 0;
+  let creditMonths = 0;
   for (const a of activeAccountList) {
-    if (a.last_paid_through != null && a.last_paid_through >= currentMonth) {
+    if (a.last_paid_through === currentMonth) {
       currentCount += 1;
       currentAmount += a.monthly_amount;
     } else {
       defaultCount += 1;
       defaultAmount += a.monthly_amount;
+      if (a.last_paid_through != null && a.last_paid_through > currentMonth) {
+        // Forward-paid subset. monthDiff below is defense-in-depth
+        // against a malformed YYYY-MM (schema regex prevents it, but
+        // a NaN would silently over-count credit months). Positive
+        // return only — the outer > check already guarantees > 0.
+        const months = monthDiffPositive(a.last_paid_through, currentMonth);
+        if (months > 0) {
+          creditCount += 1;
+          creditAmount += a.monthly_amount;
+          creditMonths += months;
+        }
+      }
     }
   }
   const currentVsDefault: CurrentVsDefaultBreakdown = {
@@ -351,6 +448,9 @@ export async function fetchDashboardStats(range: DashboardRange): Promise<Dashbo
     defaultCount,
     currentAmount,
     defaultAmount,
+    creditCount,
+    creditAmount,
+    creditMonths,
   };
 
   // Active devices = last_seen_at within 5 minutes. 5 min matches the

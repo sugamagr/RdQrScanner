@@ -525,7 +525,7 @@ function renderCurrentVsDefault(ctx: RenderContext): import('react').ReactElemen
       ]),
       renderInfoTable(ctx, [
         { left: 'Current', value: `${formatNumber(b.currentCount)} accounts`, right: `\u20B9${formatNumber(b.currentAmount)}` },
-        { left: 'Default', value: `${formatNumber(b.defaultCount)} accounts (incl. never paid)`, right: `\u20B9${formatNumber(b.defaultAmount)}` },
+        { left: 'Default', value: `${formatNumber(b.defaultCount)} accounts (not exactly this month)`, right: `\u20B9${formatNumber(b.defaultAmount)}` },
       ]),
     ),
   );
