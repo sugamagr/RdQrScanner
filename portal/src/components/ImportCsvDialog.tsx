@@ -18,6 +18,7 @@ import {
   type CsvParseResult,
   type ParsedAccount,
 } from '../lib/csvParser';
+import { parsePdfAccounts } from '../lib/pdfAccountsParser';
 import { useBackdropClose } from './useBackdropClose';
 
 interface RegressionRow {
@@ -110,12 +111,13 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
     setParseResult(null);
     setShowAllErrors(false);
     if (picked) {
-      // Hard 5 MB cap. PapaParse loads the entire file into memory and
-      // a 100 MB CSV would freeze the browser tab for 10-30 seconds
-      // before the synchronous parse completes. 5 MB is ~50,000 rows
-      // of realistic CSV — well beyond the 200 accounts/month user
-      // workload but a reasonable safety net against accidental drag-
-      // and-drop of the wrong file.
+      // Hard 5 MB cap. PapaParse (CSV) loads the entire file into
+      // memory; pdfjs-dist decodes similarly. A 100 MB payload would
+      // freeze the browser tab for tens of seconds regardless of
+      // format. 5 MB is ~50,000 CSV rows or ~200-page PDFs — both
+      // are well beyond the 200-accounts/month workload but a
+      // reasonable safety net against accidental drag-and-drop of
+      // the wrong file. Applies uniformly to CSV and PDF.
       const MAX_BYTES = 5 * 1024 * 1024;
       if (picked.size > MAX_BYTES) {
         setParseResult({
@@ -130,7 +132,17 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
         });
         return;
       }
-      const result = await parseAccountsCsv(picked);
+      // Route by extension AND MIME. The extension alone is trivially
+      // spoofable and some file-picker flows deliver an empty MIME on
+      // drag-drop; requiring either agrees with the accept-list on
+      // the underlying <input>. Anything that isn't recognisably a
+      // PDF falls through to the CSV parser, which will surface a
+      // clear per-row error if it turns out to be neither.
+      const name = picked.name.toLowerCase();
+      const isPdf = name.endsWith('.pdf') || picked.type === 'application/pdf';
+      const result = isPdf
+        ? await parsePdfAccounts(picked)
+        : await parseAccountsCsv(picked);
       if (mountedRef.current) setParseResult(result);
     }
   };
@@ -148,7 +160,7 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
     e.preventDefault();
     setIsDragging(false);
     const dropped = e.dataTransfer.files?.[0];
-    if (dropped && /\.csv$/i.test(dropped.name)) {
+    if (dropped && /\.(csv|pdf)$/i.test(dropped.name)) {
       void handleFile(dropped);
     }
   };
@@ -313,14 +325,16 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
         <header className="flex items-start justify-between border-b border-surface-border px-5 py-4">
           <div>
             <h2 id="csv-import-title" className="text-base font-semibold text-ink-primary">
-              Import accounts from CSV
+              Import accounts
             </h2>
             <p className="mt-0.5 text-xs text-ink-secondary">
-              Columns: <span className="font-mono">name</span>,{' '}
+              Upload a CSV with{' '}
+              <span className="font-mono">name</span>,{' '}
               <span className="font-mono">rd_number</span>,{' '}
               <span className="font-mono">monthly_amount</span>,{' '}
               <span className="font-mono">last_paid_through</span>{' '}
-              <span className="text-ink-muted">(optional, YYYY-MM)</span>.
+              <span className="text-ink-muted">(optional YYYY-MM)</span>,
+              or drop the DOP "Deposit Accounts" PDF and we'll parse it for you.
             </p>
           </div>
           <button
@@ -357,7 +371,7 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
             <input
               ref={fileInputRef}
               type="file"
-              accept=".csv,text/csv"
+              accept=".csv,text/csv,.pdf,application/pdf"
               onChange={onFileChange}
               className="sr-only"
               id="csv-file-input"
@@ -370,15 +384,15 @@ export function ImportCsvDialog({ ownerId, onClose, onImported }: Props) {
             />
             <p className="mt-2 text-xs text-ink-secondary">
               {isDragging
-                ? 'Drop your CSV file to load it'
-                : 'Drag a CSV file here, or'}
+                ? 'Drop your CSV or PDF to load it'
+                : 'Drag a CSV or PDF here, or'}
             </p>
             <label
               htmlFor="csv-file-input"
               className="mt-2 inline-flex cursor-pointer items-center gap-1.5 rounded-pill bg-primary px-4 py-2 text-xs font-semibold text-white shadow-card transition-colors hover:bg-primary-dark"
             >
               <Upload className="h-3.5 w-3.5" />
-              {file ? 'Choose a different file' : 'Choose CSV file'}
+              {file ? 'Choose a different file' : 'Choose file'}
             </label>
             {file && (
               <p className="mt-2 text-xs text-ink-secondary">
