@@ -84,17 +84,32 @@ export async function generateDashboardPdf(opts: GeneratePdfOptions): Promise<vo
   // Helvetica that @react-pdf falls back to is one of the 14 Type1
   // standard PDF fonts and DOES NOT include U+20B9 (Indian Rupee sign)
   // — every \u20B9 in the document would render as a missing-glyph
-  // box, breaking every financial figure. Noto Sans Regular + Bold from
-  // Google's CDN cover the full Latin + currency block we use; the
-  // disabled hyphenation callback prevents @react-pdf from word-
+  // box, breaking every financial figure. R5 oracle bg_78192f17 F10
+  // verified the missing glyph in output.
+  //
+  // Fonts are served from the portal's own origin (public/fonts/), NOT
+  // from a third-party CDN. Two reasons: (1) the portal CSP is locked
+  // to 'self' + Supabase — remote font fetches fail with an opaque
+  // TypeError:Failed to fetch; (2) offline / airport / hotel wifi
+  // reliability matters for a business tool. Each TTF is ~28KB and
+  // Cloudflare edge-caches the /fonts/ path immutably.
+  //
+  // The disabled hyphenation callback prevents @react-pdf from word-
   // splitting account names (our table cells truncate already).
-  // R5 oracle bg_78192f17 F10 verified the missing glyph in output.
   if (!fontsRegistered) {
+    // Absolute origin URL, not relative path. @react-pdf/renderer's
+    // font fetcher does NOT run in the same context as document.baseURI
+    // — it evaluates srcs relative to the current worker, which is
+    // '/assets/<hash>.js'. A bare '/fonts/x.ttf' resolves correctly,
+    // but constructing new URL(src, location.origin).href up front
+    // removes any ambiguity if the internal resolver changes across
+    // library versions.
+    const origin = window.location.origin;
     Font.register({
       family: 'Noto Sans',
       fonts: [
-        { src: 'https://cdn.jsdelivr.net/fontsource/fonts/noto-sans@latest/latin-400-normal.ttf', fontWeight: 400 },
-        { src: 'https://cdn.jsdelivr.net/fontsource/fonts/noto-sans@latest/latin-700-normal.ttf', fontWeight: 700 },
+        { src: `${origin}/fonts/noto-sans-latin-400.ttf`, fontWeight: 400 },
+        { src: `${origin}/fonts/noto-sans-latin-700.ttf`, fontWeight: 700 },
       ],
     });
     Font.registerHyphenationCallback((word: string) => [word]);
