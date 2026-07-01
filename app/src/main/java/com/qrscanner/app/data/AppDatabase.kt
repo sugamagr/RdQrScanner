@@ -17,7 +17,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SyncEvent::class,
         RdAccount::class
     ],
-    version = 10,
+    version = 11,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -367,6 +367,98 @@ abstract class AppDatabase : RoomDatabase() {
          * backfill needed. Safe to re-run (CREATE INDEX IF NOT
          * EXISTS) so a partial-failure replay doesn't break.
          */
+        // v10 -> v11: repair rd_accounts.isActive DEFAULT drift. Devices
+        // upgraded through an early Phase-RD-Accounts build have a
+        // rd_accounts table whose isActive column was created WITHOUT
+        // the SQL-level DEFAULT 1 clause (the entity carried only a
+        // Kotlin default, no @ColumnInfo(defaultValue = "1")). Room
+        // reads the live SQLite table info to build TableInfo.Found;
+        // the entity annotation drives TableInfo.Expected. They now
+        // disagree on exactly one cell: isActive defaultValue.
+        //
+        // Fix: rebuild rd_accounts with the correct DEFAULT. Standard
+        // rename-create-copy-drop pattern (matches MIGRATION_1_2 and
+        // MIGRATION_3_4 for consistency). All rows preserved via SELECT
+        // *; PK on rdNumber preserved; indexes recreated identically.
+        // legacy_alter_table=ON keeps this defensive even though no
+        // child table FK-references rd_accounts today (no auto-retarget
+        // hazard, but the pragma costs nothing and matches the codebase
+        // convention).
+        //
+        // Fresh installs are unaffected: MIGRATION_7_8 already emits
+        // DEFAULT 1 on the CREATE TABLE, so their Found already matches
+        // Expected.
+        private val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("PRAGMA legacy_alter_table = ON")
+                db.execSQL("ALTER TABLE `rd_accounts` RENAME TO `rd_accounts_old`")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `rd_accounts` (
+                        `rdNumber` TEXT NOT NULL,
+                        `name` TEXT NOT NULL,
+                        `monthlyAmount` INTEGER NOT NULL,
+                        `lastPaidThrough` TEXT,
+                        `source` TEXT NOT NULL,
+                        `isActive` INTEGER NOT NULL DEFAULT 1,
+                        `accountOpenedDate` TEXT,
+                        `accountClosingDate` TEXT,
+                        `ownerId` TEXT,
+                        `cloudId` TEXT,
+                        `syncStatus` TEXT NOT NULL DEFAULT 'LOCAL_ONLY',
+                        `updatedAt` INTEGER NOT NULL DEFAULT 0,
+                        `syncedAt` INTEGER,
+                        `lastSyncError` TEXT,
+                        `deletedAt` INTEGER,
+                        `retryCount` INTEGER NOT NULL DEFAULT 0,
+                        `lastEditorDeviceId` TEXT,
+                        PRIMARY KEY(`rdNumber`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO `rd_accounts` (
+                        `rdNumber`, `name`, `monthlyAmount`, `lastPaidThrough`,
+                        `source`, `isActive`, `accountOpenedDate`, `accountClosingDate`,
+                        `ownerId`, `cloudId`, `syncStatus`, `updatedAt`, `syncedAt`,
+                        `lastSyncError`, `deletedAt`, `retryCount`, `lastEditorDeviceId`
+                    )
+                    SELECT
+                        `rdNumber`, `name`, `monthlyAmount`, `lastPaidThrough`,
+                        `source`, `isActive`, `accountOpenedDate`, `accountClosingDate`,
+                        `ownerId`, `cloudId`, `syncStatus`, `updatedAt`, `syncedAt`,
+                        `lastSyncError`, `deletedAt`, `retryCount`, `lastEditorDeviceId`
+                    FROM `rd_accounts_old`
+                    """.trimIndent()
+                )
+                db.execSQL("DROP TABLE `rd_accounts_old`")
+                db.execSQL("PRAGMA legacy_alter_table = OFF")
+
+                // Recreate every index exactly as declared on the entity
+                // (matches the set Room reports in TableInfo.Expected.indices
+                // from the crash dump). Order alphabetical for reviewability.
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_rd_accounts_cloudId` ON `rd_accounts` (`cloudId`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_rd_accounts_deletedAt` ON `rd_accounts` (`deletedAt`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_rd_accounts_isActive` ON `rd_accounts` (`isActive`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_rd_accounts_name` ON `rd_accounts` (`name`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_rd_accounts_source` ON `rd_accounts` (`source`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_rd_accounts_syncStatus_updatedAt` ON `rd_accounts` (`syncStatus`, `updatedAt`)"
+                )
+            }
+        }
+
         private val MIGRATION_9_10 = object : Migration(9, 10) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
@@ -485,7 +577,8 @@ abstract class AppDatabase : RoomDatabase() {
                         MIGRATION_6_7,
                         MIGRATION_7_8,
                         MIGRATION_8_9,
-                        MIGRATION_9_10
+                        MIGRATION_9_10,
+                        MIGRATION_10_11
                     )
                     .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
