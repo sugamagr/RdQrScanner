@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useDeferredValue, useEffect, useState } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader';
@@ -22,24 +22,36 @@ export function SessionsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const urlSearch = searchParams.get('q') ?? '';
   const [searchInput, setSearchInput] = useState(urlSearch);
-  const [committedSearch, setCommittedSearch] = useState(urlSearch);
+  // useDeferredValue mirrors the pattern in Accounts.tsx: typing stays
+  // on the high-priority render lane while the (potentially 4-round-
+  // trip) network fetch runs at low priority. Every keystroke fires
+  // the query — no need for the operator to press Enter, which the
+  // previous form-submit-only pattern silently required and which
+  // matched no other search input in the portal. React batches the
+  // effect so keeps typing responsive at any input rate.
+  const committedSearch = useDeferredValue(searchInput);
   // Resync local state when the URL changes (back/forward navigation
   // or external link). Without this the input shows stale text after
   // a popstate event.
   useEffect(() => {
     setSearchInput(urlSearch);
-    setCommittedSearch(urlSearch);
   }, [urlSearch]);
-  const commitSearch = (next: string) => {
-    setCommittedSearch(next);
+  // URL sync side-effect: write ?q= only when the deferred value
+  // settles. Two guards prevent noise: (a) skip when the URL already
+  // matches (idempotent), (b) use replace:true so browser Back doesn't
+  // step through every character. This preserves the "browser Back
+  // returns to the same filtered view" contract from the previous
+  // form-submit pattern without churning history on every keystroke.
+  useEffect(() => {
+    if (committedSearch === urlSearch) return;
     const params = new URLSearchParams(searchParams);
-    if (next) {
-      params.set('q', next);
+    if (committedSearch) {
+      params.set('q', committedSearch);
     } else {
       params.delete('q');
     }
-    setSearchParams(params, { replace: false });
-  };
+    setSearchParams(params, { replace: true });
+  }, [committedSearch, urlSearch, searchParams, setSearchParams]);
 
   const query = useInfiniteQuery<SessionsPage>({
     queryKey: ['sessions', committedSearch],
@@ -79,9 +91,9 @@ export function SessionsPage() {
         subtitle="Every finalized scanning session across all signed-in phones."
         action={
           <form
+            role="search"
             onSubmit={(e) => {
               e.preventDefault();
-              commitSearch(searchInput);
             }}
             className="flex items-center gap-2"
           >
@@ -96,13 +108,10 @@ export function SessionsPage() {
                 className="w-44 rounded-pill border border-surface-border bg-surface px-3.5 py-1.5 text-sm placeholder:text-ink-muted sm:w-64"
               />
             </label>
-            {committedSearch && (
+            {searchInput && (
               <button
                 type="button"
-                onClick={() => {
-                  setSearchInput('');
-                  commitSearch('');
-                }}
+                onClick={() => setSearchInput('')}
                 className="rounded-pill px-3 py-1.5 text-xs text-ink-secondary hover:text-ink-primary"
               >
                 Clear
