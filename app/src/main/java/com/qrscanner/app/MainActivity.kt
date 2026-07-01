@@ -16,6 +16,9 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.qrscanner.app.cloud.CloudSessionStatus
 import com.qrscanner.app.ui.auth.AuthAwareRoot
 import com.qrscanner.app.ui.theme.QRScannerTheme
+import com.qrscanner.app.ui.update.UpdateGateScreen
+import com.qrscanner.app.update.UpdateChecker
+import com.qrscanner.app.update.UpdateGateController
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -23,6 +26,7 @@ import kotlin.time.Duration.Companion.minutes
 
 class MainActivity : ComponentActivity() {
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private val updateGate = UpdateGateController()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -35,6 +39,16 @@ class MainActivity : ComponentActivity() {
         // this, the sync_events DAO's pruneOldEvents query is defined
         // but never executed and the table grows unbounded.
         app.syncScheduler.scheduleEventPruning()
+
+        // Force-update gate. Runs OFF the main thread on lifecycleScope
+        // and never blocks the launch path: if GitHub is unreachable
+        // the checker times out at 8s and returns UpToDate, so the app
+        // opens normally on a bad WiFi day. Fresh check on every
+        // MainActivity onCreate — cheap because GitHub CDN caches
+        // releases/latest, and we want operators forced to the newest
+        // version the next time they cold-launch the app after we
+        // publish a release.
+        updateGate.launchCheck(lifecycleScope)
 
         // Reconnect catch-up: fires enqueuePull() the instant the OS
         // hands us a usable default network again. Without this the
@@ -104,7 +118,30 @@ class MainActivity : ComponentActivity() {
         setContent {
             QRScannerTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    AuthAwareRoot()
+                    val available =
+                        updateGate.checkedResult as? UpdateChecker.UpdateResult.Available
+                    if (available != null) {
+                        UpdateGateScreen(
+                            newVersionName = available.versionName,
+                            newVersionCode = available.versionCode,
+                            apkSizeBytes = available.apkSizeBytes,
+                            changelog = available.changelog,
+                            state = updateGate.gateState,
+                            onPrimaryAction = {
+                                updateGate.onPrimaryClicked(
+                                    context = this@MainActivity,
+                                    scope = lifecycleScope,
+                                    openPermissionSettings = {
+                                        startActivity(
+                                            UpdateChecker.installUnknownAppsSettingsIntent(this@MainActivity)
+                                        )
+                                    }
+                                )
+                            }
+                        )
+                    } else {
+                        AuthAwareRoot()
+                    }
                 }
             }
         }

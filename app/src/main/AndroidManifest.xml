@@ -26,6 +26,13 @@
     <!-- Haptic feedback on scan + bulk-select interactions -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- Force-update auto-install: needed so the app can launch the
+         system installer for a downloaded APK. User is prompted ONCE
+         per phone via Settings -> "Install unknown apps" to grant this
+         to us. Runtime check + deep-link in UpdateChecker handles the
+         permission request. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <application
         android:name=".QRScannerApp"
         android:allowBackup="false"

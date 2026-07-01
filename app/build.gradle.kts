@@ -32,8 +32,8 @@ android {
         // ~94% of active devices in 2026, acceptable per spec §15.
         minSdk = 30
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 20
+        versionName = "2.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -62,11 +62,13 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = true
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
+            // R8/ProGuard disabled per user's scale (2-5 phones, 30 sessions/year).
+            // Trades ~40% APK size increase for zero risk of R8 stripping
+            // Room DAO methods, kotlinx.serialization @Serializable classes,
+            // Compose runtime reflection paths, or Coil image loader glue. If
+            // distribution ever grows to 20+ operators, re-enable + add keep
+            // rules for room/kotlinx.serialization/coil/supabase-kt.
+            isMinifyEnabled = false
             signingConfig = signingConfigs.getByName("release")
         }
     }
