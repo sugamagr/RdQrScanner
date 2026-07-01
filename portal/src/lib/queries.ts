@@ -538,10 +538,25 @@ export interface RdSearchHit {
 }
 
 /**
- * Search rd_numbers by partial number. Limited to 100 hits — at scale
- * the owner should narrow the query rather than scroll thousands of
- * matches. Uses `ilike` for case-insensitive partial match. Postgres
- * trigram index lands in Phase 5 hardening.
+ * Search rd_numbers by partial number OR by customer name. Limited to
+ * 100 hits — at scale the owner should narrow the query rather than
+ * scroll thousands of matches.
+ *
+ * Query routing (single-input, two modes):
+ *   - Pure digits (e.g. "1234"): matches rd_numbers.number ILIKE — the
+ *     original RD-number-lookup behavior.
+ *   - Anything else (e.g. "ajeet"): matches rd_accounts.name ILIKE %q%,
+ *     resolves to a set of rd_numbers.number, then joins to sessions.
+ *     Same 4-round-trip pattern Sessions.tsx name-search uses; kept
+ *     client-side rather than a Postgres RPC because at the current
+ *     scale (~30 sessions/year × ~200 accounts) latency is comfortably
+ *     under 500ms and adding an RPC would require every operator's
+ *     first upgrade to also paste a cloud migration.
+ *
+ * Both modes filter out tombstoned rd_numbers, lots, and sessions.
+ * The trigram index rd_accounts_name_trgm_idx on lower(name) powers
+ * the name path; the trigram index on rd_numbers.number powers the
+ * digit path.
  */
 export async function searchRdNumbers(query: string): Promise<RdSearchHit[]> {
   const trimmed = query.trim();
@@ -549,7 +564,29 @@ export async function searchRdNumbers(query: string): Promise<RdSearchHit[]> {
 
   const ownerId = await requireOwnerId();
   const escaped = trimmed.replace(/[%_\\]/g, (c) => `\\${c}`);
-  const { data, error } = await supabase
+  const isDigitQuery = /^\d+$/.test(trimmed);
+
+  // Name mode: resolve customer name -> rd_number list, then feed the
+  // list into the same rd_numbers-with-joined-lot-session query so the
+  // render pipeline stays identical. If the name matches nothing, or
+  // matches an rd_number that has never been scanned, return empty
+  // without hitting the second query.
+  let rdNumberFilter: string[] | null = null;
+  if (!isDigitQuery) {
+    const accountsRes = await supabase
+      .from('rd_accounts')
+      .select('rd_number')
+      .eq('owner_id', ownerId)
+      .is('deleted_at', null)
+      .ilike('name', `%${escaped}%`)
+      .limit(500);
+    if (accountsRes.error) throw accountsRes.error;
+    const matched = (accountsRes.data ?? []) as Array<{ rd_number: string }>;
+    if (matched.length === 0) return [];
+    rdNumberFilter = matched.map((r) => r.rd_number);
+  }
+
+  let q = supabase
     .from('rd_numbers')
     .select(
       `
@@ -561,10 +598,13 @@ export async function searchRdNumbers(query: string): Promise<RdSearchHit[]> {
     `
     )
     .eq('owner_id', ownerId)
-    .ilike('number', `%${escaped}%`)
     .is('deleted_at', null)
     .order('scanned_at', { ascending: false })
     .limit(100);
+  q = isDigitQuery
+    ? q.ilike('number', `%${escaped}%`)
+    : q.in('number', rdNumberFilter!);
+  const { data, error } = await q;
 
   if (error) throw error;
   if (!data) return [];

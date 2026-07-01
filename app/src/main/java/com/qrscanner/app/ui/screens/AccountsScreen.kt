@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Visibility
@@ -796,6 +797,15 @@ private fun AccountRow(
                         // the touch area down to 40dp, below the WCAG
                         // floor. Glyph stays at 18dp; only the tap area
                         // grows.
+                        // P3 SEMANTIC: leading icon still gates on
+                        // CSV-vs-MANUAL for the edit affordance (Lock
+                        // reminds operator CSV rows are portal-only),
+                        // but the trailing overflow (3-dot) now
+                        // appears for BOTH sources so the read-only
+                        // "View history" action is always reachable.
+                        // CSV rows just get a shorter menu without
+                        // the destructive "Mark inactive / Delete"
+                        // item since those actions require unlock.
                         if (account.source == AccountSource.CSV) {
                             IconButton(onClick = onEditAttempt, modifier = Modifier.size(44.dp)) {
                                 Icon(
@@ -814,23 +824,25 @@ private fun AccountRow(
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
-                            Box {
-                                IconButton(onClick = onOverflowOpen, modifier = Modifier.size(44.dp)) {
-                                    Icon(
-                                        Icons.Default.MoreVert,
-                                        contentDescription = "More",
-                                        tint = TextSecondary,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                }
-                                DropdownMenu(
-                                    expanded = overflowOpen,
-                                    onDismissRequest = onOverflowDismiss
-                                ) {
-                                    DropdownMenuItem(
-                                        text = { Text("View history", color = TextPrimary) },
-                                        onClick = onViewHistory
-                                    )
+                        }
+                        Box {
+                            IconButton(onClick = onOverflowOpen, modifier = Modifier.size(44.dp)) {
+                                Icon(
+                                    Icons.Default.MoreVert,
+                                    contentDescription = "More",
+                                    tint = TextSecondary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = overflowOpen,
+                                onDismissRequest = onOverflowDismiss
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("View history", color = TextPrimary) },
+                                    onClick = onViewHistory
+                                )
+                                if (account.source != AccountSource.CSV) {
                                     DropdownMenuItem(
                                         text = { Text("Mark inactive / Delete", color = TextPrimary) },
                                         onClick = onMarkInactive

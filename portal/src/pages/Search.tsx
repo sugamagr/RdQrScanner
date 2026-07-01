@@ -59,18 +59,17 @@ export function SearchPage() {
   return (
     <div>
       <PageHeader
-        title="Search RD numbers"
-        subtitle="Type any portion of an RD number to find which session it lives in."
+        title="Search"
+        subtitle="Type an RD number or customer name to find which session it lives in."
       />
 
       <div className="mt-6">
         <label className="block">
-          <span className="sr-only">RD number</span>
+          <span className="sr-only">RD number or customer name</span>
           <input
             type="text"
-            inputMode="numeric"
             autoFocus
-            placeholder="e.g. 1234 or last 4 digits"
+            placeholder="e.g. 1234 or ajeet"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             className="w-full rounded-2xl border border-surface-border bg-surface px-4 py-3 text-base placeholder:text-ink-muted shadow-card focus:border-primary"
@@ -109,10 +108,10 @@ export function SearchPage() {
       {showResults && !query.isFetching && hits.length === 0 && !query.isError && (
         <div className="mt-6 rounded-2xl border border-dashed border-surface-border bg-surface p-12 text-center">
           <p className="text-sm font-medium text-ink-primary">
-            No RD numbers match "{debounced}".
+            No matches for "{debounced}".
           </p>
           <p className="mt-1 text-xs text-ink-secondary">
-            Try fewer digits or check for typos.
+            Try fewer digits, a partial name, or check for typos.
           </p>
         </div>
       )}
