@@ -1586,6 +1586,16 @@ object LotReviewPersister {
                                 .updateLastPaidThroughMonotonic(edit.rdNumber, token, now)
                         }
                     }
+                    // Re-mark the parent session DIRTY so the next push
+                    // cycle re-runs pushSession which recomputes the
+                    // denormalized `default_count` from the current
+                    // rd_numbers set. Without this, an already-SYNCED
+                    // session whose defaulters are edited after the
+                    // fact leaves cloud's default_count stale, which is
+                    // what the portal Sessions list reads directly.
+                    // See ScanSessionDao.markSessionDirtyForChildEdit
+                    // KDoc for the full causal chain.
+                    app.database.scanSessionDao().markSessionDirtyForChildEdit(sessionId, now)
                 }
                 // sync_event insert + push enqueue stay OUTSIDE the
                 // transaction: they're observability concerns. If the

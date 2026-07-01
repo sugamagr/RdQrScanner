@@ -284,6 +284,35 @@ interface ScanSessionDao {
     )
     suspend fun markSessionDirty(sessionId: Long, updatedAt: Long)
 
+    /**
+     * Re-mark an already-SYNCED (or DIRTY / SYNC_ERROR) session as DIRTY so
+     * the next push cycle re-runs pushSession — which recomputes the
+     * denormalized `default_count` from the current rd_numbers set.
+     *
+     * Called by LotReviewPersister after a defaulter edit lands on a
+     * session whose earlier push already SYNCED the parent row. Without
+     * this, the child (rd_numbers) row pushes fine but the session row
+     * stays SYNCED and the cloud's `scan_sessions.default_count` stays
+     * stale — which is what the portal Sessions list reads directly.
+     *
+     * Skip conditions:
+     *   - `deletedAt IS NOT NULL` — tombstoned session, do not resurrect.
+     *   - `syncStatus = 'SYNC_ABANDONED'` — circuit-breaker already
+     *      opened; promoting back to DIRTY would loop the abandonment.
+     *   - `syncStatus = 'LOCAL_ONLY'` — leave for markSessionDirty's
+     *      finalize gate (that path has additional metadata to stamp).
+     */
+    @Query(
+        """
+        UPDATE scan_sessions
+        SET syncStatus = 'DIRTY', updatedAt = :updatedAt
+        WHERE id = :sessionId
+          AND deletedAt IS NULL
+          AND syncStatus IN ('SYNCED', 'DIRTY', 'SYNC_ERROR')
+        """
+    )
+    suspend fun markSessionDirtyForChildEdit(sessionId: Long, updatedAt: Long)
+
     @Query(
         """
         UPDATE scan_sessions

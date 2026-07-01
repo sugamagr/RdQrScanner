@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -104,6 +105,33 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
+ * Sort key for the accounts list. Ordered by expected-use frequency
+ * so [NAME] (the default) ends up as the first chip in the sort row.
+ *
+ * - [NAME]        A→Z on lowercased name. Default for browse.
+ * - [LAST_PAID]   YYYY-MM ascending; null (never paid) surfaces first
+ *                 so the operator sees "needs attention" accounts on
+ *                 top instead of buried at the tail.
+ * - [AMOUNT]      monthlyAmount descending. Big-ticket accounts first.
+ * - [RECENT]      updatedAt descending. Fresh edits/scans at the top.
+ */
+enum class SortKey { NAME, LAST_PAID, AMOUNT, RECENT }
+
+/**
+ * Filter selector for the accounts list. Operates OVER-AND-ABOVE the
+ * existing "Show inactive" toggle (which changes the base set), so
+ * filter modes here only touch active-set accounts unless noted.
+ *
+ * - [ALL]         reset — no filter beyond active/inactive base
+ * - [DEFAULTERS]  lastPaidThrough < currentMonth (YYYY-MM) AND active
+ * - [NEVER_PAID]  lastPaidThrough == null AND active — brand-new
+ *                 accounts distinct from lapsed defaulters
+ * - [MANUAL]      source == MANUAL — phone-added accounts
+ * - [CSV]         source == CSV — portal-imported accounts
+ */
+enum class FilterMode { ALL, DEFAULTERS, NEVER_PAID, MANUAL, CSV }
+
+/**
  * Accounts browse screen. Three modes:
  *
  *   Browse — default. Per-row [QR] button (single-account PDF), edit
@@ -152,6 +180,8 @@ fun AccountsScreen(
     // shouldn't persist past a process restart.
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var showInactive by rememberSaveable { mutableStateOf(false) }
+    var sortKey by rememberSaveable { mutableStateOf(SortKey.NAME) }
+    var filterMode by rememberSaveable { mutableStateOf(FilterMode.ALL) }
     var selectionMode by remember { mutableStateOf(false) }
     val selectedIds = remember { mutableStateListOf<String>() }
 
@@ -169,12 +199,39 @@ fun AccountsScreen(
     val visibleAccounts by remember {
         derivedStateOf {
             val q = searchQuery.trim().lowercase()
-            allAccounts.filter { account ->
-                account.deletedAt == null &&
-                    (showInactive || account.isActive) &&
-                    (q.isEmpty() ||
-                        account.name.lowercase().contains(q) ||
-                        account.rdNumber.contains(q))
+            // Defaulter check needs a live "current month" reference. Using
+            // MonthYear.current().toToken() (see MonthYear.kt) so the phone's
+            // local-time YYYY-MM matches the same source the RD scan flow +
+            // portal defaulter view already share. Keeps defaulter semantics
+            // consistent across surfaces.
+            val currentMonth = MonthYear.current().toToken()
+            val filtered = allAccounts.filter { account ->
+                if (account.deletedAt != null) return@filter false
+                if (!showInactive && !account.isActive) return@filter false
+                if (q.isNotEmpty() &&
+                    !account.name.lowercase().contains(q) &&
+                    !account.rdNumber.contains(q)) return@filter false
+                when (filterMode) {
+                    FilterMode.ALL -> true
+                    FilterMode.DEFAULTERS -> account.isActive &&
+                        account.lastPaidThrough != null &&
+                        account.lastPaidThrough < currentMonth
+                    FilterMode.NEVER_PAID -> account.isActive &&
+                        account.lastPaidThrough == null
+                    FilterMode.MANUAL -> account.source == AccountSource.MANUAL
+                    FilterMode.CSV -> account.source == AccountSource.CSV
+                }
+            }
+            when (sortKey) {
+                SortKey.NAME -> filtered.sortedBy { it.name.lowercase() }
+                // Nulls first so never-paid accounts sit at the top of the
+                // "Last paid" view — mirrors the SortKey.LAST_PAID docstring
+                // rationale (needs-attention accounts surface first).
+                SortKey.LAST_PAID -> filtered.sortedWith(
+                    compareBy(nullsFirst()) { it.lastPaidThrough }
+                )
+                SortKey.AMOUNT -> filtered.sortedByDescending { it.monthlyAmount }
+                SortKey.RECENT -> filtered.sortedByDescending { it.updatedAt }
             }
         }
     }
@@ -244,7 +301,11 @@ fun AccountsScreen(
                     onQueryChange = { searchQuery = it },
                     showInactive = showInactive,
                     inactiveCount = inactiveCount,
-                    onToggleShowInactive = { showInactive = it }
+                    onToggleShowInactive = { showInactive = it },
+                    sortKey = sortKey,
+                    onSortKeyChange = { sortKey = it },
+                    filterMode = filterMode,
+                    onFilterModeChange = { filterMode = it }
                 )
             }
 
@@ -252,7 +313,9 @@ fun AccountsScreen(
                 AccountListSkeleton()
             } else if (visibleAccounts.isEmpty()) {
                 EmptyState(
-                    isFiltered = searchQuery.isNotBlank() || (!showInactive && inactiveCount > 0),
+                    isFiltered = searchQuery.isNotBlank() ||
+                        (!showInactive && inactiveCount > 0) ||
+                        filterMode != FilterMode.ALL,
                     onAddAccount = onNavigateToAddAccount,
                 )
             } else {
@@ -515,7 +578,11 @@ private fun FilterBar(
     onQueryChange: (String) -> Unit,
     showInactive: Boolean,
     inactiveCount: Int,
-    onToggleShowInactive: (Boolean) -> Unit
+    onToggleShowInactive: (Boolean) -> Unit,
+    sortKey: SortKey,
+    onSortKeyChange: (SortKey) -> Unit,
+    filterMode: FilterMode,
+    onFilterModeChange: (FilterMode) -> Unit
 ) {
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
         OutlinedTextField(
@@ -532,6 +599,10 @@ private fun FilterBar(
                 unfocusedContainerColor = SurfaceWhite
             )
         )
+        Spacer(modifier = Modifier.height(10.dp))
+        SortChipRow(sortKey = sortKey, onSortKeyChange = onSortKeyChange)
+        Spacer(modifier = Modifier.height(8.dp))
+        FilterChipRow(filterMode = filterMode, onFilterModeChange = onFilterModeChange)
         if (inactiveCount > 0) {
             Spacer(modifier = Modifier.height(8.dp))
             Surface(
@@ -872,6 +943,145 @@ private fun AccountListSkeleton() {
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * Sort-selector chip row. Single-select behaviour — tapping a chip
+ * commits its [SortKey] as the active sort. Selected chip renders as
+ * a PrimaryOrange pill with white text; unselected chips are muted
+ * cards with TextSecondary text. Follows the same "pill" pattern the
+ * Show inactive toggle uses so all filter/sort affordances feel like
+ * one design family.
+ *
+ * Horizontally scrollable so the row survives narrower phones + Hindi
+ * labels (which are ~20% wider than English for common sort words).
+ * The "Sort" leading label anchors screen-reader traversal.
+ */
+@Composable
+private fun SortChipRow(
+    sortKey: SortKey,
+    onSortKeyChange: (SortKey) -> Unit
+) {
+    val options = listOf(
+        SortKey.NAME to "Name",
+        SortKey.LAST_PAID to "Last paid",
+        SortKey.AMOUNT to "Amount",
+        SortKey.RECENT to "Recent"
+    )
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 2.dp)
+    ) {
+        item {
+            Text(
+                text = "Sort",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextTertiary,
+                modifier = Modifier.padding(end = 4.dp)
+            )
+        }
+        items(options.size) { index ->
+            val (key, label) = options[index]
+            val selected = key == sortKey
+            SelectablePill(
+                label = label,
+                selected = selected,
+                accent = PrimaryOrange,
+                onClick = { onSortKeyChange(key) }
+            )
+        }
+    }
+}
+
+/**
+ * Filter-selector chip row. Single-select over the FilterMode enum,
+ * with AccentMint as the selected accent (deliberately distinct from
+ * the sort row's PrimaryOrange so an operator can see at a glance
+ * which affordance is "sort" vs "filter"). The trailing chips are
+ * source filters (Manual / CSV) so they cluster together separate
+ * from the state-based filters (All / Defaulters / Never paid).
+ */
+@Composable
+private fun FilterChipRow(
+    filterMode: FilterMode,
+    onFilterModeChange: (FilterMode) -> Unit
+) {
+    val options = listOf(
+        FilterMode.ALL to "All",
+        FilterMode.DEFAULTERS to "Defaulters",
+        FilterMode.NEVER_PAID to "Never paid",
+        FilterMode.MANUAL to "Manual",
+        FilterMode.CSV to "CSV"
+    )
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 2.dp)
+    ) {
+        item {
+            Text(
+                text = "Filter",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextTertiary,
+                modifier = Modifier.padding(end = 4.dp)
+            )
+        }
+        items(options.size) { index ->
+            val (mode, label) = options[index]
+            val selected = mode == filterMode
+            SelectablePill(
+                label = label,
+                selected = selected,
+                accent = AccentMint,
+                onClick = { onFilterModeChange(mode) }
+            )
+        }
+    }
+}
+
+/**
+ * Shared pill primitive used by both sort + filter rows. Kept private
+ * to this file so the exact rendering stays under the same design
+ * gravity — extracting to a shared component would tempt other screens
+ * to reuse it and drift the visual language. If that ever becomes a
+ * genuine need, lift to ui/components/ intentionally.
+ *
+ * The selected state uses the passed [accent] at 0.15 alpha as fill
+ * plus full-strength text/border, which matches the "Show inactive"
+ * toggle exactly. Unselected uses CardBackground fill with TextSecondary,
+ * matching the same neutral surface tokens used across the app so the
+ * chips read as part of the existing design system, not a new one.
+ */
+@Composable
+private fun SelectablePill(
+    label: String,
+    selected: Boolean,
+    accent: androidx.compose.ui.graphics.Color,
+    onClick: () -> Unit
+) {
+    val fillColor = if (selected) accent.copy(alpha = 0.15f) else CardBackground
+    val textColor = if (selected) accent else TextSecondary
+    Surface(
+        color = fillColor,
+        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier
+            .heightIn(min = 36.dp)
+            .clickable { onClick() }
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
+                ),
+                color = textColor
+            )
         }
     }
 }
