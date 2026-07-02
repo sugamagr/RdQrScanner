@@ -386,8 +386,68 @@ export async function fetchActivityFeed(params: {
     }
   }
 
-  events.sort((a, b) => (b.occurredAt < a.occurredAt ? -1 : b.occurredAt > a.occurredAt ? 1 : 0));
-  return events.slice(0, limit);
+  const collapsed = collapseBulkAccountEvents(events);
+  collapsed.sort((a, b) => (b.occurredAt < a.occurredAt ? -1 : b.occurredAt > a.occurredAt ? 1 : 0));
+  return collapsed.slice(0, limit);
+}
+
+/**
+ * Collapses per-account activity rows that came from the same bulk
+ * upload into a single aggregated row. Without this a 145-row CSV
+ * import fills the Activity feed with 145 identical "Account added"
+ * entries, drowning every other event (session finalize, defaulter
+ * edit) that landed the same day.
+ *
+ * Bucket key: (kind, actorLabel, minute-of-occurredAt). Bulk upserts
+ * always land within one minute (145 rows takes ~2-5s over the
+ * PostgREST loop); manual add-one flows are separated by human typing
+ * time so they never collide. Two operators doing single adds within
+ * the same minute is not observed at 2-5 phone scale, and even if it
+ * happened both events would carry distinct actorLabels so wouldn't
+ * collapse.
+ *
+ * The phone-side bell already emits ONE aggregated `LOCAL_ACCOUNTS_
+ * ADDED` event with summary "added N accounts"; this brings the
+ * portal to visual parity. Single-account entries pass through
+ * untouched because the group size stays 1 and this function short-
+ * circuits to the original row.
+ */
+function collapseBulkAccountEvents(events: ReadonlyArray<ActivityRow>): ActivityRow[] {
+  const groups = new Map<string, ActivityRow[]>();
+  const passthrough: ActivityRow[] = [];
+  for (const ev of events) {
+    if (ev.kind !== 'account_added' && ev.kind !== 'account_edited') {
+      passthrough.push(ev);
+      continue;
+    }
+    const minuteBucket = ev.occurredAt.slice(0, 16);
+    const key = `${ev.kind}|${ev.actorLabel}|${minuteBucket}`;
+    const bucket = groups.get(key);
+    if (bucket == null) {
+      groups.set(key, [ev]);
+    } else {
+      bucket.push(ev);
+    }
+  }
+  const out: ActivityRow[] = [...passthrough];
+  for (const bucket of groups.values()) {
+    if (bucket.length === 1) {
+      out.push(bucket[0]);
+    } else {
+      const verb = bucket[0].kind === 'account_added' ? 'added' : 'edited';
+      const noun = bucket.length === 1 ? 'account' : 'accounts';
+      const newest = bucket.reduce((a, b) => (a.occurredAt > b.occurredAt ? a : b));
+      out.push({
+        kind: bucket[0].kind,
+        occurredAt: newest.occurredAt,
+        actorLabel: bucket[0].actorLabel,
+        primary: `${bucket.length} ${noun} ${verb}`,
+        secondary: 'Bulk update',
+        linkTo: '/accounts',
+      });
+    }
+  }
+  return out;
 }
 
 /**
