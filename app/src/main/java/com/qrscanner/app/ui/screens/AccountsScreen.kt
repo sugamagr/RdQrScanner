@@ -551,8 +551,9 @@ private fun AccountsHeader(
                     Text(
                         text = if (inactiveCount == 0) "$activeCount active"
                         else "$activeCount active · $inactiveCount inactive",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.White.copy(alpha = 0.85f)
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White.copy(alpha = 0.85f),
+                        maxLines = 1
                     )
                 }
                 // Icon + literal "Generate QR" label. The icon alone is not

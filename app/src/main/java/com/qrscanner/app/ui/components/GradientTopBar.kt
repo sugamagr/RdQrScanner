@@ -2,15 +2,32 @@ package com.qrscanner.app.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.displayCutoutPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.qrscanner.app.R
 import com.qrscanner.app.ui.theme.PrimaryOrange
 import com.qrscanner.app.ui.theme.PrimaryOrangeLight
 
@@ -56,5 +73,71 @@ fun GradientTopBar(
             .padding(bottom = 8.dp)
     ) {
         content()
+    }
+}
+
+/**
+ * Canonical back-chip + title/subtitle row for header-style screens.
+ *
+ * Design-system invariant locked here so AddAccountsScreen,
+ * AccountHistoryScreen, and any future header-style screen render
+ * IDENTICAL chrome — same 44dp back chip (White @ 0.20f circle),
+ * same 12dp spacer, same titleMedium 16sp Bold title, same
+ * bodySmall 14sp @ 0.85f alpha subtitle.
+ *
+ * Do NOT inline this layout in individual screens. Every previous
+ * copy diverged on subtitle typography (labelSmall 11sp vs bodySmall
+ * 14sp vs hardcoded 12sp) or dropped the back chip entirely, and
+ * the three "history / accounts / add" screens ended up visibly
+ * different at the header level despite being reachable one tap
+ * apart. This helper is the single source of truth.
+ *
+ * Screens with extra right-side controls (bulk-select toolbar,
+ * QR pill, filter icon) must instead compose their own Row inside
+ * [GradientTopBar] but MUST keep the back-chip + typography ratio
+ * to stay visually kin with this helper.
+ */
+@Composable
+fun GradientTopBarHeaderRow(
+    title: String,
+    subtitle: String?,
+    onNavigateBack: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconButton(
+            onClick = onNavigateBack,
+            modifier = Modifier
+                .size(44.dp)
+                .background(Color.White.copy(alpha = 0.20f), CircleShape)
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = stringResource(R.string.content_desc_back),
+                tint = Color.White
+            )
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                ),
+                maxLines = 1
+            )
+            if (!subtitle.isNullOrBlank()) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White.copy(alpha = 0.85f),
+                    maxLines = 1
+                )
+            }
+        }
     }
 }

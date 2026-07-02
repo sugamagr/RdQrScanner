@@ -46,6 +46,7 @@ import com.qrscanner.app.QRScannerApp
 import com.qrscanner.app.data.AccountHistoryRow
 import com.qrscanner.app.data.RdAccount
 import com.qrscanner.app.ui.components.GradientTopBar
+import com.qrscanner.app.ui.components.GradientTopBarHeaderRow
 import com.qrscanner.app.ui.theme.AccentMint
 import com.qrscanner.app.ui.theme.PrimaryOrange
 import com.qrscanner.app.ui.theme.PrimaryOrangeDark
@@ -87,39 +88,11 @@ fun AccountHistoryScreen(
             .background(MaterialTheme.colorScheme.background)
     ) {
         GradientTopBar {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                IconButton(onClick = onNavigateBack) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = Color.White
-                    )
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(vertical = 4.dp)
-                ) {
-                    Text(
-                        text = "Payment history",
-                        color = Color.White,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1
-                    )
-                    Text(
-                        text = account?.name ?: rdNumber,
-                        color = Color.White.copy(alpha = 0.85f),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1
-                    )
-                }
-            }
+            GradientTopBarHeaderRow(
+                title = "Payment history",
+                subtitle = account?.name ?: rdNumber,
+                onNavigateBack = onNavigateBack
+            )
         }
 
         LazyColumn(

@@ -80,6 +80,7 @@ import com.qrscanner.app.data.SyncEvent
 import com.qrscanner.app.data.SyncEventType
 import com.qrscanner.app.data.SyncStatus
 import com.qrscanner.app.ui.components.GradientTopBar
+import com.qrscanner.app.ui.components.GradientTopBarHeaderRow
 import com.qrscanner.app.ui.theme.AccentMint
 import com.qrscanner.app.ui.theme.BackgroundWhite
 import com.qrscanner.app.ui.theme.CardBackground
@@ -421,52 +422,11 @@ private fun AccountDraft.isFullyValid(): Boolean {
 @Composable
 private fun AddAccountsHeader(countLabel: String, onNavigateBack: () -> Unit) {
     GradientTopBar {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(
-                onClick = onNavigateBack,
-                modifier = Modifier
-                    .size(44.dp)
-                    .background(Color.White.copy(alpha = 0.2f), CircleShape)
-            ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = stringResource(R.string.content_desc_back),
-                    tint = Color.White
-                )
-            }
-            Spacer(modifier = Modifier.width(12.dp))
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .background(Color.White.copy(alpha = 0.2f), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.Default.PersonAddAlt1,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
-            Spacer(modifier = Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Add new accounts",
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                )
-                Text(
-                    text = countLabel,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Color.White.copy(alpha = 0.85f)
-                )
-            }
-        }
+        GradientTopBarHeaderRow(
+            title = "Add new accounts",
+            subtitle = countLabel,
+            onNavigateBack = onNavigateBack
+        )
     }
 }
 
