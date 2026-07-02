@@ -130,6 +130,7 @@ import com.qrscanner.app.data.ScanSession
 import com.qrscanner.app.data.SyncEvent
 import com.qrscanner.app.data.SyncEventType
 import com.qrscanner.app.util.isValidRdNumber
+import com.qrscanner.app.ui.components.RegisterAccountDialog
 import com.qrscanner.app.ui.components.ResumeSessionDialog
 import com.qrscanner.app.ui.theme.AccentCoral
 import com.qrscanner.app.ui.theme.AccentMint
@@ -250,6 +251,16 @@ private fun RDCameraScreen(
     var showEndSessionDialog by rememberSaveable { mutableStateOf(false) }
     var showFinishLotDialog by rememberSaveable { mutableStateOf(false) }
     var lastScanFeedback by remember { mutableStateOf<ScanFeedback?>(null) }
+
+    // P3 SEMANTIC: pendingUnknownRd is non-null exactly when a valid
+    // RD number was scanned but no rd_accounts row exists locally.
+    // The scanner loop pauses (isScanningRef.set(false)) while this
+    // state is non-null so the camera doesn't fire a second unknown
+    // scan on top of the first. Dismissal or successful register
+    // clears the state and re-arms scanning. Not saveable — a
+    // process kill mid-register should surface a fresh scan next
+    // launch, not an in-flight registration.
+    var pendingUnknownRd by remember { mutableStateOf<String?>(null) }
 
     // Resume flow — surfaced when an active session from a prior launch is found.
     var showResumeDialog by remember { mutableStateOf(false) }
@@ -463,6 +474,25 @@ private fun RDCameraScreen(
                             vibrator?.vibrate(VibrationEffect.createOneShot(100, VibrationEffect.DEFAULT_AMPLITUDE))
                         } catch (e: Exception) { /* ignore */ }
                     }
+                    // P3 SEMANTIC: unknown-RD guard — an rd_accounts row
+                    // MUST exist before the number can be inserted into
+                    // a lot. This is the runtime enforcement of the
+                    // "accounts drive scans" contract that XlsxExporter
+                    // column H depends on for accurate ₹ book values.
+                    // The RegisterAccountDialog rendered elsewhere in
+                    // this composable owns the recovery UX (add + retry
+                    // OR dismiss + drop). While pendingUnknownRd is
+                    // non-null, the camera loop is paused so a follow-up
+                    // scan can't shove another unknown behind this one.
+                    app.database.rdAccountDao().findByRdNumber(cleanValue) == null -> {
+                        pendingUnknownRd = cleanValue
+                        isScanningRef.set(false)
+                        try {
+                            toneGenerator?.startTone(ToneGenerator.TONE_PROP_NACK, 200)
+                            val vibrator = context.getSystemService(Vibrator::class.java)
+                            vibrator?.vibrate(VibrationEffect.createOneShot(100, VibrationEffect.DEFAULT_AMPLITUDE))
+                        } catch (e: Exception) { /* ignore */ }
+                    }
                     else -> {
                         val session = currentSession
                         if (session == null) {
@@ -612,7 +642,7 @@ private fun RDCameraScreen(
     // Pause camera analysis whenever any dialog is open; resume when all closed.
     // Also pause while the session is still hydrating from DB.
     val anyDialogOpen = !isHydrated || showResumeDialog || showEndSessionDialog ||
-            showFinishLotDialog || showLotReviewScreen
+            showFinishLotDialog || showLotReviewScreen || pendingUnknownRd != null
     LaunchedEffect(anyDialogOpen) {
         if (anyDialogOpen) {
             scanningEnabledRef.set(false)
@@ -1590,6 +1620,62 @@ private fun RDCameraScreen(
                         currentSessionId = null
                         currentLotId = null
                         startFreshSession()
+                    }
+                }
+            )
+        }
+
+        val unknownRd = pendingUnknownRd
+        if (unknownRd != null) {
+            RegisterAccountDialog(
+                rdNumber = unknownRd,
+                onDismiss = {
+                    // P3 SEMANTIC: dismissal drops the scan entirely.
+                    // pendingValueRef reset + isScanningRef re-armed +
+                    // pendingUnknownRd cleared MUST happen together;
+                    // dropping any one strands the scanner in a state
+                    // where either the RD gets re-processed on the next
+                    // camera frame (pendingValueRef not cleared) or the
+                    // camera stays frozen (isScanningRef still false).
+                    pendingUnknownRd = null
+                    pendingValueRef.set(null)
+                    isScanningRef.set(true)
+                },
+                onRegister = { name, monthlyAmount ->
+                    scope.launch {
+                        val now = System.currentTimeMillis()
+                        runCatching {
+                            app.database.rdAccountDao().insert(
+                                com.qrscanner.app.data.RdAccount(
+                                    rdNumber = unknownRd,
+                                    name = name,
+                                    monthlyAmount = monthlyAmount,
+                                    source = com.qrscanner.app.data.AccountSource.MANUAL,
+                                    isActive = true,
+                                    updatedAt = now,
+                                    syncStatus = com.qrscanner.app.data.SyncStatus.DIRTY
+                                )
+                            )
+                            runCatching { app.syncScheduler.enqueuePush() }
+                                .onFailure {
+                                    android.util.Log.w("RDScannerScreen", "push enqueue after inline-register failed", it)
+                                }
+                        }.onFailure {
+                            android.util.Log.w("RDScannerScreen", "inline account register failed for $unknownRd", it)
+                            Toast.makeText(context, "Save failed — try again", Toast.LENGTH_SHORT).show()
+                        }
+                        // P3 SEMANTIC: after the account exists, the
+                        // scan value is re-fed to the loop by bumping
+                        // scanTrigger so the pipeline re-runs its
+                        // when-branches. The unknown-RD guard now
+                        // resolves to the `else` insert branch since
+                        // findByRdNumber returns non-null. This keeps
+                        // the register-and-retry recovery to ONE user
+                        // gesture (Save) rather than requiring a
+                        // re-scan of the QR code.
+                        pendingUnknownRd = null
+                        pendingValueRef.set(unknownRd)
+                        scanTrigger++
                     }
                 }
             )

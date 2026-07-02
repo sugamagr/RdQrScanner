@@ -627,7 +627,20 @@ fun SessionHistoryScreen(
                                                 val rdNumbersPerLot = lots.map { lot ->
                                                     app.database.rdNumberDao().getNumbersForLotSync(lot.id)
                                                 }
-                                                XlsxExporter.exportSessionToXlsx(context, lots, rdNumbersPerLot, session.displayNumber)
+                                                // P3 CROSS-FILE: build (rd_number -> monthlyAmount)
+                                                // map covering every scanned number so column H
+                                                // in the xlsx carries real ₹. distinct() collapses
+                                                // duplicate scans in different lots so the DAO
+                                                // is queried at most once per unique RD number.
+                                                val amountsByRdNumber = rdNumbersPerLot
+                                                    .flatMap { it.map { row -> row.number } }
+                                                    .distinct()
+                                                    .mapNotNull { rd ->
+                                                        val amt = app.database.rdAccountDao().findByRdNumber(rd)?.monthlyAmount
+                                                        if (amt != null) rd to amt else null
+                                                    }
+                                                    .toMap()
+                                                XlsxExporter.exportSessionToXlsx(context, lots, rdNumbersPerLot, session.displayNumber, amountsByRdNumber)
                                             }
                                             if (file != null) {
                                                 val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", file)
@@ -665,7 +678,15 @@ fun SessionHistoryScreen(
                                                 val rdNumbersPerLot = lots.map { lot ->
                                                     app.database.rdNumberDao().getNumbersForLotSync(lot.id)
                                                 }
-                                                XlsxExporter.exportSessionToTxt(context, lots, rdNumbersPerLot, session.displayNumber)
+                                                val amountsByRdNumber = rdNumbersPerLot
+                                                    .flatMap { it.map { row -> row.number } }
+                                                    .distinct()
+                                                    .mapNotNull { rd ->
+                                                        val amt = app.database.rdAccountDao().findByRdNumber(rd)?.monthlyAmount
+                                                        if (amt != null) rd to amt else null
+                                                    }
+                                                    .toMap()
+                                                XlsxExporter.exportSessionToTxt(context, lots, rdNumbersPerLot, session.displayNumber, amountsByRdNumber)
                                             }
                                             if (file != null) {
                                                 val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", file)

@@ -40,7 +40,8 @@ object XlsxExporter {
         context: Context,
         lots: List<ScanLot>,
         rdNumbersPerLot: List<List<RdNumber>>,
-        sessionDisplayNumber: Int
+        sessionDisplayNumber: Int,
+        amountsByRdNumber: Map<String, Int> = emptyMap()
     ): File? {
         if (lots.isEmpty()) return null
         return try {
@@ -57,7 +58,11 @@ object XlsxExporter {
                     writeEntry(zos, "xl/workbook.xml", workbookXml(sessionDisplayNumber))
                     writeEntry(zos, "xl/_rels/workbook.xml.rels", workbookRelsXml())
                     writeEntry(zos, "xl/styles.xml", stylesXml())
-                    writeEntry(zos, "xl/worksheets/sheet1.xml", sheet1Xml(lots, rdNumbersPerLot))
+                    writeEntry(
+                        zos,
+                        "xl/worksheets/sheet1.xml",
+                        sheet1Xml(lots, rdNumbersPerLot, amountsByRdNumber)
+                    )
                 }
             }
             file
@@ -123,7 +128,11 @@ object XlsxExporter {
   </cellXfs>
 </styleSheet>"""
 
-    private fun sheet1Xml(lots: List<ScanLot>, rdNumbersPerLot: List<List<RdNumber>>): String {
+    private fun sheet1Xml(
+        lots: List<ScanLot>,
+        rdNumbersPerLot: List<List<RdNumber>>,
+        amountsByRdNumber: Map<String, Int>
+    ): String {
         val sb = StringBuilder()
         sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>")
         sb.append("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">")
@@ -137,6 +146,12 @@ object XlsxExporter {
         // ever shrinks back to defaulters-only the width should drop too.
         sb.append("<col min=\"6\" max=\"6\" width=\"80\" customWidth=\"1\"/>")
         sb.append("<col min=\"7\" max=\"7\" width=\"22\" customWidth=\"1\"/>")
+        // P3 CROSS-FILE: column H width chosen to fit ~40 chars of
+        // "<rd>: ₹<amount>" pairs joined by "; ". At the ~4-8 rows/lot
+        // typical size the cell fits comfortably; wider than E because
+        // the ₹ prefix and thousands separators add characters per RD
+        // vs the compact "<rd>: Nm" defaulter shape.
+        sb.append("<col min=\"8\" max=\"8\" width=\"50\" customWidth=\"1\"/>")
         sb.append("</cols>")
         sb.append("<sheetData>")
 
@@ -148,6 +163,7 @@ object XlsxExporter {
         sb.append(strCell("E1", "Defaulters", bold = true))
         sb.append(strCell("F1", "All Months", bold = true))
         sb.append(strCell("G1", "Timestamp", bold = true))
+        sb.append(strCell("H1", "Amounts", bold = true))
         sb.append("</row>")
 
         lots.forEachIndexed { index, lot ->
@@ -175,6 +191,18 @@ object XlsxExporter {
                 "${rd.number}: " + months.joinToString(", ") { it.formatExport() }
             }))
             sb.append(strCell("G$rowNum", dateFormat.format(Date(lot.timestamp))))
+            // P3 CROSS-FILE: column H is the caller-supplied amounts
+            // map. Missing keys fall through to 0 defensively but the
+            // scanner NOW enforces "account exists before scan" via
+            // RegisterAccountDialog (RDScannerScreen), so a real 0
+            // means either (a) the account was hard-deleted between
+            // scan and export, or (b) manual DB tampering — never
+            // steady-state. Format is "<rd>: ₹<amount>" mirroring the
+            // per-RD shape of columns E and F.
+            sb.append(strCell("H$rowNum", rows.joinToString("; ") { rd ->
+                val amt = amountsByRdNumber[rd.number] ?: 0
+                "${rd.number}: \u20B9$amt"
+            }))
             sb.append("</row>")
         }
 
@@ -205,7 +233,8 @@ object XlsxExporter {
         context: Context,
         lots: List<ScanLot>,
         rdNumbersPerLot: List<List<RdNumber>>,
-        sessionDisplayNumber: Int
+        sessionDisplayNumber: Int,
+        amountsByRdNumber: Map<String, Int> = emptyMap()
     ): File? {
         if (lots.isEmpty()) return null
 
@@ -221,17 +250,20 @@ object XlsxExporter {
 
                 var totalDefaulters = 0
                 var totalMonths = 0
+                var totalBookValue = 0
                 lots.forEachIndexed { index, lot ->
                     val rows = rdNumbersPerLot.getOrElse(index) { emptyList() }
                     val defaulters = rows.filter { it.monthsPaid > 1 }
                     val anchor = MonthYear.fromEpochMillis(lot.timestamp)
                     totalDefaulters += defaulters.size
                     totalMonths += defaulters.sumOf { it.monthsPaid }
+                    val lotBookValue = rows.sumOf { amountsByRdNumber[it.number] ?: 0 }
+                    totalBookValue += lotBookValue
 
                     val header = if (defaulters.isEmpty()) {
-                        "LOT ${lot.lotNumber} (${rows.size} numbers):"
+                        "LOT ${lot.lotNumber} (${rows.size} numbers, \u20B9$lotBookValue book value):"
                     } else {
-                        "LOT ${lot.lotNumber} (${rows.size} numbers, ${defaulters.size} defaulter${if (defaulters.size == 1) "" else "s"}):"
+                        "LOT ${lot.lotNumber} (${rows.size} numbers, ${defaulters.size} defaulter${if (defaulters.size == 1) "" else "s"}, \u20B9$lotBookValue book value):"
                     }
                     writer.append("$header\n")
                     writer.append(rows.joinToString(", ") { it.number })
@@ -244,13 +276,25 @@ object XlsxExporter {
                         })
                         writer.append("\n")
                     }
-                    writer.append("\n")
+                    // P3 CROSS-FILE: amounts line mirrors xlsx column H
+                    // so pairing xlsx + txt outputs from the same session
+                    // gives byte-identical amount data. Missing keys fall
+                    // through to 0 defensively but the scanner NOW
+                    // enforces "account exists before scan" via
+                    // RegisterAccountDialog — see xlsx column H writer.
+                    writer.append("Amounts: ")
+                    writer.append(rows.joinToString(", ") { rd ->
+                        val amt = amountsByRdNumber[rd.number] ?: 0
+                        "${rd.number} (\u20B9$amt)"
+                    })
+                    writer.append("\n\n")
                 }
 
                 val totalNumbers = rdNumbersPerLot.sumOf { it.size }
                 writer.append("-".repeat(40) + "\n")
                 writer.append("Total: ${lots.size} LOTs, $totalNumbers RD Numbers")
                 if (totalDefaulters > 0) writer.append(", $totalDefaulters defaulters ($totalMonths months)")
+                writer.append(", \u20B9$totalBookValue book value")
                 writer.append("\n")
             }
 
