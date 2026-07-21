@@ -126,6 +126,25 @@ account → sync pulls all cloud data down.
 The first update after that will go through the in-app gate — they
 don't need to visit GitHub again.
 
+## Supabase keep-alive Worker
+
+The app's Supabase project runs on the free tier, which auto-pauses
+after 7 days without database activity. When paused:
+
+- DNS returns NXDOMAIN for the project URL
+- Every phone sees "not online" on cold launch
+- The force-update gate itself keeps working (GitHub is a separate
+  dependency) but the app is unusable because the backend is gone
+
+The `supabase-keepalive/` Cloudflare Worker prevents this. It fires
+an authenticated REST HEAD request every 3 days at 03:00 UTC (which
+is 08:30 IST — safely pre-workday). See `supabase-keepalive/README.md`
+for setup, verification, and rotation instructions.
+
+If the Worker itself fails (Cloudflare outage, key rotation drift),
+the fallback is manual: visit https://supabase.com/dashboard, click
+Resume on the project, done in 60 seconds.
+
 ## Rate limit
 
 GitHub unauthenticated API is 60 requests per hour per IP. At 5 phones

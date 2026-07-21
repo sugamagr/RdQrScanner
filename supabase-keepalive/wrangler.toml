@@ -1,0 +1,42 @@
+name = "rd-scanner-supabase-keepalive"
+main = "src/index.ts"
+compatibility_date = "2026-01-01"
+
+# Cron-only deploy: no public HTTP endpoint, no workers.dev subdomain
+# needed. This lets us ship without the one-time browser step to
+# register a subdomain. If we ever add a fetch handler, flip this to
+# true and register the subdomain at
+# https://dash.cloudflare.com/<account>/workers/onboarding.
+workers_dev = false
+
+# Fires every 3 days at 03:00 UTC (which is 08:30 IST).
+# Supabase free tier auto-pauses after 7 days without activity, so a
+# 3-day cadence gives us 4-day safety margin against a single missed
+# execution. Cloudflare guarantees cron precision +/- ~1 minute so
+# even under load we hit the window comfortably.
+#
+# WHY 3 days not 6: user chose 3 as heartbeat redundancy - if a single
+# ping fails we still have another one within the pause window.
+#
+# WHY 03:00 UTC (08:30 IST): morning collection scanning happens
+# 09:00-16:00 IST typically. A pre-work ping catches any auto-pause
+# BEFORE the operator opens the app. If ping fails around 3 AM we
+# get 5+ hours of visibility to notice and manually resume before
+# the workday starts.
+[triggers]
+crons = ["0 3 */3 * *"]
+
+# Non-secret config. Endpoint is public in the app APK already.
+[vars]
+SUPABASE_URL = "https://otkhvevvddxclbormkfo.supabase.co"
+
+# SUPABASE_ANON_KEY is set via `wrangler secret put SUPABASE_ANON_KEY`
+# on first deploy. Anon key is not truly secret (it's baked into the
+# APK) but Workers secrets get audit logs and rotation UI so we treat
+# it as one anyway.
+
+# Observability: keep the last 100 executions viewable in the CF
+# dashboard so I can eyeball failures without leaving the browser.
+# Free tier includes this.
+[observability]
+enabled = true
