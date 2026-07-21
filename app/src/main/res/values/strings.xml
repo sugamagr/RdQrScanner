@@ -198,4 +198,11 @@
     <string name="scanner_action_undo">Undo</string>
     <string name="scanner_action_save">Save</string>
     <string name="scanner_action_end">End</string>
+    <!-- P3 SEMANTIC: manual-entry pill sits ABOVE the Undo/Save/End
+         weight(1f) x 3 row as a right-aligned secondary chip. Longer
+         copy is fine here because it's a standalone Surface pill, not
+         a weighted button in the primary row. Two-word "Add manually"
+         is the sweet spot: clear intent, not verbose. Hindi value is
+         a short transliteration for the same reason. -->
+    <string name="scanner_action_manual">Add manually</string>
 </resources>

@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 package com.qrscanner.app.ui.screens
 
 import android.Manifest
@@ -57,6 +59,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.QrCodeScanner
@@ -67,16 +70,19 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -130,6 +136,7 @@ import com.qrscanner.app.data.ScanSession
 import com.qrscanner.app.data.SyncEvent
 import com.qrscanner.app.data.SyncEventType
 import com.qrscanner.app.util.isValidRdNumber
+import com.qrscanner.app.ui.components.ManualEntrySheet
 import com.qrscanner.app.ui.components.RegisterAccountDialog
 import com.qrscanner.app.ui.components.ResumeSessionDialog
 import com.qrscanner.app.ui.theme.AccentCoral
@@ -149,7 +156,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
-@OptIn(ExperimentalPermissionsApi::class)
+@OptIn(ExperimentalPermissionsApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun RDScannerScreen(
     onNavigateBack: () -> Unit,
@@ -261,6 +268,17 @@ private fun RDCameraScreen(
     // process kill mid-register should surface a fresh scan next
     // launch, not an in-flight registration.
     var pendingUnknownRd by remember { mutableStateOf<String?>(null) }
+
+    // P3 SEMANTIC: manual-entry sheet + register-form seed for the
+    // no-QR-yet path. showManualSheet controls the ModalBottomSheet
+    // visibility. pendingManualRegisterSeed is non-null exactly when
+    // the operator chose "Add new account" from the sheet — its value
+    // is the seed for the editable RD field (digits typed in search,
+    // or empty for the top-level Add button). Not saveable for the
+    // same reason as pendingUnknownRd: a process kill mid-flow should
+    // surface a clean scanner, not a stranded in-flight sheet.
+    var showManualSheet by remember { mutableStateOf(false) }
+    var pendingManualRegisterSeed by remember { mutableStateOf<String?>(null) }
 
     // Resume flow — surfaced when an active session from a prior launch is found.
     var showResumeDialog by remember { mutableStateOf(false) }
@@ -642,7 +660,8 @@ private fun RDCameraScreen(
     // Pause camera analysis whenever any dialog is open; resume when all closed.
     // Also pause while the session is still hydrating from DB.
     val anyDialogOpen = !isHydrated || showResumeDialog || showEndSessionDialog ||
-            showFinishLotDialog || showLotReviewScreen || pendingUnknownRd != null
+            showFinishLotDialog || showLotReviewScreen || pendingUnknownRd != null ||
+            showManualSheet || pendingManualRegisterSeed != null
     LaunchedEffect(anyDialogOpen) {
         if (anyDialogOpen) {
             scanningEnabledRef.set(false)
@@ -1169,7 +1188,39 @@ private fun RDCameraScreen(
                 
                 Spacer(modifier = Modifier.height(12.dp))
             }
-            
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 12.dp),
+                horizontalArrangement = Arrangement.End
+            ) {
+                Surface(
+                    onClick = { showManualSheet = true },
+                    shape = RoundedCornerShape(20.dp),
+                    color = Color.White.copy(alpha = 0.15f)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = stringResource(R.string.scanner_action_manual),
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelLarge,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+
             // Action Buttons
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1641,13 +1692,14 @@ private fun RDCameraScreen(
                     pendingValueRef.set(null)
                     isScanningRef.set(true)
                 },
-                onRegister = { name, monthlyAmount ->
+                onRegister = { rdNumberFromDialog, name, monthlyAmount ->
+                    val scanned = rdNumberFromDialog
                     scope.launch {
                         val now = System.currentTimeMillis()
                         runCatching {
                             app.database.rdAccountDao().insert(
                                 com.qrscanner.app.data.RdAccount(
-                                    rdNumber = unknownRd,
+                                    rdNumber = scanned,
                                     name = name,
                                     monthlyAmount = monthlyAmount,
                                     source = com.qrscanner.app.data.AccountSource.MANUAL,
@@ -1661,7 +1713,7 @@ private fun RDCameraScreen(
                                     android.util.Log.w("RDScannerScreen", "push enqueue after inline-register failed", it)
                                 }
                         }.onFailure {
-                            android.util.Log.w("RDScannerScreen", "inline account register failed for $unknownRd", it)
+                            android.util.Log.w("RDScannerScreen", "inline account register failed for $scanned", it)
                             Toast.makeText(context, "Save failed — try again", Toast.LENGTH_SHORT).show()
                         }
                         // P3 SEMANTIC: after the account exists, the
@@ -1674,7 +1726,82 @@ private fun RDCameraScreen(
                         // gesture (Save) rather than requiring a
                         // re-scan of the QR code.
                         pendingUnknownRd = null
-                        pendingValueRef.set(unknownRd)
+                        pendingValueRef.set(scanned)
+                        scanTrigger++
+                    }
+                }
+            )
+        }
+
+        if (showManualSheet) {
+            val manualSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            val accountsForSearch by app.database.rdAccountDao()
+                .observeAll()
+                .collectAsState(initial = emptyList())
+            ManualEntrySheet(
+                accounts = accountsForSearch,
+                sheetState = manualSheetState,
+                onDismiss = { showManualSheet = false },
+                onSelectExisting = { rd ->
+                    // Route through the same scan-injection channel as
+                    // a real QR decode. Downstream when-branches at line
+                    // 452 handle dup-check, LOT pin, monthly-amount
+                    // cache, and feedback tone identically.
+                    pendingValueRef.set(rd)
+                    scanTrigger++
+                    showManualSheet = false
+                },
+                onRegisterNew = { seed ->
+                    pendingManualRegisterSeed = seed
+                    showManualSheet = false
+                }
+            )
+        }
+
+        val registerSeed = pendingManualRegisterSeed
+        if (registerSeed != null) {
+            RegisterAccountDialog(
+                rdNumber = "",
+                editableRdNumber = true,
+                initialRdSeed = registerSeed,
+                onDismiss = { pendingManualRegisterSeed = null },
+                onRegister = { typedRd, name, monthlyAmount ->
+                    scope.launch {
+                        val now = System.currentTimeMillis()
+                        val existingAccount = runCatching {
+                            app.database.rdAccountDao().findByRdNumber(typedRd)
+                        }.getOrNull()
+                        if (existingAccount != null) {
+                            Toast.makeText(
+                                context,
+                                "Account already exists — adding to current LOT",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        } else {
+                            runCatching {
+                                app.database.rdAccountDao().insert(
+                                    com.qrscanner.app.data.RdAccount(
+                                        rdNumber = typedRd,
+                                        name = name,
+                                        monthlyAmount = monthlyAmount,
+                                        source = com.qrscanner.app.data.AccountSource.MANUAL,
+                                        isActive = true,
+                                        updatedAt = now,
+                                        syncStatus = com.qrscanner.app.data.SyncStatus.DIRTY
+                                    )
+                                )
+                                runCatching { app.syncScheduler.enqueuePush() }
+                                    .onFailure {
+                                        android.util.Log.w("RDScannerScreen", "push enqueue after manual-register failed", it)
+                                    }
+                            }.onFailure {
+                                android.util.Log.w("RDScannerScreen", "manual account register failed for $typedRd", it)
+                                Toast.makeText(context, "Save failed — try again", Toast.LENGTH_SHORT).show()
+                                return@launch
+                            }
+                        }
+                        pendingManualRegisterSeed = null
+                        pendingValueRef.set(typedRd)
                         scanTrigger++
                     }
                 }

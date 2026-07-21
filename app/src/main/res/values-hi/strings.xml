@@ -202,4 +202,5 @@
     <string name="scanner_action_undo">अनडू</string>
     <string name="scanner_action_save">सेव</string>
     <string name="scanner_action_end">बंद</string>
+    <string name="scanner_action_manual">मैनुअली जोड़ें</string>
 </resources>

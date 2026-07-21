@@ -45,19 +45,52 @@ import com.qrscanner.app.ui.theme.TextSecondary
 import com.qrscanner.app.ui.theme.TextTertiary
 
 /**
- * Inline "Register this account" dialog for the scanner. Fires when a
- * valid RD number is scanned but no rd_accounts row exists locally.
+ * Dual-mode "Register this account" dialog.
+ *
+ * Two entry paths share this composable so the visual language stays
+ * consistent and the validation rules can't drift between them:
+ *
+ *  1. Scanner scan-fail path (editableRdNumber = false)
+ *     - Fires when a valid QR decodes to an RD number with no
+ *       matching rd_accounts row.
+ *     - rdNumber is the scanned value, shown READ-ONLY (operator
+ *       already committed the barcode; retyping is a source of typos,
+ *       not a feature).
+ *     - onRegister carries THAT rdNumber back to the caller.
+ *
+ *  2. Manual-entry path (editableRdNumber = true)
+ *     - Fires when the operator taps "Add new account" from
+ *       ManualEntrySheet.
+ *     - rdNumber may be empty; initialRdSeed prefills the field if
+ *       the operator typed digits into the search box first.
+ *     - Field is a numeric OutlinedTextField validated against
+ *       isValidRdNumber (9-15 digits, matches CSV parser regex).
+ *     - onRegister carries the TYPED rdNumber back to the caller.
+ *
+ * NOT splitting into two dialogs because:
+ *   - Same fields (name, monthlyAmount), same validation ranges,
+ *     same visual chrome (orange badge, PersonAddAlt1 icon, save
+ *     button copy)
+ *   - Two files would drift on the amount range or copy the moment
+ *     someone edited one and forgot the other
+ *   - Duplication risk is worse than a small if-else here
  *
  * Contract:
- *  - onDismiss: user backed out (back button, X, tap outside blocked).
- *    Caller drops the scan and re-arms the camera. RD is NOT inserted
- *    into any lot.
- *  - onRegister(name, monthlyAmount): user tapped Save with valid
- *    inputs. Caller inserts an rd_accounts row as source=MANUAL,
- *    isActive=true, then re-feeds the scanned RD to the pipeline so
- *    the scan lands in the lot on the same user gesture.
+ *  - onDismiss: user backed out. Caller drops the flow. NOT inserted
+ *    into any lot. Scanner path re-arms the camera; manual path
+ *    returns to the ManualEntrySheet.
+ *  - onRegister(rdNumber, name, monthlyAmount): user tapped Save
+ *    with valid inputs. Caller inserts an rd_accounts row as
+ *    source=MANUAL, isActive=true, then re-feeds the RD to the scan
+ *    pipeline so the row lands in the current LOT on the same user
+ *    gesture. This is the "one-tap register-and-record" invariant
+ *    both entry paths depend on.
  *
  * Validation locked at input time so bad data never reaches Room:
+ *  - rdNumber (editable mode only): matches Regex("^\d{9,15}$").
+ *    Same regex as scanner isValidRdNumber and CSV parser rd_number
+ *    field. Deliberately duplicated so a copy-paste of the accepted
+ *    range doesn't require reaching across the file boundary.
  *  - name: non-blank after trim, <= 60 chars (matches CSV parser cap).
  *  - monthlyAmount: positive integer in [10, 100000]. Range chosen
  *    from user's actual DOP roster (\u20B950 min, \u20B910,000 max
@@ -68,12 +101,34 @@ import com.qrscanner.app.ui.theme.TextTertiary
 fun RegisterAccountDialog(
     rdNumber: String,
     onDismiss: () -> Unit,
-    onRegister: (name: String, monthlyAmount: Int) -> Unit
+    onRegister: (rdNumber: String, name: String, monthlyAmount: Int) -> Unit,
+    editableRdNumber: Boolean = false,
+    initialRdSeed: String = ""
 ) {
+    val seedFiltered = remember(initialRdSeed) {
+        initialRdSeed.filter { it.isDigit() }.take(15)
+    }
+    var typedRdNumber by remember { mutableStateOf(seedFiltered) }
+    var rdTouched by remember { mutableStateOf(seedFiltered.isNotEmpty()) }
     var name by remember { mutableStateOf("") }
     var amountText by remember { mutableStateOf("") }
     var nameTouched by remember { mutableStateOf(false) }
     var amountTouched by remember { mutableStateOf(false) }
+
+    val effectiveRdNumber by remember {
+        derivedStateOf { if (editableRdNumber) typedRdNumber.trim() else rdNumber }
+    }
+    val rdRegex = remember { Regex("^\\d{9,15}$") }
+    val rdError by remember {
+        derivedStateOf {
+            if (!editableRdNumber) null else when {
+                !rdTouched -> null
+                typedRdNumber.isBlank() -> "RD number required"
+                !rdRegex.matches(typedRdNumber.trim()) -> "9-15 digits"
+                else -> null
+            }
+        }
+    }
 
     val trimmedName by remember { derivedStateOf { name.trim() } }
     val nameError by remember {
@@ -103,7 +158,9 @@ fun RegisterAccountDialog(
     }
     val canSave by remember {
         derivedStateOf {
-            trimmedName.isNotEmpty() && trimmedName.length <= 60 &&
+            val rdOk = if (editableRdNumber) rdRegex.matches(typedRdNumber.trim()) else true
+            rdOk &&
+                trimmedName.isNotEmpty() && trimmedName.length <= 60 &&
                 (parsedAmount != null && parsedAmount!! in 10..100_000)
         }
     }
@@ -162,19 +219,41 @@ fun RegisterAccountDialog(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                Text(
-                    text = "RD number",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = TextSecondary
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = rdNumber,
-                    style = MaterialTheme.typography.titleSmall.copy(
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.SemiBold
+                if (editableRdNumber) {
+                    OutlinedTextField(
+                        value = typedRdNumber,
+                        onValueChange = { input ->
+                            typedRdNumber = input.filter { it.isDigit() }.take(15)
+                            rdTouched = true
+                        },
+                        label = { Text("RD number") },
+                        placeholder = { Text("e.g. 123456789012") },
+                        isError = rdError != null,
+                        supportingText = rdError?.let { { Text(it) } }
+                            ?: { Text("9 to 15 digits", color = TextTertiary) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = PrimaryOrange,
+                            focusedLabelColor = PrimaryOrange
+                        )
                     )
-                )
+                } else {
+                    Text(
+                        text = "RD number",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = TextSecondary
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = rdNumber,
+                        style = MaterialTheme.typography.titleSmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
@@ -224,7 +303,9 @@ fun RegisterAccountDialog(
                 Button(
                     onClick = {
                         val amt = parsedAmount ?: return@Button
-                        onRegister(trimmedName, amt)
+                        val rd = effectiveRdNumber
+                        if (rd.isBlank()) return@Button
+                        onRegister(rd, trimmedName, amt)
                     },
                     enabled = canSave,
                     modifier = Modifier
