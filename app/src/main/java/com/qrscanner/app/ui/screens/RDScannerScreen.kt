@@ -232,6 +232,7 @@ private fun RDCameraScreen(
     val currentLotNumbers = remember { mutableStateListOf<String>() }
     val allSessionNumbers = remember { mutableStateListOf<String>() }
     val lotAmountCache = remember { mutableStateMapOf<String, Int?>() }
+    val lotNameCache = remember { mutableStateMapOf<String, String?>() }
     // O(1) duplicate-check mirrors. The visible lists must keep
     // insertion order for the Recently-Scanned UI and the live total,
     // but List.contains is O(N) — at 500 scans/session that's 250k
@@ -579,17 +580,21 @@ private fun RDCameraScreen(
                         currentLotNumbersSet.add(cleanValue)
                         allSessionNumbers.add(cleanValue)
                         allSessionNumbersSet.add(cleanValue)
-                        // Resolve monthlyAmount at the scan site so the
-                        // live-total chip stays O(1) per scan. A size-keyed
+                        // Resolve monthlyAmount + name at the scan site so
+                        // the live-total chip AND the Recently-Scanned
+                        // list stay O(1) per scan. A size-keyed
                         // LaunchedEffect would re-filter the whole list on
                         // every append (O(N) cache probes per scan, ~6,400
                         // probes per 80-row LOT). Rehydration paths prime
-                        // the cache via the session-keyed effect below.
-                        if (cleanValue !in lotAmountCache) {
-                            val amount = runCatching {
-                                app.database.rdAccountDao().findByRdNumber(cleanValue)?.monthlyAmount
+                        // both caches via the session-keyed effect below.
+                        // One DAO fetch fills both caches to save a
+                        // second round-trip per scan.
+                        if (cleanValue !in lotAmountCache || cleanValue !in lotNameCache) {
+                            val profile = runCatching {
+                                app.database.rdAccountDao().findByRdNumber(cleanValue)
                             }.getOrNull()
-                            lotAmountCache[cleanValue] = amount
+                            lotAmountCache[cleanValue] = profile?.monthlyAmount
+                            lotNameCache[cleanValue] = profile?.name?.takeIf { it.isNotBlank() }
                         }
                         lastScanFeedback = ScanFeedback.Success(cleanValue)
                         try {
@@ -619,12 +624,15 @@ private fun RDCameraScreen(
     // the steady-state append case.
     LaunchedEffect(currentSessionId) {
         val sessionId = currentSessionId ?: return@LaunchedEffect
-        val missing = currentLotNumbers.filter { it !in lotAmountCache }
+        val missing = currentLotNumbers.filter {
+            it !in lotAmountCache || it !in lotNameCache
+        }
         for (rdNumber in missing) {
-            val amount = runCatching {
-                app.database.rdAccountDao().findByRdNumber(rdNumber)?.monthlyAmount
+            val profile = runCatching {
+                app.database.rdAccountDao().findByRdNumber(rdNumber)
             }.getOrNull()
-            lotAmountCache[rdNumber] = amount
+            lotAmountCache[rdNumber] = profile?.monthlyAmount
+            lotNameCache[rdNumber] = profile?.name?.takeIf { it.isNotBlank() }
         }
         // Suppress unused warning; sessionId is the key.
         @Suppress("UNUSED_EXPRESSION") sessionId
@@ -1162,6 +1170,7 @@ private fun RDCameraScreen(
                     reverseLayout = false
                 ) {
                     items(currentLotNumbers, key = { it }) { number ->
+                        val displayName = lotNameCache[number]
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -1175,13 +1184,34 @@ private fun RDCameraScreen(
                                 modifier = Modifier.size(16.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = number,
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    fontFamily = FontFamily.Monospace,
-                                    color = Color.White
+                            if (displayName != null) {
+                                Text(
+                                    text = displayName,
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        color = Color.White,
+                                        fontWeight = FontWeight.SemiBold
+                                    ),
+                                    maxLines = 1
                                 )
-                            )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = number,
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                        color = Color.White.copy(alpha = 0.75f)
+                                    ),
+                                    maxLines = 1
+                                )
+                            } else {
+                                Text(
+                                    text = number,
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontFamily = FontFamily.Monospace,
+                                        color = Color.White
+                                    ),
+                                    maxLines = 1
+                                )
+                            }
                         }
                     }
                 }
@@ -1198,7 +1228,7 @@ private fun RDCameraScreen(
                 Surface(
                     onClick = { showManualSheet = true },
                     shape = RoundedCornerShape(20.dp),
-                    color = Color.White.copy(alpha = 0.15f)
+                    color = PrimaryOrange
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
@@ -1215,6 +1245,7 @@ private fun RDCameraScreen(
                             text = stringResource(R.string.scanner_action_manual),
                             color = Color.White,
                             style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold,
                             maxLines = 1
                         )
                     }

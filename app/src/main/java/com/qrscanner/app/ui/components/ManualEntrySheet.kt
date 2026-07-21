@@ -119,16 +119,28 @@ fun ManualEntrySheet(
         debouncedQuery = query.trim()
     }
 
-    val trimmed = debouncedQuery
+    // P3 SEMANTIC: read debouncedQuery INSIDE the derivedStateOf blocks
+    // so Compose tracks the State read and re-invalidates on every
+    // keystroke. An earlier attempt captured `val trimmed = debouncedQuery`
+    // at the top of the function and used that variable inside the
+    // derivedStateOf. That captured the state value ONCE at composition
+    // start; subsequent recompositions saw the same stale value because
+    // the derivedStateOf lambda's captured reference didn't re-read the
+    // MutableState. Compose only tracks state reads that happen inside
+    // the tracked scope (derivedStateOf / composables / snapshotFlow).
     val isDigitsOnly by remember {
-        derivedStateOf { trimmed.isNotEmpty() && trimmed.all { it.isDigit() } }
+        derivedStateOf {
+            val q = debouncedQuery
+            q.isNotEmpty() && q.all { it.isDigit() }
+        }
     }
     val filtered by remember(accounts) {
         derivedStateOf {
-            if (trimmed.isEmpty()) return@derivedStateOf accounts
-            val lower = trimmed.lowercase()
+            val q = debouncedQuery
+            if (q.isEmpty()) return@derivedStateOf accounts
+            val lower = q.lowercase()
             accounts.filter { acc ->
-                acc.rdNumber.contains(trimmed) ||
+                acc.rdNumber.contains(q) ||
                     acc.name.lowercase().contains(lower)
             }
         }
@@ -224,7 +236,7 @@ fun ManualEntrySheet(
             Spacer(modifier = Modifier.height(12.dp))
 
             Button(
-                onClick = { onRegisterNew(if (isDigitsOnly) trimmed else "") },
+                onClick = { onRegisterNew(if (isDigitsOnly) debouncedQuery else "") },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp),
@@ -241,7 +253,7 @@ fun ManualEntrySheet(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            if (trimmed.isNotEmpty() && filtered.isEmpty()) {
+            if (debouncedQuery.isNotEmpty() && filtered.isEmpty()) {
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
@@ -252,7 +264,7 @@ fun ManualEntrySheet(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            text = "No matches for \"$trimmed\"",
+                            text = "No matches for \"$debouncedQuery\"",
                             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
                         )
                         Spacer(modifier = Modifier.height(4.dp))
@@ -286,7 +298,7 @@ fun ManualEntrySheet(
                     }
                 }
             } else {
-                val label = if (trimmed.isEmpty()) {
+                val label = if (debouncedQuery.isEmpty()) {
                     "All accounts (${filtered.size})"
                 } else {
                     "${filtered.size} match${if (filtered.size == 1) "" else "es"}"
