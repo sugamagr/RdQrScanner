@@ -4,3 +4,5 @@ dist/
 package-lock.json
 *.log
 .DS_Store
+.dev.vars
+.dev.vars.*
