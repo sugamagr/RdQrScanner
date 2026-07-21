@@ -78,6 +78,14 @@
     <string name="settings_sign_out">साइन आउट</string>
     <string name="settings_sync_status">सिंक स्थिति</string>
     <string name="settings_diagnostics">सिंक डायग्नोस्टिक्स</string>
+    <string name="settings_app_version_label">ऐप संस्करण</string>
+    <string name="settings_check_updates">अपडेट देखें</string>
+    <string name="settings_checking_updates">जाँच रहे हैं\u2026</string>
+    <string name="settings_update_available_pill">अपडेट</string>
+    <string name="settings_toast_up_to_date">आप नवीनतम संस्करण पर हैं</string>
+    <string name="update_banner_title">अपडेट उपलब्ध</string>
+    <string name="update_banner_action">अपडेट</string>
+    <string name="update_banner_dismiss_a11y">अपडेट बैनर बंद करें</string>
 
     <!-- Pill states -->
     <string name="pill_not_signed_in">साइन इन के लिए टैप करें</string>

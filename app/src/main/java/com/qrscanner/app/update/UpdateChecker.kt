@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.SharedPreferences
 import android.database.Cursor
 import android.net.Uri
 import android.os.Build
@@ -27,11 +28,14 @@ import kotlinx.serialization.json.Json
 import java.io.File
 
 /**
- * Force-update gate. On MainActivity launch [check] hits the GitHub
+ * Update-gate probe. On MainActivity launch [check] hits the GitHub
  * Releases API, extracts the versionCode from the release tag, and
  * compares to [BuildConfig.VERSION_CODE]. If the release is newer,
- * the caller shows [com.qrscanner.app.ui.update.UpdateGateScreen] and
- * blocks all further app UI until the user taps Download & install.
+ * the caller renders an in-app affordance to update:
+ *  - `isForce = true`  -> full-screen blocking gate
+ *    (UpdateGateScreen); operator cannot use the app on this build.
+ *  - `isForce = false` -> non-blocking banner over normal UI;
+ *    operator can dismiss and keep working.
  *
  * Tag convention (locked to keep the parser trivial): every release
  * tag is `v<major>.<minor>.<patch>+<versionCode>` — the +N suffix
@@ -40,14 +44,35 @@ import java.io.File
  * the tag is malformed the check returns [UpdateResult.UpToDate] as
  * a safe default so an operator laptop typo can't brick 5 phones.
  *
- * Offline resilience: any error (no network, GitHub 5xx, malformed
- * JSON, malformed tag, missing APK asset) returns UpToDate. We would
- * rather let an operator work on a stale build than lock them out of
- * the app because the CDN blinked. The next launch retries.
+ * Force marker convention: a release is treated as force-update ONLY
+ * when its release body contains the literal token `[FORCE]` on any
+ * line. This is the ONE escape valve for shipping cloud-schema or
+ * sync-format changes that older versions cannot survive; every
+ * other update is optional. Priority-3 CROSS-FILE contract: parsed
+ * in [parseForceFlag]; consumed by MainActivity to choose between
+ * blocking gate and non-blocking banner. Do NOT introduce a second
+ * source of truth (per-tag prerelease flags, semver-major bumps,
+ * etc.) — a single grep-able string in release notes is the only
+ * signal both the operator writing the release and the phone reading
+ * it can align on.
  *
- * Rate limit: GitHub unauthenticated API is 60 req/hour per IP. At
- * 5 phones checking once per launch that's absurdly under the cap
- * even if operators relaunch every minute.
+ * Offline resilience: any error (no network, GitHub 5xx, GitHub 403
+ * rate-limit, malformed JSON, malformed tag, missing APK asset)
+ * falls back to the last cached response if present, else returns
+ * UpToDate. We would rather show a slightly-stale banner than lock
+ * the operator out because the CDN blinked.
+ *
+ * Rate-limit cache: GitHub unauthenticated API is 60 req/hour PER
+ * PUBLIC IP. Colleagues on the same office WiFi share ONE public IP
+ * behind NAT, so 5 phones cold-launching within the same hour can
+ * silently exhaust the bucket and every subsequent phone gets 403
+ * → old code fell back to UpToDate → missed the update entirely.
+ * [checkedCache] caches the full parsed response for [CACHE_TTL_MS]
+ * (6 hours), and every failure path checks the cache before giving
+ * up. Priority-3 invariant: the cache MUST include isForce so a
+ * cached-blocking-update stays blocking even while the API is
+ * unreachable; forgetting this would let a rate-limited launch bypass
+ * a critical push.
  */
 object UpdateChecker {
 
@@ -56,6 +81,12 @@ object UpdateChecker {
     private const val REPO = "RdQrScanner"
     private const val LATEST_RELEASE_URL =
         "https://api.github.com/repos/$OWNER/$REPO/releases/latest"
+
+    private const val PREFS_NAME = "update_checker"
+    private const val KEY_CACHE_JSON = "cache_json"
+    private const val KEY_CACHE_STAMP = "cache_stamp"
+    private const val CACHE_TTL_MS = 6L * 60L * 60L * 1_000L
+    private const val FORCE_MARKER = "[FORCE]"
 
     /**
      * `+N` versionCode suffix on the tag. See class KDoc for the
@@ -86,11 +117,30 @@ object UpdateChecker {
             val versionCode: Int,
             val apkUrl: String,
             val apkSizeBytes: Long,
-            val changelog: String
+            val changelog: String,
+            val isForce: Boolean
         ) : UpdateResult()
     }
 
-    suspend fun check(): UpdateResult {
+    /**
+     * @param forceRefresh true = skip cache read and always hit the
+     * network (used by the manual "Check for updates" bell-menu
+     * item). On success we STILL write the new response back to the
+     * cache so the next auto-check on cold launch benefits from the
+     * fresh data. On failure we fall back to the cache exactly like
+     * the automatic path, so a manual retry never breaks the
+     * baseline behaviour.
+     */
+    suspend fun check(context: Context, forceRefresh: Boolean = false): UpdateResult {
+        val prefs = context.applicationContext
+            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+        if (!forceRefresh) {
+            readFreshCache(prefs)?.let { cached ->
+                return cached
+            }
+        }
+
         return try {
             val release: GitHubRelease = client.get(LATEST_RELEASE_URL) {
                 header("Accept", "application/vnd.github+json")
@@ -104,32 +154,105 @@ object UpdateChecker {
                 ?.toIntOrNull()
                 ?: run {
                     Log.w(TAG, "release tag ${release.tagName} missing +versionCode suffix")
+                    prefs.edit().clear().apply()
                     return UpdateResult.UpToDate
                 }
 
             if (remoteVersionCode <= BuildConfig.VERSION_CODE) {
+                prefs.edit().clear().apply()
                 return UpdateResult.UpToDate
             }
 
             val apkAsset = release.assets.firstOrNull { it.name.endsWith(".apk") }
                 ?: run {
                     Log.w(TAG, "release ${release.tagName} has no .apk asset")
+                    prefs.edit().clear().apply()
                     return UpdateResult.UpToDate
                 }
 
-            UpdateResult.Available(
+            val available = UpdateResult.Available(
                 versionName = release.name?.takeIf { it.isNotBlank() }
                     ?: release.tagName.substringBefore('+').removePrefix("v"),
                 versionCode = remoteVersionCode,
                 apkUrl = apkAsset.browserDownloadUrl,
                 apkSizeBytes = apkAsset.size,
-                changelog = release.body ?: ""
+                changelog = release.body ?: "",
+                isForce = parseForceFlag(release.body)
             )
+            writeCache(prefs, available)
+            available
         } catch (e: Exception) {
-            Log.w(TAG, "update check failed; assuming up-to-date", e)
-            UpdateResult.UpToDate
+            Log.w(TAG, "update check failed; falling back to cache if fresh", e)
+            readFreshCache(prefs) ?: UpdateResult.UpToDate
         }
     }
+
+    /**
+     * Reads the cached response IF it is (a) still under [CACHE_TTL_MS]
+     * old and (b) still describes a versionCode strictly greater than
+     * the running build. The versionCode re-check matters when the
+     * operator installs a newer APK BETWEEN two cache writes — without
+     * it we would keep announcing an update that is already installed.
+     */
+    private fun readFreshCache(prefs: SharedPreferences): UpdateResult.Available? {
+        val stamp = prefs.getLong(KEY_CACHE_STAMP, 0L)
+        val payload = prefs.getString(KEY_CACHE_JSON, null) ?: return null
+        val age = System.currentTimeMillis() - stamp
+        if (age !in 0..CACHE_TTL_MS) return null
+        val cached = runCatching { json.decodeFromString<CachedAvailable>(payload) }
+            .getOrNull()
+            ?: return null
+        if (cached.versionCode <= BuildConfig.VERSION_CODE) return null
+        return UpdateResult.Available(
+            versionName = cached.versionName,
+            versionCode = cached.versionCode,
+            apkUrl = cached.apkUrl,
+            apkSizeBytes = cached.apkSizeBytes,
+            changelog = cached.changelog,
+            isForce = cached.isForce
+        )
+    }
+
+    private fun writeCache(prefs: SharedPreferences, available: UpdateResult.Available) {
+        val payload = CachedAvailable(
+            versionName = available.versionName,
+            versionCode = available.versionCode,
+            apkUrl = available.apkUrl,
+            apkSizeBytes = available.apkSizeBytes,
+            changelog = available.changelog,
+            isForce = available.isForce
+        )
+        prefs.edit()
+            .putString(KEY_CACHE_JSON, json.encodeToString(CachedAvailable.serializer(), payload))
+            .putLong(KEY_CACHE_STAMP, System.currentTimeMillis())
+            .apply()
+    }
+
+    /**
+     * Case-insensitive scan for the [FORCE_MARKER] anywhere in the
+     * release body. Priority-3 SEMANTIC lock: matching is
+     * substring-based not line-based so operators can put the token
+     * inline with prose like "[FORCE] cloud schema change - must
+     * install". Do not tighten to full-line-match; the tradeoff
+     * favours forgiving authoring over parser strictness because a
+     * missed FORCE tag ships as merely-optional (safe), while an
+     * over-eager parser could block updates the operator meant as
+     * optional.
+     */
+    private fun parseForceFlag(body: String?): Boolean {
+        if (body.isNullOrBlank()) return false
+        return body.contains(FORCE_MARKER, ignoreCase = true)
+    }
+
+    @Serializable
+    private data class CachedAvailable(
+        val versionName: String,
+        val versionCode: Int,
+        val apkUrl: String,
+        val apkSizeBytes: Long,
+        val changelog: String,
+        val isForce: Boolean
+    )
 
     /**
      * Kicks off a DownloadManager job and returns the downloaded APK

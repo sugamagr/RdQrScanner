@@ -20,6 +20,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.qrscanner.app.QRScannerApp
 import com.qrscanner.app.ui.screens.AccountHistoryScreen
@@ -209,10 +210,39 @@ private fun SettingsRoute(onNavigateBack: () -> Unit) {
         }
     }
 
+    val updateGate = app.updateGateController
+    val checkedResult = updateGate.checkedResult
+    val manualCheckInFlight = updateGate.manualCheckInFlight
+    val lastManualOutcome = updateGate.lastManualOutcome
+    val updateStatus = when {
+        manualCheckInFlight -> "checking"
+        checkedResult is com.qrscanner.app.update.UpdateChecker.UpdateResult.Available ->
+            "available:${checkedResult.versionName}"
+        checkedResult is com.qrscanner.app.update.UpdateChecker.UpdateResult.UpToDate ->
+            "up_to_date"
+        else -> "unknown"
+    }
+    val upToDateToast = stringResource(com.qrscanner.app.R.string.settings_toast_up_to_date)
+    LaunchedEffect(lastManualOutcome) {
+        if (lastManualOutcome ==
+            com.qrscanner.app.update.UpdateGateController.ManualCheckOutcome.UpToDate
+        ) {
+            android.widget.Toast.makeText(context, upToDateToast, android.widget.Toast.LENGTH_SHORT).show()
+            updateGate.consumeManualOutcome()
+        } else if (lastManualOutcome ==
+            com.qrscanner.app.update.UpdateGateController.ManualCheckOutcome.Available
+        ) {
+            updateGate.consumeManualOutcome()
+        }
+    }
+
     SettingsScreen(
         signedInEmail = deviceSettings?.ownerId.orEmpty(),
         deviceName = deviceSettings?.deviceName.orEmpty(),
         operatorName = deviceSettings?.operatorName.orEmpty(),
+        installedVersionName = com.qrscanner.app.BuildConfig.VERSION_NAME,
+        updateStatus = updateStatus,
+        onCheckForUpdates = { updateGate.triggerManualCheck(context.applicationContext, scope) },
         onBack = onNavigateBack,
         onSwitchOperator = { /* Wave 4 — operator switch flow is a separate spec section. */ },
         onSignOut = { showConfirmDialog = true },

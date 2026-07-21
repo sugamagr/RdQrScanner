@@ -1,11 +1,67 @@
 # Release recipe
 
 RD Scanner is distributed via GitHub Releases. Every install of v2.0.0
-or later runs a force-update gate on cold launch: it hits the GitHub
-API, extracts the versionCode from the release tag, and blocks all app
-UI until the operator installs the newest version. If GitHub is
-unreachable the check silently defers so a flaky WiFi day never bricks
-the app.
+or later runs an update probe on cold launch: it hits the GitHub API,
+extracts the versionCode from the release tag, and — depending on
+whether the release body contains the literal token `[FORCE]` — either
+blocks all app UI (force update) or shows a dismissable orange banner
+at the top of the app (optional update, the default since v2.0.5). If
+GitHub is unreachable the check silently defers so a flaky WiFi day
+never bricks the app.
+
+The probe response is cached in SharedPreferences for 6 hours. This
+matters because GitHub throttles unauthenticated API calls at 60/hour
+per PUBLIC IP address, and multiple colleagues on one office WiFi
+share ONE public IP behind NAT. Without the cache, five phones
+cold-launching within an hour after a WhatsApp update announcement can
+exhaust the shared bucket and every subsequent phone gets HTTP 403 →
+silently misses the update. With the cache, the first launch fetches;
+every launch for the next 6 hours reads from local storage.
+
+Operators can also trigger a manual check any time via
+**Settings → About & updates → Check for updates**. Manual checks
+bypass the 6-hour cache but still populate it on success.
+
+## Force vs optional updates
+
+**Default is optional.** Every release is dismissable unless you
+explicitly mark it as mandatory. Marking is done via the release BODY,
+not the tag:
+
+```
+gh release create v2.1.0+30 RdBookScanner-v2.1.0.apk \
+    --title 'v2.1.0' \
+    --notes '[FORCE] Cloud schema change - phones on v2.0.x cannot sync until installed.'
+```
+
+The `UpdateChecker.parseForceFlag()` function does a case-insensitive
+substring match for `[FORCE]` anywhere in the release body. If present,
+`isForce` is true → MainActivity renders the blocking `UpdateGateScreen`
+that swallows the back gesture. If absent, `isForce` is false → an
+orange `UpdateBanner` at the top of the app that the operator can
+dismiss with the X button.
+
+When to use `[FORCE]`:
+
+- Cloud schema migration (v13+ Supabase change) that older app versions
+  cannot survive.
+- Sync-format change in the phone-cloud DTO shape.
+- Critical security fix in an auth or crypto path.
+- Any change where "phones on older versions producing stale/wrong
+  data" is worse than "phones stuck on the update gate for a day".
+
+When to leave it optional (99% of releases):
+
+- New features, UI polish, bug fixes that improve UX but don't break
+  the older version.
+- Any change where a phone on the previous version can continue to
+  sync and function without corrupting cloud data.
+
+The banner dismissal is session-scoped: the operator dismissing it
+this morning does NOT hide it forever. Next cold launch shows the
+banner again unless the operator has installed the update by then.
+This is intentional so an ignored optional update eventually gets
+installed without a nag every 10 minutes.
 
 ## Tag format (LOAD-BEARING — do not skip)
 
@@ -92,8 +148,12 @@ gh release create v2.0.1+21 \
     --notes "One-line description of what changed"
 
 # 7. Done. On next cold-launch of every phone running v2.0.0 or newer,
-#    UpdateChecker sees v2.0.1+21 > VERSION_CODE 20, and the gate
-#    forces the download-and-install flow. Colleagues can't skip it.
+#    UpdateChecker sees the new versionCode > VERSION_CODE currently
+#    installed. If the release body contains [FORCE] the operator
+#    hits the blocking gate; otherwise they see an orange banner they
+#    can dismiss and update at their own pace. Cache lives 6 hours, so
+#    on flaky WiFi day the check falls back to the cached response
+#    before returning UpToDate.
 ```
 
 ## Where the keystore lives

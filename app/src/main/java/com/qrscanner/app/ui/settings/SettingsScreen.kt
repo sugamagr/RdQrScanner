@@ -20,13 +20,16 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.PersonOutline
 import androidx.compose.material.icons.filled.Smartphone
 import androidx.compose.material.icons.filled.SyncAlt
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -45,6 +48,7 @@ import com.qrscanner.app.ui.components.GradientTopBar
 import com.qrscanner.app.ui.theme.AccentCoral
 import com.qrscanner.app.ui.theme.GradientPeach
 import com.qrscanner.app.ui.theme.PrimaryOrange
+import com.qrscanner.app.ui.theme.SuccessGreen
 import com.qrscanner.app.ui.theme.TextPrimary
 import com.qrscanner.app.ui.theme.TextSecondary
 
@@ -60,11 +64,24 @@ import com.qrscanner.app.ui.theme.TextSecondary
  * placeholder in Wave 3 so the navigation contract is locked even before
  * the screen ships.
  */
+/**
+ * @param installedVersionName currently-installed app versionName (e.g. "2.0.5") — shown in the About card.
+ * @param updateStatus one of "up_to_date" / "available:<name>" / "checking" / "unknown".
+ *   The Settings card renders a green tick, an orange "Update available" pill,
+ *   a spinner, or nothing respectively. Passing an unknown token defaults to nothing.
+ *   Priority-3 SEMANTIC: this is a stringly-typed status because the caller
+ *   (Navigation.kt) already collapses UpdateResult + manualCheckInFlight into
+ *   the display shape, keeping the composable free of update-domain types.
+ * @param onCheckForUpdates fires [UpdateGateController.triggerManualCheck].
+ */
 @Composable
 fun SettingsScreen(
     signedInEmail: String,
     deviceName: String,
     operatorName: String,
+    installedVersionName: String,
+    updateStatus: String,
+    onCheckForUpdates: () -> Unit,
     onBack: () -> Unit,
     onSwitchOperator: () -> Unit,
     onSignOut: () -> Unit,
@@ -204,7 +221,108 @@ fun SettingsScreen(
                     )
                 }
             }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            SettingsCard {
+                AboutRow(
+                    installedVersionName = installedVersionName,
+                    updateStatus = updateStatus
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(
+                    onClick = onCheckForUpdates,
+                    enabled = updateStatus != "checking",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = PrimaryOrange.copy(alpha = 0.12f),
+                        contentColor = PrimaryOrange,
+                        disabledContainerColor = PrimaryOrange.copy(alpha = 0.06f),
+                        disabledContentColor = PrimaryOrange.copy(alpha = 0.5f)
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    if (updateStatus == "checking") {
+                        CircularProgressIndicator(
+                            color = PrimaryOrange,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = stringResource(R.string.settings_checking_updates),
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    } else {
+                        Text(
+                            text = stringResource(R.string.settings_check_updates),
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
             }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AboutRow(installedVersionName: String, updateStatus: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .background(PrimaryOrange.copy(alpha = 0.12f), CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.SystemUpdate,
+                contentDescription = null,
+                tint = PrimaryOrange,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.settings_app_version_label),
+                style = MaterialTheme.typography.labelMedium.copy(color = TextSecondary)
+            )
+            Text(
+                text = "v$installedVersionName",
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontWeight = FontWeight.SemiBold,
+                    color = TextPrimary
+                )
+            )
+        }
+        when {
+            updateStatus == "up_to_date" -> {
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = null,
+                    tint = SuccessGreen,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            updateStatus.startsWith("available:") -> {
+                Box(
+                    modifier = Modifier
+                        .background(PrimaryOrange, RoundedCornerShape(10.dp))
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = stringResource(R.string.settings_update_available_pill),
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
+                        )
+                    )
+                }
+            }
+            else -> Unit
         }
     }
 }

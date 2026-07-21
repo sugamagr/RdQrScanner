@@ -78,6 +78,14 @@
     <string name="settings_sign_out">Sign out</string>
     <string name="settings_sync_status">Sync status</string>
     <string name="settings_diagnostics">Sync diagnostics</string>
+    <string name="settings_app_version_label">App version</string>
+    <string name="settings_check_updates">Check for updates</string>
+    <string name="settings_checking_updates">Checking\u2026</string>
+    <string name="settings_update_available_pill">Update</string>
+    <string name="settings_toast_up_to_date">You are on the latest version</string>
+    <string name="update_banner_title">Update available</string>
+    <string name="update_banner_action">Update</string>
+    <string name="update_banner_dismiss_a11y">Dismiss update banner</string>
 
     <!-- Sync pill states -->
     <string name="pill_not_signed_in">Tap to sign in</string>

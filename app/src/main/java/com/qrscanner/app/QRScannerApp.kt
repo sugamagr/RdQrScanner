@@ -74,6 +74,21 @@ class QRScannerApp : Application(), Configuration.Provider {
         SyncWorkScheduler(this)
     }
 
+    /**
+     * App-scoped singleton so the Settings screen can trigger a manual
+     * "Check for updates" that shares state with MainActivity's on-launch
+     * probe. Priority-3 SEMANTIC coupling: a per-Activity controller would
+     * make the bell-menu / Settings check run its own network call and
+     * drift out of sync with the automatic gate — cache would still
+     * dedupe the byte cost but the state visible to the operator would
+     * split ("Settings says up to date, banner still shows a version").
+     * One controller keeps [checkedResult] and [bannerDismissed] as a
+     * single source of truth for every surface that shows update UX.
+     */
+    val updateGateController: com.qrscanner.app.update.UpdateGateController by lazy {
+        com.qrscanner.app.update.UpdateGateController()
+    }
+
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
             .setMinimumLoggingLevel(if (BuildConfig.DEBUG) Log.DEBUG else Log.INFO)
