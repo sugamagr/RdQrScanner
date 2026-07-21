@@ -1,30 +1,45 @@
-# Supabase keep-alive
+# RD Scanner ops Worker
 
-Cloudflare Worker cron that pings the RD Scanner's Supabase project
-every 3 days so the free tier doesn't auto-pause it.
+Cloudflare Worker with two cron jobs. Runs on Cloudflare's free tier,
+$0/month.
 
-## Why this exists
+## Cron 1 — Supabase keep-alive (every 3 days)
 
-Supabase free tier auto-pauses a project after 7 days without database
-activity. When paused:
+**Schedule**: `0 3 */3 * *` (03:00 UTC = 08:30 IST every 3 days)
 
-- DNS entry is removed (`otkhvevvddxclbormkfo.supabase.co` returns
-  NXDOMAIN)
+Fires an authenticated REST HEAD against Supabase to prevent the free
+tier's 7-day auto-pause. When Supabase auto-pauses:
+
+- DNS returns NXDOMAIN for the project URL
 - Every phone opening the app sees "not online" errors
 - Every portal user sees connection failed
-- The `releases/latest` GitHub API still returns whatever tag is
-  live, so the force-update gate says "you're up to date" — but the
-  app doesn't work anyway because the backend is gone
+- Force-update gate itself keeps working (GitHub is a separate
+  dependency) but the app is unusable because the backend is gone
 
-This happened once in the wild (see main repo's compressed session
-history, block b25). Recovery was fast (click Resume on the Supabase
-dashboard) but it's a real operational risk for a 2-5 phone shop
-that goes quiet over long weekends.
+This happened once in the wild (2026-07-02). Recovery was fast
+(dashboard resume in 60 seconds) but the Worker prevents recurrence.
 
-The cron fires every 3 days at 03:00 UTC (08:30 IST) via Cloudflare's
-scheduler. Each firing does one authenticated HEAD request against
-the devices table, which counts as DB activity and resets the
-inactivity timer.
+3-day cadence gives 4-day safety margin against a single missed
+execution before hitting the pause threshold.
+
+## Cron 2 — Weekly health digest (Mondays)
+
+**Schedule**: `0 8 * * 1` (08:00 UTC Monday = 13:30 IST Monday)
+
+Runs three independent checks in parallel:
+
+1. Supabase REST HEAD (same as keep-alive)
+2. Portal HTML fetch (`https://rd-scanner-portal.pages.dev`, expects 200)
+3. GitHub Releases API (`sugamagr/RdQrScanner/releases/latest`, expects 200)
+
+Then sends a plain-text digest email to `sugamagr@gmail.com` via
+Resend. Email is sent regardless of outcome — a Monday afternoon
+with NO email means the Worker itself broke, which is diagnostic.
+
+Subject lines make the digest triageable from inbox preview:
+
+- All healthy: `[RD Scanner] Weekly health: all systems healthy`
+- Any failure: `[RD Scanner] Weekly health: ATTENTION needed`
 
 ## First deploy
 
@@ -32,95 +47,155 @@ inactivity timer.
 cd supabase-keepalive
 npm install
 
-# Log in to Cloudflare (browser opens; select the account that owns
-# the rd-scanner-portal project so both live under the same account).
+# Log in to Cloudflare (browser opens; pick the account that owns
+# rd-scanner-portal so all infra stays under one account).
 npx wrangler login
 
-# Set the Supabase anon key as a secret. Value comes from the
-# SUPABASE_ANON_KEY line in local.properties at the repo root.
-# (The anon key is technically public — it's baked into the APK —
-# but Workers secrets get audit logs, so we treat it as one anyway.)
+# Set the Supabase anon key. Value comes from SUPABASE_ANON_KEY in
+# local.properties at repo root. Anon key is public (baked into APK)
+# but Workers secrets get audit logs and rotation UI, so we treat it
+# as one anyway.
 npx wrangler secret put SUPABASE_ANON_KEY
 # Paste the value when prompted.
 
-# Deploy the Worker.
+# Set the Resend API key. See "Resend setup" below to get one.
+npx wrangler secret put RESEND_API_KEY
+# Paste the re_... key when prompted.
+
+# One-time subdomain registration prerequisite for cron triggers.
+# Even though this Worker is cron-only (workers_dev = false in
+# wrangler.toml), Cloudflare requires the subdomain to exist as an
+# account setting before it accepts ANY cron trigger. Visit:
+#   https://dash.cloudflare.com/<account-id>/workers/onboarding
+# Pick any subdomain name or accept Cloudflare's generated one.
+
 npm run deploy
-# Prints the Worker URL, something like
-# https://rd-scanner-supabase-keepalive.<subdomain>.workers.dev
+# Confirms both crons registered:
+#   schedule: 0 3 */3 * *
+#   schedule: 0 8 * * 1
 ```
+
+## Resend setup
+
+Free tier of Resend (`https://resend.com`) gives 100 emails/day and
+a sandbox sender `onboarding@resend.dev`. Weekly cadence = 1
+email/week = 1% of daily quota, massive headroom.
+
+**Sandbox sender rule**: `onboarding@resend.dev` only delivers to the
+Resend account owner's verified email address. If the Resend account
+is `sugamagr@gmail.com` and `RECIPIENT_EMAIL` in `wrangler.toml` is
+`sugamagr@gmail.com`, delivery works. To deliver to a different
+address, verify a real sender domain on Resend (10 minutes of DNS
+records via Cloudflare) and set `RESEND_FROM` in `wrangler.toml` to
+`alerts@yourdomain.com`.
+
+Steps:
+
+1. Sign up at `https://resend.com` with `sugamagr@gmail.com`
+2. Verify the sign-up email if Resend sends one
+3. Visit `https://resend.com/api-keys`
+4. Create API key: name it "RD Scanner ops Worker", scope "Sending
+   access"
+5. Copy the `re_...` key
+6. Run `npx wrangler secret put RESEND_API_KEY` and paste
 
 ## Verify it works
 
-Two independent checks — do both:
+Two independent checks:
 
 ```bash
-# 1. Manual HTTP trigger. Fires the ping right now, waits for the
-#    result, returns JSON. Should return 200 + succeeded=true.
-curl https://rd-scanner-supabase-keepalive.<subdomain>.workers.dev/
-
-# 2. Manual cron trigger via wrangler. Runs the scheduled handler
-#    against local dev (also connects to real Supabase).
+# 1. Manual cron trigger against real infrastructure. Local dev server
+#    runs on port 8787, /__scheduled endpoint accepts a cron string.
 npx wrangler dev --test-scheduled
-# Then in another terminal:
+
+# In another terminal, trigger the Supabase keep-alive path:
 curl 'http://localhost:8787/__scheduled?cron=0+3+*/3+*+*'
-# Watch the dev terminal for the log line.
+# Watch the dev terminal for the log line - should show
+# succeeded=true, HTTP 200, low latency
+
+# Trigger the weekly-email path (WILL send a real email if
+# RESEND_API_KEY is set):
+curl 'http://localhost:8787/__scheduled?cron=0+8+*+*+1'
+# Check your inbox at sugamagr@gmail.com within 30 seconds
+# (may land in Gmail spam on first delivery - mark "Not spam" once)
 ```
 
-Expected success log line:
-
+```bash
+# 2. Confirm crons are registered on Cloudflare's side. Get an API
+#    token from https://dash.cloudflare.com/profile/api-tokens then:
+curl -sS -H "Authorization: Bearer <api-token>" \
+  "https://api.cloudflare.com/client/v4/accounts/<account-id>/workers/scripts/rd-scanner-supabase-keepalive/schedules" \
+  | python3 -m json.tool
+# Should return both crons with created_on timestamps.
 ```
-{"trigger":"cron","succeeded":true,"attempts":1,"finalStatus":200,
- "totalLatencyMs":230,"results":[...],"at":"2026-07-21T03:00:00.000Z"}
+
+Expected keep-alive success log:
+
+```json
+{"trigger":"supabase-keepalive","succeeded":true,"attempts":1,
+ "finalStatus":200,"totalLatencyMs":230,...}
 ```
 
-Failure log lines are structured JSON with `"succeeded":false` and
-show up as `console.error` — surfaces as errors in the Cloudflare
-Worker analytics dashboard.
+Expected weekly-email success logs (two lines per fire):
+
+```json
+{"trigger":"weekly-email","emailStatus":200}
+{"trigger":"weekly-email","allOk":true,"components":[...]}
+```
 
 ## Monitoring
-
-Log tail from CLI:
 
 ```bash
 npm run tail
 ```
 
-Or the Cloudflare dashboard: Workers & Pages -> your Worker ->
-Observability -> Logs. Filter by `error` level to see only failures.
+Or Cloudflare dashboard: Workers & Pages → `rd-scanner-supabase-keepalive`
+→ Observability → Logs. Filter by `error` level to see only failures.
 
-The cron history is visible under: Workers & Pages -> your Worker ->
-Triggers -> Cron Triggers -> Recent invocations.
+Cron history: same Worker → Triggers → Cron Triggers → Recent
+invocations. Shows execution timestamps and outcome.
 
-## What happens if a ping fails
+## Failure modes
 
-Fail-safe by design:
+**Supabase keep-alive**:
 
-- **One transient 5xx or timeout**: retries after 2 seconds. If the
-  retry succeeds you get a warning log but the project stays alive.
-- **Two transient failures**: log an error. Next cron in 3 days will
-  try again. Supabase's pause threshold is 7 days so we've got 4
-  days of slack before an outage.
-- **Auth failure (401/403)**: means SUPABASE_ANON_KEY drifted (rotated,
-  or the project was recreated with a new one). Fix:
-  `npx wrangler secret put SUPABASE_ANON_KEY` with the new value from
-  the Supabase dashboard -> Settings -> API.
-- **Worker itself crashes**: Cloudflare's cron retry policy invokes
-  it again at the next scheduled time. No data loss because the
-  Worker is stateless.
-- **Cloudflare has an outage**: extremely rare, and if it lasts
-  longer than 4 days simultaneously with Supabase's activity check
-  running... we've got bigger problems. Manual dashboard resume is
-  still available as backup.
+- **Single transient 5xx or timeout**: retries after 2s. If retry
+  succeeds, warning-level log, project stays alive.
+- **Two transient failures**: error log. Next cron in 3 days will try
+  again. Supabase pauses at 7 days so we have 4 days of slack.
+- **Auth failure (401/403)**: means `SUPABASE_ANON_KEY` drifted
+  (rotated or project recreated). Fix:
+  `npx wrangler secret put SUPABASE_ANON_KEY` with new value from
+  Supabase dashboard → Settings → API. NO retry because retrying a
+  bad key just doubles log noise.
+- **Cloudflare outage**: extremely rare; fallback is manual dashboard
+  resume of Supabase (60 seconds).
 
-## Rotating the anon key
+**Weekly email**:
 
-If Supabase rotates the anon key (Settings -> API -> Rotate anon
-key):
+- **Any component reports FAIL**: email STILL sent with FAIL flag in
+  subject line. Silence is the danger; the whole point is to get a
+  signal in the inbox every Monday.
+- **Resend API 4xx/5xx**: logged, no retry (next Monday is 7 days
+  away). If you notice a missed email, check CF Worker logs.
+- **RESEND_API_KEY rotated or disabled**: email fails, health-check
+  results still land in CF Worker logs. Fix: get new key from Resend
+  dashboard, run `npx wrangler secret put RESEND_API_KEY`.
+- **First email lands in Gmail spam**: mark "Not spam" once. Gmail
+  learns and future messages arrive in the inbox. Verified domain
+  sender doesn't have this issue (upgrade path: verify domain on
+  Resend + update `RESEND_FROM` in `wrangler.toml`).
+
+## Rotating secrets
+
+Either key:
 
 ```bash
 cd supabase-keepalive
 npx wrangler secret put SUPABASE_ANON_KEY
-# Paste new key when prompted.
+# or
+npx wrangler secret put RESEND_API_KEY
+# Paste new value when prompted.
 ```
 
 No redeploy needed. Secrets take effect immediately for the next
@@ -129,9 +204,30 @@ invocation.
 ## Cost
 
 Cloudflare Workers free tier:
-- 100,000 requests/day (cron uses ~10/month = 0.033% of daily quota)
-- 3 million CPU-ms/day (each ping uses ~50 CPU-ms = negligible)
+- 100,000 requests/day
+- 3 million CPU-ms/day
 - Free for scheduled/cron triggers
 
-So: zero cost, expected to stay zero cost even if we increased the
-ping frequency to hourly.
+Our usage:
+- ~10 keep-alive invocations/month (3-day cadence)
+- ~4 weekly-email invocations/month (Monday cadence)
+- ~50 CPU-ms per invocation
+
+Total: 14 invocations/month vs 100,000/day quota = 0.0005% utilization.
+Expected to stay at $0/month indefinitely.
+
+Resend free tier:
+- 100 emails/day
+- 3000 emails/month
+
+Our usage: 4 emails/month. 0.13% utilization. Also $0/month.
+
+## Dispatch mechanism (implementation note)
+
+The Worker has ONE `scheduled` handler; it matches `event.cron` against
+the two expected strings to dispatch. This is deliberate — a future
+third cron expression won't silently take one of the existing branches.
+If you add a cron entry to `wrangler.toml`, you MUST also add the
+matching string to the dispatch switch in `src/index.ts`, or the new
+cron will hit the "unknown-cron" error branch and log a console.error
+every time it fires.

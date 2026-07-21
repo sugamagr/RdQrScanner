@@ -9,31 +9,44 @@ compatibility_date = "2026-01-01"
 # https://dash.cloudflare.com/<account>/workers/onboarding.
 workers_dev = false
 
-# Fires every 3 days at 03:00 UTC (which is 08:30 IST).
-# Supabase free tier auto-pauses after 7 days without activity, so a
-# 3-day cadence gives us 4-day safety margin against a single missed
-# execution. Cloudflare guarantees cron precision +/- ~1 minute so
-# even under load we hit the window comfortably.
+# Two cron triggers on this Worker. src/index.ts dispatches by matching
+# event.cron exactly so a future third cron won't silently take one of
+# these branches.
 #
-# WHY 3 days not 6: user chose 3 as heartbeat redundancy - if a single
-# ping fails we still have another one within the pause window.
+# Cron 1: "0 3 */3 * *" (every 3 days, 03:00 UTC = 08:30 IST)
+#   Supabase keep-alive. 3-day cadence gives 4-day safety margin
+#   against a single missed execution before the 7-day pause threshold.
+#   03:00 UTC = 08:30 IST is pre-workday so any failure gets 5+ hours
+#   of visibility before morning collection scans start.
 #
-# WHY 03:00 UTC (08:30 IST): morning collection scanning happens
-# 09:00-16:00 IST typically. A pre-work ping catches any auto-pause
-# BEFORE the operator opens the app. If ping fails around 3 AM we
-# get 5+ hours of visibility to notice and manually resume before
-# the workday starts.
+# Cron 2: "0 8 * * 1" (Monday 08:00 UTC = 13:30 IST)
+#   Weekly health check + email digest. Monday afternoon IST is
+#   post-lunch, non-peak; email lands when you're likely at a
+#   computer to react to any FAIL flag.
 [triggers]
-crons = ["0 3 */3 * *"]
+crons = ["0 3 */3 * *", "0 8 * * 1"]
 
-# Non-secret config. Endpoint is public in the app APK already.
+# Non-secret config. All values are already public - Supabase endpoint
+# is baked into the app APK, portal URL is on business cards, GitHub
+# repo is a public URL, sender email will be either onboarding@resend.dev
+# (dev) or your own verified sender.
 [vars]
 SUPABASE_URL = "https://otkhvevvddxclbormkfo.supabase.co"
+PORTAL_URL = "https://rd-scanner-portal.pages.dev"
+GITHUB_REPO = "sugamagr/RdQrScanner"
+RECIPIENT_EMAIL = "sugamagr@gmail.com"
+RESEND_FROM = "onboarding@resend.dev"
 
-# SUPABASE_ANON_KEY is set via `wrangler secret put SUPABASE_ANON_KEY`
-# on first deploy. Anon key is not truly secret (it's baked into the
-# APK) but Workers secrets get audit logs and rotation UI so we treat
-# it as one anyway.
+# Secrets - set via `wrangler secret put <NAME>` after wrangler login:
+#  - SUPABASE_ANON_KEY: from local.properties at repo root. Anon key
+#    is not truly secret (baked into the APK) but Workers secrets get
+#    audit logs and rotation UI so we treat it as one anyway.
+#  - RESEND_API_KEY: get from https://resend.com after signing up.
+#    Free tier = 100 emails/day, way above weekly cadence. Sandbox
+#    sender onboarding@resend.dev works only for delivery to the
+#    Resend account owner's email (which is what we want - only
+#    sugamagr@gmail.com receives). For delivery to other addresses,
+#    verify a domain on Resend + set RESEND_FROM to a verified address.
 
 # Observability: keep the last 100 executions viewable in the CF
 # dashboard so I can eyeball failures without leaving the browser.
