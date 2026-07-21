@@ -159,7 +159,8 @@ class UpdateGateController {
                             UpdateChecker.downloadApk(
                                 context = context,
                                 apkUrl = available.apkUrl,
-                                versionName = available.versionName
+                                versionName = available.versionName,
+                                expectedSizeBytes = available.apkSizeBytes
                             )
                         }
                         gateState = UpdateGateState.ReadyToInstall

@@ -261,21 +261,61 @@ object UpdateChecker {
      *
      * Storage strategy: external cache dir (getExternalCacheDir/updates/).
      * Under app's own scoped storage sandbox so no runtime permission
-     * needed. Auto-cleared on uninstall. Any prior half-downloaded
-     * copy is deleted before the new job starts so a killed download
-     * can't corrupt the next attempt.
+     * needed. Auto-cleared on uninstall.
+     *
+     * Reuse-if-fully-downloaded: if `update-<versionName>.apk` already
+     * exists AND its length matches [expectedSizeBytes] (from the
+     * GitHub API asset.size), we skip the network entirely and return
+     * the cached file. This is the "operator downloaded v2.0.5, killed
+     * the installer prompt, taps Update again" case — v2.0.5 shipped a
+     * bug where every tap re-downloaded 77MB from scratch. Priority-3
+     * SEMANTIC lock: the size match is the ONLY reuse gate we need at
+     * this scale because DownloadManager writes byte-for-byte to the
+     * target file, and GitHub asset sizes are fixed once the release is
+     * cut. A cryptographic hash check would be theoretically stricter
+     * but adds a 77MB SHA256 pass on every re-tap for zero real-world
+     * benefit — the OS installer already validates the APK signature
+     * before installing, so a corrupt reused file fails at the
+     * installer prompt (not silently), and the operator can retry.
+     *
+     * Selective cleanup: instead of nuking every file in updates/ (v2.0.5
+     * behaviour that made this bug possible), we only delete files
+     * whose name is NOT the current [versionName] target. This keeps
+     * stale APKs (e.g. `update-v2.0.5.apk` left after v2.0.6 lands)
+     * from bloating external cache indefinitely, while preserving the
+     * one file we might still be able to reuse.
+     *
+     * Partial-download recovery: if [expectedSizeBytes] is > 0 and the
+     * existing file's length is smaller (killed prior download), we
+     * delete and re-fetch. If [expectedSizeBytes] is 0 (GitHub API
+     * didn't populate size — extremely rare), we conservatively delete
+     * any existing file and re-download to avoid running the installer
+     * against a possibly-truncated APK.
      */
     suspend fun downloadApk(
         context: Context,
         apkUrl: String,
-        versionName: String
+        versionName: String,
+        expectedSizeBytes: Long = 0L
     ): File {
+        val cacheDir = File(context.externalCacheDir, "updates").apply { mkdirs() }
+        val target = File(cacheDir, "update-$versionName.apk")
+
+        cacheDir.listFiles()?.forEach { file ->
+            if (file.name != target.name) {
+                runCatching { file.delete() }
+            }
+        }
+
+        if (expectedSizeBytes > 0 && target.exists() && target.length() == expectedSizeBytes) {
+            return target
+        }
+        if (target.exists()) {
+            runCatching { target.delete() }
+        }
+
         val dm = context.getSystemService(DownloadManager::class.java)
             ?: error("DownloadManager unavailable")
-
-        val cacheDir = File(context.externalCacheDir, "updates").apply { mkdirs() }
-        cacheDir.listFiles()?.forEach { runCatching { it.delete() } }
-        val target = File(cacheDir, "update-$versionName.apk")
 
         val request = DownloadManager.Request(Uri.parse(apkUrl))
             .setTitle("RD Scanner update")
