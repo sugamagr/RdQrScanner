@@ -32,6 +32,28 @@ Rule of thumb: the versionCode integer must be `>` any previously
 released integer. The versionName (`2.0.1`, `2.1.0`, etc.) is free-form
 for humans; it does not drive the comparison.
 
+## APK filename convention
+
+Every release APK attached to a GitHub Release MUST be named:
+
+```
+RdBookScanner-v<versionName>.apk
+```
+
+Concrete examples:
+
+- `RdBookScanner-v2.0.0.apk`
+- `RdBookScanner-v2.0.3.apk`
+- `RdBookScanner-v2.1.0.apk`
+
+Never upload `app-release.apk` (Gradle's default output name). Always
+rename it before `gh release create` or `gh release upload`.
+
+The naming rule is enforced by convention only — `UpdateChecker.kt`
+picks any `.apk` asset from the release, so a wrong filename won't
+break updates today. It will confuse humans who save the file though.
+Keep the format consistent across every release.
+
 ## Cutting a release — the whole recipe
 
 ```bash
@@ -55,9 +77,17 @@ git push origin feat/cloud-sync
 git tag v2.0.1+21
 git push origin v2.0.1+21
 
-# 6. Cut the GitHub release with the APK attached.
+# 6. Rename APK to the standard release name BEFORE uploading.
+#    Format: RdBookScanner-v<version>.apk (no versionCode suffix).
+#    LOAD-BEARING: this filename is what colleagues see when they save
+#    the APK to their phone. Keep the format identical across every
+#    release so an old file next to a new one sorts and diffs cleanly.
+cp app/build/outputs/apk/release/app-release.apk \
+   /tmp/RdBookScanner-v2.0.1.apk
+
+# 7. Cut the GitHub release with the renamed APK attached.
 gh release create v2.0.1+21 \
-    app/build/outputs/apk/release/app-release.apk \
+    /tmp/RdBookScanner-v2.0.1.apk \
     --title "v2.0.1" \
     --notes "One-line description of what changed"
 
