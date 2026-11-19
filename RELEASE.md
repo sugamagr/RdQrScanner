@@ -204,22 +204,26 @@ don't need to visit GitHub again.
 
 ## Supabase keep-alive Worker
 
-The app's Supabase project runs on the free tier, which auto-pauses
-after 7 days without database activity. When paused:
+The app's Supabase project runs on the free tier, which pauses a
+project that does not get enough database activity over a week
+(Supabase's documentation: "typically a few user requests to the
+database each day"). When paused:
 
-- DNS returns NXDOMAIN for the project URL
-- Every phone sees "not online" on cold launch
-- The force-update gate itself keeps working (GitHub is a separate
-  dependency) but the app is unusable because the backend is gone
+- The project address stops answering
+- Every phone sees "not online" on cold launch; scans stay on the phone
+  and sync later
+- The update check keeps working (GitHub is a separate dependency)
 
-The `supabase-keepalive/` Cloudflare Worker prevents this. It fires
-an authenticated REST HEAD request every 3 days at 03:00 UTC (which
-is 08:30 IST — safely pre-workday). See `supabase-keepalive/README.md`
-for setup, verification, and rotation instructions.
+The `supabase-keepalive/` Cloudflare Worker handles this. Every hour it
+writes a heartbeat row in the database. If the project is paused anyway
+it restores it through the Supabase Management API and emails the
+result. A Monday email reports the overall state. See
+`supabase-keepalive/README.md` for setup, the emails it sends, and how
+to renew its access token.
 
-If the Worker itself fails (Cloudflare outage, key rotation drift),
-the fallback is manual: visit https://supabase.com/dashboard, click
-Resume on the project, done in 60 seconds.
+If the Worker cannot restore the project it emails `ACTION NEEDED`; the
+manual fix is to open https://supabase.com/dashboard and press Resume
+project, which takes about a minute.
 
 ## Rate limit
 

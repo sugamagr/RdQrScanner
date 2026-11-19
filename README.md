@@ -17,7 +17,7 @@ everything in a web portal — no manual file sharing.
 |---|---|---|---|
 | Phone app | `app/` | Android app the operators scan with | Signed APK on GitHub Releases, with an in-app update check |
 | Owner portal | `portal/` | Web app for browsing, searching, editing and exporting | Cloudflare Pages, deployed by hand |
-| Ops Worker | `supabase-keepalive/` | Two cron jobs: database keep-alive and a weekly health email | Cloudflare Workers, deployed by hand |
+| Ops Worker | `supabase-keepalive/` | Hourly database heartbeat, automatic restore if Supabase pauses the project, weekly health email | Cloudflare Workers, deployed by hand |
 | Cloud schema | `cloud/` | Postgres tables, security policies and migrations | SQL pasted into Supabase Studio |
 | Docs | `docs/`, `RELEASE.md` | Design spec, migration playbook, release recipe | — |
 
@@ -30,7 +30,7 @@ sized for 2–5 phones and one portal user.
  ─ background sync (WorkManager) ◄──  ─ Auth                   on Cloudflare Pages
                                       ─ Realtime
                                           ▲
-                                          │ ping every 3 days
+                                          │ heartbeat every hour
                                    Ops Worker (Cloudflare cron)
 ```
 
@@ -176,7 +176,7 @@ app/src/main/java/com/qrscanner/app/
 └── util/            XLSX/TXT export, QR PDF, LOT image, month maths
 
 portal/src/          pages/, components/, lib/ (queries, parsers, exports)
-supabase-keepalive/  src/index.ts (both cron jobs)
+supabase-keepalive/  src/index.ts (heartbeat, restore, weekly email)
 cloud/               schema.sql, migrations/
 docs/                CLOUD_SYNC_SPEC.md, CLOUD_MIGRATION_PLAYBOOK.md
 ```

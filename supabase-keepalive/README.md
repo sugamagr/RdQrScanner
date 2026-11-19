@@ -1,233 +1,168 @@
 # RD Scanner ops Worker
 
-Cloudflare Worker with two cron jobs. Runs on Cloudflare's free tier,
-$0/month.
+A Cloudflare Worker that keeps the free Supabase project from being
+paused, restores it by itself if it gets paused anyway, and emails you
+only when something happened. Runs on Cloudflare's free tier, $0/month.
 
-## Cron 1 — Supabase keep-alive (every 3 days)
+## Why it exists
 
-**Schedule**: `0 3 */3 * *` (03:00 UTC = 08:30 IST every 3 days)
+Supabase pauses a Free plan project that "does not receive sufficient
+user database activity over the past week". Its documentation says
+"typically a few user requests to the database each day" is enough and
+adds that this is not a guarantee. A paused project is unreachable:
+phones and the portal cannot sync until someone presses Resume.
 
-Fires an authenticated REST HEAD against Supabase to prevent the free
-tier's 7-day auto-pause. When Supabase auto-pauses:
+The first version of this Worker sent one anonymous read every 3 days.
+That is far below "a few requests each day", so Supabase kept pausing
+the project while the Worker reported success. This version replaces it.
 
-- DNS returns NXDOMAIN for the project URL
-- Every phone opening the app sees "not online" errors
-- Every portal user sees connection failed
-- Force-update gate itself keeps working (GitHub is a separate
-  dependency) but the app is unusable because the backend is gone
+## What it does
 
-This happened once in the wild (2026-07-02). Recovery was fast
-(dashboard resume in 60 seconds) but the Worker prevents recurrence.
+One cron runs every hour at minute 17 (UTC).
 
-3-day cadence gives 4-day safety margin against a single missed
-execution before hitting the pause threshold.
+| When | What |
+|---|---|
+| Every run | **Heartbeat.** Calls the database function `keepalive_beat()`, which writes a row, then reads the `devices` table. 24 writes and 24 reads a day. |
+| Only if the heartbeat fails | **Self-heal.** Asks the Supabase Management API for the project status. If the project is paused it calls the restore endpoint, waits up to 7 minutes for it to come back, and emails the result. |
+| 03:17 and 15:17 UTC (08:47 and 20:47 IST) | **Reminder.** If a problem is still unresolved and needs you, it is emailed at these two hours, so at most twice a day. |
+| Monday 07:17 UTC (12:47 IST) | **Weekly email.** State of Supabase, the portal and GitHub Releases, plus how many heartbeats the database recorded. |
 
-## Cron 2 — Weekly health digest (Mondays)
+The Worker stores nothing between runs. A pause it repairs produces
+one email, because the next run sees a project that is no longer paused.
 
-**Schedule**: `0 8 * * 1` (08:00 UTC Monday = 13:30 IST Monday)
+## Emails you can get
 
-Runs three independent checks in parallel:
+| Subject | Meaning | What to do |
+|---|---|---|
+| `Weekly health: all systems healthy` | Normal Monday email. | Nothing. |
+| `Weekly health: ATTENTION needed` | One line in the email is marked `[FAIL]`. | Read that line; it says what to do. |
+| `Supabase was paused - restored automatically` | Supabase paused the project and the Worker brought it back. | Nothing. If it repeats every week or two, the heartbeat is not being counted; the project still repairs itself. |
+| `Supabase was paused - restore started` | Restore was started but took longer than 7 minutes. | Nothing unless a reminder follows. |
+| `ACTION NEEDED: Supabase is paused and could not be restored automatically` | Supabase refused the restore request. | Open the dashboard and press **Resume project**. |
+| `ACTION NEEDED: Supabase is not answering` | The database is down and the Worker has no working access token to check or restore it. | Resume from the dashboard, then renew the token (see below). |
+| `Supabase heartbeat is failing` | The project is running but the Worker's request is rejected, usually a changed anon key. | Update `SUPABASE_ANON_KEY`. |
+| `Setup step missing: heartbeat function` | The SQL in step 1 below was never run. | Run it. |
 
-1. Supabase REST HEAD (same as keep-alive)
-2. Portal HTML fetch (`https://rd-scanner-portal.pages.dev`, expects 200)
-3. GitHub Releases API (`sugamagr/RdQrScanner/releases/latest`, expects 200)
+No Monday email at all means the Worker itself stopped. Supabase says
+it also emails its own warning about a week before it pauses a project,
+which is a second line of warning if that ever happens.
 
-Then sends a plain-text digest email to `sugamagr@gmail.com` via
-Resend. Email is sent regardless of outcome — a Monday afternoon
-with NO email means the Worker itself broke, which is diagnostic.
+## Setup
 
-Subject lines make the digest triageable from inbox preview:
+Do these in order. Steps 1 and 3 are done once.
 
-- All healthy: `[RD Scanner] Weekly health: all systems healthy`
-- Any failure: `[RD Scanner] Weekly health: ATTENTION needed`
+### 1. Create the heartbeat function (Supabase)
 
-## First deploy
+Open the project's SQL editor, paste the contents of
+[`../cloud/migrations/v14_keepalive_heartbeat.sql`](../cloud/migrations/v14_keepalive_heartbeat.sql)
+and press Run. It adds one small table and one function, touches no app
+data, and is safe to run again.
+
+### 2. Log in to Cloudflare
 
 ```bash
 cd supabase-keepalive
 npm install
-
-# Log in to Cloudflare (browser opens; pick the account that owns
-# rd-scanner-portal so all infra stays under one account).
 npx wrangler login
+```
 
-# Set the Supabase anon key. Value comes from SUPABASE_ANON_KEY in
-# local.properties at repo root. Anon key is public (baked into APK)
-# but Workers secrets get audit logs and rotation UI, so we treat it
-# as one anyway.
-npx wrangler secret put SUPABASE_ANON_KEY
-# Paste the value when prompted.
+Pick the account that owns `rd-scanner-portal`. The API token in
+`local.properties` is for the portal only and cannot deploy Workers.
 
-# Set the Resend API key. See "Resend setup" below to get one.
-npx wrangler secret put RESEND_API_KEY
-# Paste the re_... key when prompted.
+### 3. Set the secrets
 
-# One-time subdomain registration prerequisite for cron triggers.
-# Even though this Worker is cron-only (workers_dev = false in
-# wrangler.toml), Cloudflare requires the subdomain to exist as an
-# account setting before it accepts ANY cron trigger. Visit:
-#   https://dash.cloudflare.com/<account-id>/workers/onboarding
-# Pick any subdomain name or accept Cloudflare's generated one.
+```bash
+npx wrangler secret put SUPABASE_ANON_KEY       # from local.properties
+npx wrangler secret put RESEND_API_KEY          # from resend.com, "Sending access"
+npx wrangler secret put SUPABASE_ACCESS_TOKEN   # see below
+```
 
+Secrets already set on the Worker stay set; only new or changed ones
+need this.
+
+**Creating `SUPABASE_ACCESS_TOKEN`:**
+
+1. Open <https://supabase.com/dashboard/account/tokens> and generate a
+   new token.
+2. Scope it to this project only and give it **Project Settings:
+   Read-write**. That is the permission Supabase lists for reading the
+   project status and for "Restore a project".
+3. Choose the longest expiry offered ("never" if available).
+4. Copy the token and paste it into the `wrangler secret put` prompt.
+
+When the token expires or is deleted, the Monday email shows
+`[FAIL] Automatic restore: NOT WORKING`. Create a new token and run the
+`secret put` command again. Heartbeats do not depend on this token.
+
+### 4. Deploy
+
+```bash
 npm run deploy
-# Confirms both crons registered:
-#   schedule: 0 3 */3 * *
-#   schedule: 0 8 * * 1
 ```
 
-## Resend setup
+The output should list one schedule: `17 * * * *`. Cloudflare can take
+up to 15 minutes to start running a changed schedule.
 
-Free tier of Resend (`https://resend.com`) gives 100 emails/day and
-a sandbox sender `onboarding@resend.dev`. Weekly cadence = 1
-email/week = 1% of daily quota, massive headroom.
+## Check that it works
 
-**Sandbox sender rule**: `onboarding@resend.dev` only delivers to the
-Resend account owner's verified email address. If the Resend account
-is `sugamagr@gmail.com` and `RECIPIENT_EMAIL` in `wrangler.toml` is
-`sugamagr@gmail.com`, delivery works. To deliver to a different
-address, verify a real sender domain on Resend (10 minutes of DNS
-records via Cloudflare) and set `RESEND_FROM` in `wrangler.toml` to
-`alerts@yourdomain.com`.
+- **Database:** in the Supabase SQL editor run
+  `select * from public.keepalive_heartbeat order by day desc;`
+  The `beats` number for today goes up by one every hour.
+- **Worker:** Cloudflare dashboard, Workers & Pages,
+  `rd-scanner-supabase-keepalive`, Observability. Each run logs one line
+  starting `{"event":"run"`. A healthy run has `"ok":true,"wrote":true`.
+- **Live log from the terminal:** `npm run tail`
 
-Steps:
+### Proving the self-heal
 
-1. Sign up at `https://resend.com` with `sugamagr@gmail.com`
-2. Verify the sign-up email if Resend sends one
-3. Visit `https://resend.com/api-keys`
-4. Create API key: name it "RD Scanner ops Worker", scope "Sending
-   access"
-5. Copy the `re_...` key
-6. Run `npx wrangler secret put RESEND_API_KEY` and paste
+The restore path cannot be exercised without a paused project. To see
+it work once: pause the project yourself in the Supabase dashboard
+(Project Settings, General, Pause project). At the next minute 17 the
+Worker should restore it and send `Supabase was paused - restored
+automatically`. Pausing and resuming keeps all data.
 
-## Verify it works
-
-Two independent checks:
+## Tests
 
 ```bash
-# 1. Manual cron trigger against real infrastructure. Local dev server
-#    runs on port 8787, /__scheduled endpoint accepts a cron string.
+npm test          # 20 cases against a local stand-in; sends nothing
+npm run typecheck
+```
+
+The tests run the real Worker logic against a local server that plays
+Supabase, the Management API, Resend, GitHub and the portal. They cover
+the healthy run, retries, every pause and restore outcome, missing or
+expired tokens, the reminder throttle and the weekly email. Needs
+Node 23.6 or newer.
+
+To run the Worker once locally against the real Supabase project:
+
+```bash
 npx wrangler dev --test-scheduled
-
-# In another terminal, trigger the Supabase keep-alive path:
-curl 'http://localhost:8787/__scheduled?cron=0+3+*/3+*+*'
-# Watch the dev terminal for the log line - should show
-# succeeded=true, HTTP 200, low latency
-
-# Trigger the weekly-email path (WILL send a real email if
-# RESEND_API_KEY is set):
-curl 'http://localhost:8787/__scheduled?cron=0+8+*+*+1'
-# Check your inbox at sugamagr@gmail.com within 30 seconds
-# (may land in Gmail spam on first delivery - mark "Not spam" once)
+# in another terminal:
+curl 'http://localhost:8787/__scheduled?cron=17+*+*+*+*'
 ```
 
-```bash
-# 2. Confirm crons are registered on Cloudflare's side. Get an API
-#    token from https://dash.cloudflare.com/profile/api-tokens then:
-curl -sS -H "Authorization: Bearer <api-token>" \
-  "https://api.cloudflare.com/client/v4/accounts/<account-id>/workers/scripts/rd-scanner-supabase-keepalive/schedules" \
-  | python3 -m json.tool
-# Should return both crons with created_on timestamps.
-```
+This uses the values in `.dev.vars` (git-ignored). It sends a real
+email only if the run finds a problem at a reminder hour, restores a
+paused project, or is made in the Monday 07:00 UTC hour.
 
-Expected keep-alive success log:
+## What this does not guarantee
 
-```json
-{"trigger":"supabase-keepalive","succeeded":true,"attempts":1,
- "finalStatus":200,"totalLatencyMs":230,...}
-```
-
-Expected weekly-email success logs (two lines per fire):
-
-```json
-{"trigger":"weekly-email","emailStatus":200}
-{"trigger":"weekly-email","allOk":true,"components":[...]}
-```
-
-## Monitoring
-
-```bash
-npm run tail
-```
-
-Or Cloudflare dashboard: Workers & Pages → `rd-scanner-supabase-keepalive`
-→ Observability → Logs. Filter by `error` level to see only failures.
-
-Cron history: same Worker → Triggers → Cron Triggers → Recent
-invocations. Shows execution timestamps and outcome.
-
-## Failure modes
-
-**Supabase keep-alive**:
-
-- **Single transient 5xx or timeout**: retries after 2s. If retry
-  succeeds, warning-level log, project stays alive.
-- **Two transient failures**: error log. Next cron in 3 days will try
-  again. Supabase pauses at 7 days so we have 4 days of slack.
-- **Auth failure (401/403)**: means `SUPABASE_ANON_KEY` drifted
-  (rotated or project recreated). Fix:
-  `npx wrangler secret put SUPABASE_ANON_KEY` with new value from
-  Supabase dashboard → Settings → API. NO retry because retrying a
-  bad key just doubles log noise.
-- **Cloudflare outage**: extremely rare; fallback is manual dashboard
-  resume of Supabase (60 seconds).
-
-**Weekly email**:
-
-- **Any component reports FAIL**: email STILL sent with FAIL flag in
-  subject line. Silence is the danger; the whole point is to get a
-  signal in the inbox every Monday.
-- **Resend API 4xx/5xx**: logged, no retry (next Monday is 7 days
-  away). If you notice a missed email, check CF Worker logs.
-- **RESEND_API_KEY rotated or disabled**: email fails, health-check
-  results still land in CF Worker logs. Fix: get new key from Resend
-  dashboard, run `npx wrangler secret put RESEND_API_KEY`.
-- **First email lands in Gmail spam**: mark "Not spam" once. Gmail
-  learns and future messages arrive in the inbox. Verified domain
-  sender doesn't have this issue (upgrade path: verify domain on
-  Resend + update `RESEND_FROM` in `wrangler.toml`).
-
-## Rotating secrets
-
-Either key:
-
-```bash
-cd supabase-keepalive
-npx wrangler secret put SUPABASE_ANON_KEY
-# or
-npx wrangler secret put RESEND_API_KEY
-# Paste new value when prompted.
-```
-
-No redeploy needed. Secrets take effect immediately for the next
-invocation.
+- Supabase does not publish the exact amount of activity it requires.
+  Hourly writes are well above what its documentation describes, but
+  only a paid plan is exempt from pausing by rule.
+- The restore call is documented by Supabase and covered by the tests
+  here, but it has not yet been seen restoring this project for real.
+  If Supabase refuses it, you get the `ACTION NEEDED` email and resume
+  from the dashboard as before.
+- A paused project can be resumed from the dashboard for a limited
+  time (Supabase currently says up to 1 year). After that only the
+  backups can be downloaded.
 
 ## Cost
 
-Cloudflare Workers free tier:
-- 100,000 requests/day
-- 3 million CPU-ms/day
-- Free for scheduled/cron triggers
-
-Our usage:
-- ~10 keep-alive invocations/month (3-day cadence)
-- ~4 weekly-email invocations/month (Monday cadence)
-- ~50 CPU-ms per invocation
-
-Total: 14 invocations/month vs 100,000/day quota = 0.0005% utilization.
-Expected to stay at $0/month indefinitely.
-
-Resend free tier:
-- 100 emails/day
-- 3000 emails/month
-
-Our usage: 4 emails/month. 0.13% utilization. Also $0/month.
-
-## Dispatch mechanism (implementation note)
-
-The Worker has ONE `scheduled` handler; it matches `event.cron` against
-the two expected strings to dispatch. This is deliberate — a future
-third cron expression won't silently take one of the existing branches.
-If you add a cron entry to `wrangler.toml`, you MUST also add the
-matching string to the dispatch switch in `src/index.ts`, or the new
-cron will hit the "unknown-cron" error branch and log a console.error
-every time it fires.
+- Cloudflare Workers free tier: 100,000 requests a day and 5 cron
+  triggers per account. This Worker uses 1 cron trigger and about 24
+  runs a day, each making 2 outgoing requests when healthy (at most
+  about 25 while restoring; the limit is 50).
+- Resend free tier: 100 emails a day. Normal use is one email a week.

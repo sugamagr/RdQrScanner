@@ -1,13 +1,15 @@
 {
   "name": "rd-scanner-supabase-keepalive",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "tail": "wrangler tail",
-    "trigger": "wrangler dev --test-scheduled"
+    "trigger": "wrangler dev --test-scheduled",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/worker.test.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260714.1",

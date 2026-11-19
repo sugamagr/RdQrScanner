@@ -492,5 +492,61 @@ begin
 end$$;
 
 -- =====================================================================
+-- Schema patch v14 (keepalive heartbeat) — same content as
+-- cloud/migrations/v14_keepalive_heartbeat.sql; see that file for the
+-- full rationale.
+--
+-- The ops Worker (supabase-keepalive/) calls keepalive_beat() every
+-- hour with the anon key. Each call is a real write, which is the
+-- "user database activity" Supabase requires to keep a Free plan
+-- project from being paused. One small row per day, trimmed to 60
+-- days, reachable only through the function. Not app data.
+-- =====================================================================
+
+create table if not exists public.keepalive_heartbeat (
+    day       date primary key,
+    beats     integer not null default 0,
+    first_at  timestamptz not null default now(),
+    last_at   timestamptz not null default now()
+);
+
+alter table public.keepalive_heartbeat enable row level security;
+revoke all on table public.keepalive_heartbeat from anon, authenticated;
+
+create or replace function public.keepalive_beat()
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+    v_today date := (now() at time zone 'utc')::date;
+begin
+    insert into public.keepalive_heartbeat as h (day, beats, first_at, last_at)
+    values (v_today, 1, now(), now())
+    on conflict (day) do update
+        set beats = h.beats + 1,
+            last_at = now();
+
+    delete from public.keepalive_heartbeat where day < v_today - 60;
+
+    return jsonb_build_object(
+        'server_time', now(),
+        'beats_today',
+            (select k.beats from public.keepalive_heartbeat k where k.day = v_today),
+        'beats_yesterday',
+            coalesce((select k.beats from public.keepalive_heartbeat k where k.day = v_today - 1), 0),
+        'beats_7d',
+            coalesce((select sum(k.beats) from public.keepalive_heartbeat k where k.day > v_today - 7), 0),
+        'yesterday_full',
+            coalesce((select min(k.day) < v_today - 1 from public.keepalive_heartbeat k), false)
+    );
+end;
+$$;
+
+revoke all on function public.keepalive_beat() from public;
+grant execute on function public.keepalive_beat() to anon, authenticated, service_role;
+
+-- =====================================================================
 -- End of schema.sql.
 -- =====================================================================
