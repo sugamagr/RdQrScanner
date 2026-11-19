@@ -2,11 +2,14 @@
 
 Web companion to the RD Book QR Scanner Android app. Lets the shop
 owner sign in from any browser, browse every finalized scanning
-session across all phones, search RD numbers, export XLSX, edit
-defaulter months, and see which phones are currently active.
+session across all phones, see a dashboard of collections and
+defaulters, search accounts, manage account profiles (including CSV and
+PDF bulk import), export XLSX and PDF, edit defaulter months, and see
+which phones are currently active.
 
 Stack: Vite 5 + React 18 + TypeScript (strict) + Tailwind v3 +
-TanStack Query v5 + supabase-js v2 + react-router-dom v6.
+TanStack Query v5 + supabase-js v2 + react-router-dom v6 + Recharts +
+@react-pdf/renderer.
 Hosted on Cloudflare Pages free tier. Reads the same Supabase project
 the phones write to.
 
@@ -51,27 +54,44 @@ src/
 ├── main.tsx                   QueryClient + AuthProvider boot
 ├── lib/
 │   ├── supabase.ts            singleton supabase client (anon key only)
-│   ├── auth.tsx               AuthProvider + useAuth + expiry handling
-│   ├── queries.ts             all PostgREST queries (sessions, lots,
-│   │                          rd_numbers, devices, search, update)
+│   ├── auth.tsx, useAuth.ts   AuthProvider + useAuth + expiry handling
+│   ├── queries.ts             PostgREST queries (sessions, lots,
+│   │                          rd_numbers, accounts, devices, search)
+│   ├── dashboardQueries.ts    KPI + chart aggregation for the dashboard
+│   ├── useRealtimeSync.ts     Realtime subscription → query invalidation
+│   ├── csvParser.ts           accounts CSV validation
+│   ├── pdfAccountsParser.ts   reads the post office Deposit Accounts
+│   │                          PDF report into account rows
+│   ├── pdfExport.ts           dashboard PDF report (@react-pdf/renderer)
 │   ├── monthYear.ts           TS mirror of MonthYear.kt
 │   ├── xlsx.ts                hand-rolled OOXML matching XlsxExporter.kt
-│   └── format.ts              i18n date + number formatters
+│   ├── format.ts              i18n date + number formatters
+│   └── useDocumentTitle.ts    per-page browser tab title
 ├── components/
 │   ├── AppShell.tsx           sticky header + nav + signout
 │   ├── PageHeader.tsx         page title + subtitle + action slot
+│   ├── Loader.tsx             full-page loader + skeletons
+│   ├── ErrorBoundary.tsx      render-error fallback
 │   ├── EditDefaulterDialog.tsx  bottom-sheet defaulter editor
-│   ├── ImportCsvDialog.tsx    CSV bulk-upload modal for accounts
+│   ├── ImportCsvDialog.tsx    CSV / PDF bulk import for accounts
 │   ├── AccountEditDialog.tsx  name + amount + active toggle
-│   └── DeleteOrInactivateDialog.tsx  two-path delete with verbatim spec copy
+│   ├── DeleteOrInactivateDialog.tsx  two-path delete with verbatim spec copy
+│   ├── ExportPdfDialog.tsx    dashboard PDF options (lazy-loaded)
+│   └── useBackdropClose.ts    shared click-outside-to-close behaviour
 ├── pages/
-│   ├── SignIn.tsx             email + password + expiry hint
-│   ├── Sessions.tsx           table + search by #, infinite scroll
-│   ├── SessionDetail.tsx      LOT/RD breakdown + XLSX + edit
-│   ├── Search.tsx             global RD number search
-│   └── Devices.tsx            phone cards with active/idle/dormant
+│   ├── SignIn.tsx             /signin    email + password + expiry hint
+│   ├── Dashboard.tsx          /          KPIs, charts, date ranges, PDF export
+│   ├── Sessions.tsx           /sessions  table + search, infinite scroll
+│   ├── SessionDetail.tsx      /sessions/:sessionId  LOT/RD breakdown + XLSX + edit
+│   ├── Search.tsx             /search    account search by name or RD number
+│   ├── Accounts.tsx           /accounts  profiles, edit, import, delete
+│   ├── Activity.tsx           /activity  feed of changes
+│   └── Devices.tsx            /devices   phone cards with active/idle/dormant
 └── types/db.ts                hand-written types matching cloud/schema.sql
 ```
+
+`scripts/smoke-parse-pdf.mjs` runs the PDF accounts parser against a
+local file from Node, for checking parser changes without the browser.
 
 ## Security
 

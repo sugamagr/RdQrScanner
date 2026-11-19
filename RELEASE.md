@@ -147,13 +147,29 @@ gh release create v2.0.1+21 \
     --title "v2.0.1" \
     --notes "One-line description of what changed"
 
-# 7. Done. On next cold-launch of every phone running v2.0.0 or newer,
+# 8. Done. On next cold-launch of every phone running v2.0.0 or newer,
 #    UpdateChecker sees the new versionCode > VERSION_CODE currently
 #    installed. If the release body contains [FORCE] the operator
 #    hits the blocking gate; otherwise they see an orange banner they
 #    can dismiss and update at their own pace. Cache lives 6 hours, so
 #    on flaky WiFi day the check falls back to the cached response
 #    before returning UpToDate.
+```
+
+## Which GitHub account
+
+The repository and its releases live under the `sugamagr` GitHub
+account. Commits, `git push` and `gh release create` must all run as
+that account. This checkout is set up for it in its own git config
+(commit identity plus a credential helper that takes the `sugamagr`
+token from `gh`), so `git push` works without touching the machine's
+default account.
+
+`gh` itself uses whichever account is active on the machine. If that is
+a different account, pass the token for the one command:
+
+```bash
+GH_TOKEN=$(gh auth token --user sugamagr) gh release create ...
 ```
 
 ## Where the keystore lives
@@ -207,9 +223,10 @@ Resume on the project, done in 60 seconds.
 
 ## Rate limit
 
-GitHub unauthenticated API is 60 requests per hour per IP. At 5 phones
-launching the app 10 times a day each, that's 50 requests per day
-worst-case, absurdly under the cap. No auth token needed on the client.
+GitHub's unauthenticated API allows 60 requests per hour per public IP,
+and every phone on the same office WiFi shares one IP. The 6-hour
+response cache described at the top of this file keeps the phones well
+under that cap, so no auth token is needed on the client.
 
 ## Build variants
 

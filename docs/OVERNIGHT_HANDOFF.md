@@ -1,5 +1,10 @@
 # Overnight Handoff — Night of QC + Feature Wave
 
+> **Historical record (June 2026).** This describes the state of the
+> project at the end of QC rounds 1–7, before the v2.0.0 release. The
+> "Actions for you" list at the bottom is no longer current. For the
+> present state see the root `README.md`, `RELEASE.md` and `git log`.
+
 This document summarises the work shipped while you slept, the QC rounds run,
 and the actions you need to take in the morning. Read top-to-bottom; the
 "Actions for you" section at the bottom is the executable summary.

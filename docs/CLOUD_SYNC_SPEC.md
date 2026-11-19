@@ -1,11 +1,11 @@
 # RD Book QR Scanner — Cloud Sync & Portal Spec
 
-> **Status:** APPROVED for build, not yet implemented.
+> **Status:** IMPLEMENTED and live. The phase plan (§19–§20) and migration plan (§18) are kept as a historical record; the phone's local schema has since moved past the v6 described here (see `AppDatabase.kt`), and the current cloud schema is `cloud/schema.sql` plus `cloud/migrations/`.
 > **Document owner:** Sugam Agrawal.
 > **Last updated:** see git log on this file.
 > **Audience:** any engineer (including future you) dropping into this work after a break of hours, days, or weeks. Read this end-to-end before touching code.
 
-This document is the **single source of truth** for the cloud-sync + portal feature. Every line of code that follows must reconcile against this spec. If a decision feels wrong while implementing, fix it *here first*, get re-approval, then write the code.
+This document is the **single source of truth** for the design of the cloud-sync + portal feature. Code must reconcile against this spec. If a decision feels wrong, fix it *here first*, get re-approval, then change the code.
 
 ---
 
